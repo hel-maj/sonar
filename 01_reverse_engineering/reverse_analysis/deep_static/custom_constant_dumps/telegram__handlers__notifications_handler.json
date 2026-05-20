@@ -1,0 +1,231 @@
+[
+  "config_manager",
+  "load_telegram_settings",
+  "notifications",
+  "InlineKeyboardBuilder",
+  [
+    "caught_fish",
+    true
+  ],
+  "button",
+  "✅",
+  "❌",
+  " Пойманная рыба (со скриншотом)",
+  "notif:toggle:caught_fish",
+  [
+    "text",
+    "callback_data"
+  ],
+  [
+    "meal",
+    true
+  ],
+  " Еда и питьё",
+  "notif:toggle:meal",
+  [
+    "backpack_storage",
+    true
+  ],
+  " Перекладывание в рюкзак",
+  "notif:toggle:backpack_storage",
+  [
+    "inventory_full",
+    true
+  ],
+  " Заполнение инвентаря",
+  "notif:toggle:inventory_full",
+  [
+    "fishing_restored",
+    true
+  ],
+  " Восстановление рыбалки",
+  "notif:toggle:fishing_restored",
+  [
+    "tackle_ended",
+    true
+  ],
+  " Окончание снастей",
+  "notif:toggle:tackle_ended",
+  [
+    "bait_changed",
+    true
+  ],
+  " Смена наживки",
+  "notif:toggle:bait_changed",
+  "adjust",
+  [
+    1
+  ],
+  "row",
+  "InlineKeyboardButton",
+  [
+    "🔙 Назад",
+    "bot:fishing"
+  ],
+  "as_markup",
+  "Клавиатура настройки уведомлений",
+  {
+    "__dict_items__": [
+      [
+        "user_id",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "is_admin_user",
+  "register_notifications_handlers.<locals>.is_admin_user",
+  "callback_query",
+  "F",
+  "data",
+  "startswith",
+  [
+    "notif:"
+  ],
+  "callback",
+  "CallbackQuery",
+  "return",
+  "Обработчик настройки уведомлений",
+  "notifications_handler",
+  "register_notifications_handlers.<locals>.notifications_handler",
+  "Регистрация обработчиков уведомлений",
+  "admin_ids",
+  "from_user",
+  "id",
+  "answer",
+  [
+    "❌ Нет доступа",
+    true
+  ],
+  [
+    "show_alert"
+  ],
+  [
+    ":",
+    2
+  ],
+  "toggle",
+  2,
+  "save_telegram_settings",
+  {
+    "__dict_items__": [
+      [
+        "caught_fish",
+        "Пойманная рыба"
+      ],
+      [
+        "meal",
+        "Еда и питьё"
+      ],
+      [
+        "backpack_storage",
+        "Перекладывание в рюкзак"
+      ],
+      [
+        "inventory_full",
+        "Заполнение инвентаря"
+      ],
+      [
+        "fishing_restored",
+        "Восстановление рыбалки"
+      ],
+      [
+        "tackle_ended",
+        "Окончание снастей"
+      ],
+      [
+        "bait_changed",
+        "Смена наживки"
+      ]
+    ]
+  },
+  "включено",
+  "выключено",
+  "🔔 ",
+  ": ",
+  "message",
+  "edit_reply_markup",
+  "get_notifications_keyboard",
+  [
+    "reply_markup"
+  ],
+  "menu",
+  "edit_text",
+  [
+    "🔔 <b>Настройка уведомлений</b>\n\nВыберите какие уведомления вы хотите получать:"
+  ],
+  "\nОбработчик настройки уведомлений Telegram бота\n",
+  "origin",
+  "has_location",
+  "aiogram",
+  [
+    "Dispatcher",
+    "F"
+  ],
+  "Dispatcher",
+  "aiogram.types",
+  [
+    "CallbackQuery",
+    "InlineKeyboardButton"
+  ],
+  "aiogram.utils.keyboard",
+  [
+    "InlineKeyboardBuilder"
+  ],
+  [
+    "ConfigManager"
+  ],
+  "ConfigManager",
+  "dp",
+  "register_notifications_handlers",
+  "telegram\\handlers\\notifications_handler.py",
+  "<module telegram.handlers.notifications_handler>",
+  [
+    "settings",
+    "notifications",
+    "builder",
+    "caught_fish",
+    "meal",
+    "backpack",
+    "inventory",
+    "restored",
+    "tackle",
+    "bait"
+  ],
+  [
+    "user_id",
+    "admin_ids"
+  ],
+  [
+    "admin_ids"
+  ],
+  [
+    "callback",
+    "parts",
+    "action",
+    "notification_type",
+    "settings",
+    "notifications",
+    "current",
+    "names",
+    "name",
+    "status",
+    "is_admin_user"
+  ],
+  [
+    "is_admin_user"
+  ],
+  [
+    "dp",
+    "admin_ids",
+    "is_admin_user",
+    "notifications_handler"
+  ]
+]

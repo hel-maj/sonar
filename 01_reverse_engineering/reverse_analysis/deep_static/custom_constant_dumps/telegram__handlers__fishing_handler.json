@@ -1,0 +1,433 @@
+[
+  "fishing_bot_instance",
+  "Установить ссылку на экземпляр FishingBot",
+  "config_manager",
+  "load_fishing_settings",
+  "running",
+  "⏹ Выключить",
+  "▶️ Включить",
+  [
+    "auto_meal"
+  ],
+  "🍔 Есть/пить: ✅",
+  "🍔 Есть/пить: ❌",
+  [
+    "auto_change_bait"
+  ],
+  "🎣 Автосмена наживки: ✅",
+  "🎣 Автосмена наживки: ❌",
+  [
+    "store_in_backpack"
+  ],
+  "🎒 В рюкзак: ✅",
+  "🎒 В рюкзак: ❌",
+  [
+    "store_in_trunk"
+  ],
+  "🚗 В багажник: ✅",
+  "🚗 В багажник: ❌",
+  [
+    "shutdown_on_overweight"
+  ],
+  "💻 Выкл ПК при перевесе: ✅",
+  "💻 Выкл ПК при перевесе: ❌",
+  "InlineKeyboardBuilder",
+  "button",
+  "fishing:toggle",
+  [
+    "text",
+    "callback_data"
+  ],
+  "fishing:toggle_meal",
+  "fishing:toggle_bait",
+  "fishing:toggle_backpack",
+  "fishing:toggle_trunk",
+  "fishing:toggle_shutdown",
+  [
+    "🐟 Настройка рыбы",
+    "fishing:fish_settings"
+  ],
+  [
+    "🗑 Настройка мусора",
+    "fishing:garbage_settings"
+  ],
+  [
+    "🔔 Уведомления",
+    "notif:menu"
+  ],
+  [
+    "📊 Статус",
+    "fishing:status"
+  ],
+  [
+    "🔙 Назад",
+    "menu:bots"
+  ],
+  "adjust",
+  [
+    1
+  ],
+  "as_markup",
+  "Меню управления рыбалкой",
+  "fish_settings",
+  "Path",
+  "resources",
+  "fishing",
+  "fish2k",
+  "sorted",
+  "glob",
+  [
+    "*.png"
+  ],
+  "stem",
+  "get_fish_name",
+  "fish_list",
+  8,
+  "min",
+  "✅",
+  "❌",
+  "builder",
+  " ",
+  "fish:toggle:",
+  ":",
+  [
+    2
+  ],
+  "InlineKeyboardButton",
+  "⬅️ Назад",
+  "fish:page:",
+  "➡️ Вперёд",
+  "row",
+  [
+    "🔙 К рыбалке",
+    "bot:fishing"
+  ],
+  "Клавиатура настройки рыбы с пагинацией",
+  "garbage_settings",
+  [
+    "corn",
+    "Банка кукурузы"
+  ],
+  [
+    "bag",
+    "Пустой мешок"
+  ],
+  [
+    "pack",
+    "Пустая пачка сигарет"
+  ],
+  "🗑 Выкинуть",
+  "✅ Оставить",
+  "garbage:toggle:",
+  "Клавиатура настройки мусора",
+  "📊 <b>Статус рыбалки</b>\n\n⏸ Бот <b>остановлен</b>",
+  "📊 <b>Статус рыбалки</b>\n\n▶️ Бот: <b>Запущен</b>\n",
+  "🎯 Фаза: <b>",
+  "phase",
+  "</b>\n",
+  "🖥 Разрешение: <b>",
+  "resolution_type",
+  "upper",
+  "</b>\n\n",
+  "<b>Настройки:</b>\n",
+  "🍔 Есть/пить: ",
+  "\n",
+  "🎣 Автосмена наживки: ",
+  "🎒 В рюкзак: ",
+  "🚗 В багажник: ",
+  "💻 Выкл ПК при перевесе: ",
+  "Получить статус рыбалки",
+  {
+    "__dict_items__": [
+      [
+        "user_id",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "is_admin_user",
+  "register_fishing_handlers.<locals>.is_admin_user",
+  "callback_query",
+  "F",
+  "data",
+  "startswith",
+  [
+    "fishing:"
+  ],
+  "callback",
+  "CallbackQuery",
+  "return",
+  "Обработчик управления рыбалкой",
+  "fishing_handler",
+  "register_fishing_handlers.<locals>.fishing_handler",
+  [
+    "fish:"
+  ],
+  "Обработчик настроек рыбы",
+  "fish_settings_handler",
+  "register_fishing_handlers.<locals>.fish_settings_handler",
+  [
+    "garbage:"
+  ],
+  "Обработчик настроек мусора",
+  "garbage_settings_handler",
+  "register_fishing_handlers.<locals>.garbage_settings_handler",
+  "Регистрация обработчиков рыбалки",
+  "admin_ids",
+  "from_user",
+  "id",
+  "answer",
+  [
+    "❌ Нет доступа",
+    true
+  ],
+  [
+    "show_alert"
+  ],
+  [
+    ":",
+    1
+  ],
+  "toggle",
+  [
+    "❌ Бот не инициализирован",
+    true
+  ],
+  "stop",
+  [
+    "⏹ Бот остановлен"
+  ],
+  "start",
+  [
+    "▶️ Бот запущен"
+  ],
+  "message",
+  "edit_reply_markup",
+  "get_fishing_menu_keyboard",
+  [
+    "reply_markup"
+  ],
+  "toggle_meal",
+  [
+    "auto_meal",
+    true
+  ],
+  "auto_meal",
+  "save_fishing_settings",
+  "reload_settings",
+  "включено",
+  "выключено",
+  "🍔 Есть/пить ",
+  "toggle_bait",
+  [
+    "auto_change_bait",
+    false
+  ],
+  "auto_change_bait",
+  "включена",
+  "выключена",
+  "🎣 Автосмена наживки ",
+  "toggle_backpack",
+  [
+    "store_in_backpack",
+    true
+  ],
+  "store_in_backpack",
+  "🎒 Перекладывание в рюкзак ",
+  "toggle_trunk",
+  [
+    "store_in_trunk",
+    false
+  ],
+  "store_in_trunk",
+  "🚗 Перекладывание в багажник ",
+  "toggle_shutdown",
+  [
+    "shutdown_on_overweight",
+    false
+  ],
+  "shutdown_on_overweight",
+  "💻 Выключение ПК при перевесе ",
+  "edit_text",
+  "get_fish_settings_keyboard",
+  [
+    "🐟 <b>Настройка рыбы</b>\n\n✅ - Забирать\n❌ - Отпускать\n\nНажмите на рыбу чтобы изменить:"
+  ],
+  "get_garbage_settings_keyboard",
+  [
+    "🗑 <b>Настройка мусора</b>\n\nВыберите действие для каждого типа мусора:"
+  ],
+  "status",
+  "get_fishing_status",
+  [
+    ":"
+  ],
+  2,
+  3,
+  "забирать",
+  "отпускать",
+  "✓ ",
+  "page",
+  "выкидывать",
+  "оставлять",
+  "\nОбработчик управления рыбалкой через Telegram\n",
+  "origin",
+  "has_location",
+  "pathlib",
+  [
+    "Path"
+  ],
+  "aiogram",
+  [
+    "Dispatcher",
+    "F"
+  ],
+  "Dispatcher",
+  "aiogram.types",
+  [
+    "CallbackQuery",
+    "InlineKeyboardButton"
+  ],
+  "aiogram.utils.keyboard",
+  [
+    "InlineKeyboardBuilder"
+  ],
+  [
+    "ConfigManager"
+  ],
+  "ConfigManager",
+  "telegram.handlers.fish_names_map",
+  [
+    "get_fish_name"
+  ],
+  "set_fishing_bot",
+  [
+    0
+  ],
+  {
+    "__dict_items__": [
+      [
+        "page",
+        {
+          "__builtin__": "int"
+        }
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "str"
+        }
+      ]
+    ]
+  },
+  "dp",
+  "register_fishing_handlers",
+  "telegram\\handlers\\fishing_handler.py",
+  "<module telegram.handlers.fishing_handler>",
+  [
+    "callback",
+    "parts",
+    "action",
+    "fish_id",
+    "page",
+    "settings",
+    "fish_settings",
+    "current",
+    "status",
+    "is_admin_user"
+  ],
+  [
+    "is_admin_user"
+  ],
+  [
+    "callback",
+    "action",
+    "settings",
+    "status",
+    "is_admin_user"
+  ],
+  [
+    "callback",
+    "parts",
+    "action",
+    "garbage_id",
+    "settings",
+    "garbage_settings",
+    "current",
+    "status",
+    "is_admin_user"
+  ],
+  [
+    "page",
+    "settings",
+    "fish_settings",
+    "resources_path",
+    "fish_list",
+    "file_path",
+    "fish_id",
+    "fish_name",
+    "items_per_page",
+    "total_pages",
+    "start_idx",
+    "end_idx",
+    "builder",
+    "keep",
+    "status",
+    "nav_buttons"
+  ],
+  [
+    "settings",
+    "is_running",
+    "toggle_text",
+    "meal_text",
+    "bait_text",
+    "backpack_text",
+    "trunk_text",
+    "shutdown_text",
+    "builder"
+  ],
+  [
+    "settings",
+    "status"
+  ],
+  [
+    "settings",
+    "garbage_settings",
+    "garbage_list",
+    "builder",
+    "garbage_id",
+    "garbage_name",
+    "eject",
+    "status"
+  ],
+  [
+    "user_id",
+    "admin_ids"
+  ],
+  [
+    "admin_ids"
+  ],
+  [
+    "dp",
+    "admin_ids",
+    "is_admin_user",
+    "fishing_handler",
+    "fish_settings_handler",
+    "garbage_settings_handler"
+  ],
+  [
+    "bot"
+  ]
+]

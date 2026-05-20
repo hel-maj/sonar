@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sonar"
+version = "0.1.0"
+description = "Readable rebuild of the Sonar fishing automation tool."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python>=4.8",
+    "Pillow>=10",
+    "psutil>=5.9",
+    "requests>=2.31",
+    "pywin32>=306; platform_system == 'Windows'",
+    "PyQt6>=6.6",
+    "pyautogui>=0.9.54",
+    "pytesseract>=0.3.10",
+]
+
+[project.optional-dependencies]
+build = [
+    "Nuitka>=2.7",
+    "ordered-set>=4.1",
+    "zstandard>=0.22",
+]
+
+[project.scripts]
+sonar = "sonar.app:main"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sonar = ["resources/**/*"]

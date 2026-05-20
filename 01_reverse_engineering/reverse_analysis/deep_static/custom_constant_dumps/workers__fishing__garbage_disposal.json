@@ -1,0 +1,710 @@
+[
+  "process_name",
+  "hwnd",
+  "callback",
+  "WindowCapture.find_window_by_process.<locals>.callback",
+  "win32gui",
+  "EnumWindows",
+  "self",
+  "Найти дескриптор окна по имени процесса",
+  "IsWindowVisible",
+  "win32process",
+  "GetWindowThreadProcessId",
+  "psutil",
+  "Process",
+  "append",
+  "GetWindowText",
+  "IsWindow",
+  [
+    0,
+    0
+  ],
+  "GetClientRect",
+  "Получить ширину и высоту окна",
+  "GetWindowDC",
+  "win32ui",
+  "CreateDCFromHandle",
+  "CreateCompatibleDC",
+  "CreateBitmap",
+  "CreateCompatibleBitmap",
+  "SelectObject",
+  "BitBlt",
+  "win32con",
+  "SRCCOPY",
+  "GetInfo",
+  "GetBitmapBits",
+  [
+    true
+  ],
+  "np",
+  "frombuffer",
+  "uint8",
+  [
+    "dtype"
+  ],
+  "bmHeight",
+  "bmWidth",
+  4,
+  "shape",
+  "cv2",
+  "cvtColor",
+  "COLOR_BGRA2BGR",
+  "DeleteObject",
+  "GetHandle",
+  "DeleteDC",
+  "ReleaseDC",
+  "Ошибка захвата: ",
+  "Захватить скриншот окна",
+  "GetWindowRect",
+  2,
+  3,
+  10,
+  "pydirectinput",
+  "moveTo",
+  "time",
+  "sleep",
+  [
+    0.05
+  ],
+  "right",
+  "rightClick",
+  "leftClick",
+  "Ошибка клика: ",
+  "Выполнить клик в указанных координатах окна",
+  "WindowCapture",
+  [
+    "gta5.exe"
+  ],
+  "capture",
+  "resolution",
+  "inventory_roi",
+  "templates",
+  "get_fishing_resources",
+  "garbage",
+  "resources_path",
+  {
+    "__dict_items__": [
+      [
+        "bag",
+        true
+      ],
+      [
+        "corn",
+        true
+      ],
+      [
+        "pack",
+        true
+      ]
+    ]
+  },
+  "garbage_settings",
+  "q",
+  "discard_key",
+  {
+    "__dict_items__": [
+      [
+        "corn",
+        "Банка кукурузы"
+      ],
+      [
+        "bag",
+        "Пустой мешок"
+      ],
+      [
+        "pack",
+        "Пустая пачка сигарет"
+      ]
+    ]
+  },
+  "garbage_names",
+  [
+    "Поиск окна GTA5..."
+  ],
+  "find_window_by_process",
+  [
+    "❌ Окно GTA5 не найдено!"
+  ],
+  "get_window_size",
+  "Размер окна: ",
+  "x",
+  1920,
+  1080,
+  "FULLHD",
+  "INVENTORY_ROI_FULLHD",
+  "template_suffix",
+  [
+    "✓ Определено разрешение: FullHD (1920x1080)"
+  ],
+  2560,
+  1440,
+  "2K",
+  "INVENTORY_ROI_2K",
+  "2k",
+  [
+    "✓ Определено разрешение: 2K (2560x1440)"
+  ],
+  "❌ Неподдерживаемое разрешение: ",
+  [
+    "Поддерживаются только: 1920x1080 (FullHD) и 2560x1440 (2K)"
+  ],
+  "load_templates",
+  "Инициализация системы",
+  "❌ Папка с шаблонами не найдена: ",
+  "Загрузка шаблонов из: ",
+  {
+    "__dict_items__": [
+      [
+        "corn",
+        "corn.png"
+      ],
+      [
+        "bag",
+        "bag.png"
+      ],
+      [
+        "pack",
+        "pack.png"
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "corn",
+        "corn2k.png"
+      ],
+      [
+        "bag",
+        "bag2k.png"
+      ],
+      [
+        "pack",
+        "pack2k.png"
+      ]
+    ]
+  },
+  "❌ Файл ",
+  " не найден!",
+  "imread",
+  "❌ Не удалось загрузить ",
+  "✓ Загружен шаблон ",
+  "Загрузить шаблоны изображений",
+  "y",
+  "height",
+  "width",
+  "matchTemplate",
+  "TM_CCOEFF_NORMED",
+  "minMaxLoc",
+  "CONFIDENCE_THRESHOLD",
+  {
+    "__slice__": [
+      null,
+      2,
+      null
+    ]
+  },
+  "\n        Найти шаблон на скриншоте (первое вхождение)\n        Возвращает (найдено, x_центр, y_центр, уверенность)\n        ",
+  "where",
+  {
+    "__slice__": [
+      null,
+      null,
+      -1
+    ]
+  },
+  "offset_x",
+  "h",
+  "offset_y",
+  "matches",
+  "remove_overlapping_matches",
+  "\n        Найти ВСЕ вхождения шаблона на скриншоте\n        Возвращает список кортежей (x_центр, y_центр, уверенность)\n        ",
+  "sorted",
+  "<lambda>",
+  "GarbageDisposal.remove_overlapping_matches.<locals>.<lambda>",
+  [
+    "key",
+    "reverse"
+  ],
+  "max",
+  0.5,
+  "filtered",
+  "sqrt",
+  "\n        Удалить перекрывающиеся совпадения, оставить только лучшие\n        ",
+  [
+    "\n🔍 Сканирование инвентаря на наличие мусора..."
+  ],
+  [
+    "corn",
+    "bag",
+    "pack"
+  ],
+  "garbage_types_to_search",
+  [
+    "   ℹ️ Все типы мусора отключены в настройках"
+  ],
+  "find_all_template_matches",
+  "screenshot",
+  "   ✓ ",
+  ": найдено ",
+  " шт.",
+  "key",
+  "confidence",
+  "number",
+  "found_garbage",
+  "      [",
+  "] Позиция: (",
+  ", ",
+  ") [уверенность: ",
+  ".2f",
+  "]",
+  "\n        Найти весь мусор в инвентаре один раз и запомнить ВСЕ позиции\n        Возвращает список словарей с информацией о найденном мусоре\n        ",
+  [
+    "number",
+    ""
+  ],
+  "\n🗑️ Выбрасывание: ",
+  " #",
+  "   Позиция: (",
+  ")",
+  [
+    "   Клик ПКМ по мусору..."
+  ],
+  "click_at",
+  [
+    "   ❌ Не удалось кликнуть по мусору"
+  ],
+  [
+    1.0
+  ],
+  "   Нажимаем '",
+  "' для выбрасывания...",
+  "press_key",
+  "press",
+  "   ✅ ",
+  " выброшен (через ",
+  ")!",
+  "   ❌ Ошибка при нажатии ",
+  ": ",
+  "\n        Выбросить мусор по заранее известной позиции\n        Возвращает True если успешно\n        ",
+  "initialize",
+  [
+    "\n============================================================"
+  ],
+  [
+    "АВТОМАТИЧЕСКОЕ ВЫБРАСЫВАНИЕ МУСОРА"
+  ],
+  [
+    "============================================================"
+  ],
+  "Разрешение: ",
+  "Инвентарь ROI: X=",
+  ", Y=",
+  ", W=",
+  ", H=",
+  [
+    "\nТипы мусора:"
+  ],
+  "items",
+  "  • ",
+  [
+    "============================================================\n"
+  ],
+  [
+    "📸 Делаем снимок экрана..."
+  ],
+  [
+    "❌ Не удалось захватить скриншот!"
+  ],
+  "find_all_garbage",
+  [
+    "\n✅ Мусор не найден в инвентаре - всё чисто!"
+  ],
+  "\n📋 Найдено предметов мусора: ",
+  "\n[",
+  "] ",
+  {
+    "__dict_items__": [
+      [
+        "end",
+        ""
+      ]
+    ]
+  },
+  "dispose_garbage_by_position",
+  "disposed_count",
+  "   📦 Прогресс: ",
+  "   ⚠️ Не удалось выбросить ",
+  [
+    "ЗАВЕРШЕНО"
+  ],
+  "Успешно выброшено: ",
+  " из ",
+  [
+    "\n\n============================================================"
+  ],
+  [
+    "ПРОГРАММА ОСТАНОВЛЕНА"
+  ],
+  "Основной процесс выбрасывания мусора",
+  [
+    "\n╔══════════════════════════════════════════════════════════╗\n║     GTA5 GARBAGE DISPOSAL - ВЫБРАСЫВАНИЕ МУСОРА         ║\n╚══════════════════════════════════════════════════════════╝\n    "
+  ],
+  "GarbageDisposal",
+  "run",
+  "Точка входа",
+  "\nGTA5 Garbage Disposal - Автоматическое выбрасывание мусора\nНаходит и выбрасывает: банку кукурузы, пустой мешок, пустую пачку сигарет\n",
+  "origin",
+  "has_location",
+  "numpy",
+  "sys",
+  "os",
+  "pathlib",
+  [
+    "Path"
+  ],
+  "Path",
+  "path_utils",
+  [
+    "get_fishing_resources"
+  ],
+  {
+    "__dict_items__": [
+      [
+        "x",
+        1077
+      ],
+      [
+        "y",
+        90
+      ],
+      [
+        "width",
+        538
+      ],
+      [
+        "height",
+        986
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "x",
+        1436
+      ],
+      [
+        "y",
+        99
+      ],
+      [
+        "width",
+        717
+      ],
+      [
+        "height",
+        1341
+      ]
+    ]
+  },
+  0.8,
+  "DELAY_AFTER_RIGHT_CLICK",
+  "DELAY_AFTER_KEY_PRESS",
+  "workers.fishing.garbage_disposal",
+  "Захват скриншотов окна по имени процесса",
+  "__qualname__",
+  {
+    "__dict_items__": [
+      [
+        "process_name",
+        {
+          "__builtin__": "str"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.__init__",
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.find_window_by_process",
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "tuple"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.get_window_size",
+  "return",
+  "ndarray",
+  "WindowCapture.capture",
+  [
+    "left"
+  ],
+  {
+    "__dict_items__": [
+      [
+        "x",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "y",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "button",
+        {
+          "__builtin__": "str"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.click_at",
+  "Класс для автоматического выбрасывания мусора",
+  "GarbageDisposal.__init__",
+  "GarbageDisposal.initialize",
+  "GarbageDisposal.load_templates",
+  [
+    null
+  ],
+  "template",
+  "roi",
+  "find_template",
+  "GarbageDisposal.find_template",
+  "GarbageDisposal.find_all_template_matches",
+  {
+    "__dict_items__": [
+      [
+        "matches",
+        {
+          "__builtin__": "list"
+        }
+      ],
+      [
+        "template_w",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "template_h",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "return",
+        {
+          "__builtin__": "list"
+        }
+      ]
+    ]
+  },
+  "GarbageDisposal.remove_overlapping_matches",
+  "GarbageDisposal.find_all_garbage",
+  {
+    "__dict_items__": [
+      [
+        "garbage_info",
+        {
+          "__builtin__": "dict"
+        }
+      ],
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "GarbageDisposal.dispose_garbage_by_position",
+  "GarbageDisposal.run",
+  "main",
+  "workers\\fishing\\garbage_disposal.py",
+  [
+    "x"
+  ],
+  "<module workers.fishing.garbage_disposal>",
+  [
+    "__class__"
+  ],
+  [
+    "self"
+  ],
+  [
+    "self",
+    "process_name"
+  ],
+  [
+    "hwnd",
+    "hwnds",
+    "_",
+    "pid",
+    "process",
+    "self"
+  ],
+  [
+    "self",
+    "left",
+    "top",
+    "right",
+    "bottom",
+    "width",
+    "height",
+    "hwndDC",
+    "mfcDC",
+    "saveDC",
+    "saveBitMap",
+    "bmpinfo",
+    "bmpstr",
+    "img",
+    "e"
+  ],
+  [
+    "self",
+    "x",
+    "y",
+    "button",
+    "rect",
+    "client_rect",
+    "border_x",
+    "border_y",
+    "screen_x",
+    "screen_y",
+    "top_right_x",
+    "top_right_y",
+    "e"
+  ],
+  [
+    "self",
+    "garbage_info",
+    "garbage_name",
+    "garbage_x",
+    "garbage_y",
+    "garbage_num",
+    "key_to_press",
+    "e"
+  ],
+  [
+    "self",
+    "screenshot",
+    "found_garbage",
+    "garbage_types_to_search",
+    "garbage_key",
+    "matches",
+    "i",
+    "x",
+    "y",
+    "conf",
+    "garbage_info"
+  ],
+  [
+    "self",
+    "screenshot",
+    "template",
+    "roi",
+    "search_area",
+    "offset_x",
+    "offset_y",
+    "result",
+    "locations",
+    "matches",
+    "h",
+    "w",
+    "pt",
+    "confidence",
+    "center_x",
+    "center_y"
+  ],
+  [
+    "self",
+    "screenshot",
+    "template",
+    "roi",
+    "search_area",
+    "result",
+    "min_val",
+    "max_val",
+    "min_loc",
+    "max_loc",
+    "h",
+    "w",
+    "center_x",
+    "center_y"
+  ],
+  [
+    "self",
+    "callback",
+    "hwnds",
+    "hwnd",
+    "title"
+  ],
+  [
+    "self",
+    "left",
+    "top",
+    "right",
+    "bottom"
+  ],
+  [
+    "self",
+    "width",
+    "height"
+  ],
+  [
+    "self",
+    "template_files",
+    "key",
+    "filename",
+    "file_path",
+    "template"
+  ],
+  [
+    "disposal"
+  ],
+  [
+    "self",
+    "matches",
+    "template_w",
+    "template_h",
+    "filtered",
+    "min_distance",
+    "match",
+    "x",
+    "y",
+    "conf",
+    "is_overlap",
+    "existing",
+    "ex",
+    "ey",
+    "_",
+    "distance"
+  ],
+  [
+    "self",
+    "key",
+    "name",
+    "screenshot",
+    "garbage_positions",
+    "disposed_count",
+    "i",
+    "garbage_info"
+  ]
+]

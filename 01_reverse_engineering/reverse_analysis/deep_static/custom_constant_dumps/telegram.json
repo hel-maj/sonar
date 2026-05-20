@@ -1,0 +1,18 @@
+[
+  "\nTelegram Bot Package для KortexWorker\nМодульная структура для удобного добавления новых ботов\n",
+  "environ",
+  [
+    "NUITKA_PACKAGE_telegram",
+    "\\not_existing"
+  ],
+  "origin",
+  "has_location",
+  "submodule_search_locations",
+  "bot_manager",
+  [
+    "TelegramBotManager"
+  ],
+  "TelegramBotManager",
+  "telegram\\__init__.py",
+  "<module telegram>"
+]

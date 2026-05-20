@@ -1,0 +1,27 @@
+[
+  "environ",
+  [
+    "NUITKA_PACKAGE_license",
+    "\\not_existing"
+  ],
+  "origin",
+  "has_location",
+  "submodule_search_locations",
+  "hwid_generator",
+  [
+    "get_hwid"
+  ],
+  "get_hwid",
+  "license_client",
+  [
+    "LicenseClient"
+  ],
+  "LicenseClient",
+  "activation_dialog",
+  [
+    "ActivationDialog"
+  ],
+  "ActivationDialog",
+  "license\\__init__.py",
+  "<module license>"
+]

@@ -1,0 +1,2 @@
+*.gbf filter=lfs diff=lfs merge=lfs -text
+01_reverse_engineering/reverse_analysis/deep_static/ghidra_exports/ghidra_symbols.csv filter=lfs diff=lfs merge=lfs -text

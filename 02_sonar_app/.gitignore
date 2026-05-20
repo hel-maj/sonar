@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build/install output
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime config and logs
+/config/
+/logs/
+*.log
+assets/game_icons/.build_history.json
+
+# Local tooling
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,239 @@
+[
+  "InlineKeyboardBuilder",
+  "button",
+  [
+    "🎮 Окно игры",
+    "screenshot:game"
+  ],
+  [
+    "text",
+    "callback_data"
+  ],
+  "mss",
+  "monitors",
+  [
+    null,
+    null,
+    null
+  ],
+  "monitor_count",
+  "builder",
+  "🖥 Монитор ",
+  "screenshot:monitor:",
+  [
+    "🔙 Назад",
+    "menu:main"
+  ],
+  "adjust",
+  [
+    1
+  ],
+  "as_markup",
+  "Меню выбора скриншота",
+  "Сделать скриншот окна игры",
+  "cv2",
+  "WindowCapture",
+  [
+    "gta5.exe"
+  ],
+  "find_window_by_process",
+  "capture",
+  "cvtColor",
+  "COLOR_BGR2RGB",
+  "Image",
+  "fromarray",
+  "BytesIO",
+  "save",
+  {
+    "__dict_items__": [
+      [
+        "format",
+        "PNG"
+      ]
+    ]
+  },
+  "seek",
+  [
+    0
+  ],
+  "BufferedInputFile",
+  {
+    "__dict_items__": [
+      [
+        "filename",
+        "game_screenshot.png"
+      ]
+    ]
+  },
+  "take_game_screenshot",
+  "Сделать скриншот монитора",
+  "monitor_num",
+  "grab",
+  "frombytes",
+  "RGB",
+  "size",
+  "rgb",
+  "monitor_",
+  ".png",
+  [
+    "filename"
+  ],
+  "take_monitor_screenshot",
+  {
+    "__dict_items__": [
+      [
+        "user_id",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "is_admin_user",
+  "register_screenshot_handlers.<locals>.is_admin_user",
+  "callback_query",
+  "F",
+  "data",
+  "startswith",
+  [
+    "screenshot:"
+  ],
+  "callback",
+  "CallbackQuery",
+  "return",
+  "Обработчик скриншотов",
+  "screenshot_handler",
+  "register_screenshot_handlers.<locals>.screenshot_handler",
+  "Регистрация обработчиков скриншотов",
+  "admin_ids",
+  "from_user",
+  "id",
+  "answer",
+  [
+    "❌ Нет доступа",
+    true
+  ],
+  [
+    "show_alert"
+  ],
+  [
+    ":"
+  ],
+  [
+    "📸 Делаю скриншот..."
+  ],
+  "game",
+  "message",
+  "answer_photo",
+  "🎮 Скриншот окна игры",
+  [
+    "photo",
+    "caption"
+  ],
+  [
+    "❌ Не удалось сделать скриншот игры"
+  ],
+  "monitor",
+  2,
+  "🖥 Скриншот монитора ",
+  "❌ Не удалось сделать скриншот монитора ",
+  "TelegramNetworkError",
+  "\nОбработчик скриншотов\n",
+  "origin",
+  "has_location",
+  "io",
+  "aiogram",
+  [
+    "Dispatcher",
+    "F"
+  ],
+  "Dispatcher",
+  "aiogram.types",
+  [
+    "CallbackQuery",
+    "BufferedInputFile"
+  ],
+  "aiogram.utils.keyboard",
+  [
+    "InlineKeyboardBuilder"
+  ],
+  "aiogram.exceptions",
+  [
+    "TelegramNetworkError"
+  ],
+  "PIL",
+  [
+    "Image"
+  ],
+  "workers.fishing.window_capture",
+  [
+    "WindowCapture"
+  ],
+  "get_screenshot_menu_keyboard",
+  {
+    "__dict_items__": [
+      [
+        "monitor_num",
+        {
+          "__builtin__": "int"
+        }
+      ]
+    ]
+  },
+  "dp",
+  "register_screenshot_handlers",
+  "telegram\\handlers\\screenshot_handler.py",
+  "<module telegram.handlers.screenshot_handler>",
+  [
+    "builder",
+    "sct",
+    "monitor_count",
+    "i"
+  ],
+  [
+    "user_id",
+    "admin_ids"
+  ],
+  [
+    "admin_ids"
+  ],
+  [
+    "dp",
+    "admin_ids",
+    "is_admin_user",
+    "screenshot_handler"
+  ],
+  [
+    "callback",
+    "parts",
+    "action",
+    "screenshot",
+    "monitor_num",
+    "is_admin_user"
+  ],
+  [
+    "is_admin_user"
+  ],
+  [
+    "cv2",
+    "capture",
+    "frame",
+    "frame_rgb",
+    "img",
+    "buf"
+  ],
+  [
+    "monitor_num",
+    "sct",
+    "monitor",
+    "screenshot",
+    "img",
+    "buf"
+  ]
+]

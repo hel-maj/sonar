@@ -1,0 +1,573 @@
+[
+  "license_client",
+  "init_ui",
+  "QTimer",
+  "update_timer",
+  "timeout",
+  "connect",
+  "update_license_info",
+  "start",
+  [
+    5000
+  ],
+  "load_server_info",
+  "\n        Args:\n            license_client: Экземпляр LicenseClient для работы с лицензией\n            parent: Родительский виджет\n        ",
+  "QVBoxLayout",
+  "setContentsMargins",
+  [
+    30,
+    30,
+    30,
+    30
+  ],
+  "setSpacing",
+  [
+    20
+  ],
+  "QScrollArea",
+  "setWidgetResizable",
+  [
+    true
+  ],
+  "setFrameShape",
+  "QFrame",
+  "Shape",
+  "NoFrame",
+  "setStyleSheet",
+  [
+    "QScrollArea { background: transparent; border: none; }"
+  ],
+  "QWidget",
+  [
+    0,
+    0,
+    10,
+    0
+  ],
+  "_create_card",
+  [
+    "📋 Информация"
+  ],
+  "QLabel",
+  "server_info_text",
+  "setWordWrap",
+  "setTextFormat",
+  "Qt",
+  "TextFormat",
+  "RichText",
+  "setOpenExternalLinks",
+  "setAlignment",
+  "AlignmentFlag",
+  "AlignLeft",
+  "AlignTop",
+  "\n            QLabel {\n                background-color: ",
+  "BACKGROUND_COLOR",
+  ";\n                border: 1px solid #48484A;\n                border-radius: 8px;\n                padding: 12px;\n            }\n        ",
+  "setText",
+  [
+    "⏳ Загрузка информации с сервера..."
+  ],
+  "addWidget",
+  [
+    "🎁 Активировать промокод"
+  ],
+  "QHBoxLayout",
+  [
+    12
+  ],
+  "QLineEdit",
+  "promo_input",
+  "setPlaceholderText",
+  [
+    "Введите промокод..."
+  ],
+  "\n            QLineEdit {\n                background-color: ",
+  ";\n                color: ",
+  "TEXT_COLOR",
+  ";\n                border: 1px solid #48484A;\n                border-radius: 8px;\n                padding: 12px;\n                font-size: 13px;\n            }\n            QLineEdit:focus {\n                border: 1px solid ",
+  "MAGENTA_COLOR",
+  ";\n            }\n        ",
+  3,
+  "QPushButton",
+  [
+    "Применить"
+  ],
+  "promo_button",
+  "setMinimumHeight",
+  [
+    44
+  ],
+  "\n            QPushButton {\n                background-color: ",
+  ";\n                color: white;\n                border: none;\n                border-radius: 8px;\n                font-size: 13px;\n                font-weight: 600;\n                padding: 0 20px;\n            }\n            QPushButton:hover {\n                background-color: #FF1A90;\n            }\n            QPushButton:pressed {\n                background-color: #E0006E;\n            }\n            QPushButton:disabled {\n                background-color: #48484A;\n                color: #8E8E93;\n            }\n        ",
+  "clicked",
+  "apply_promocode",
+  "addLayout",
+  [
+    ""
+  ],
+  "promo_status_label",
+  "font-size: 12px; color: ",
+  "TEXT_SECONDARY",
+  ";",
+  [
+    "🔑 Информация о лицензии"
+  ],
+  "_create_info_row",
+  [
+    "Статус:",
+    ""
+  ],
+  "status_label",
+  [
+    "Истекает:",
+    ""
+  ],
+  "expires_label",
+  [
+    "Осталось:",
+    ""
+  ],
+  "remaining_label",
+  [
+    "Ключ:",
+    ""
+  ],
+  "key_label",
+  "; font-family: 'Courier New';",
+  [
+    "🛒 Приобрести лицензию"
+  ],
+  [
+    "📱"
+  ],
+  "setFixedWidth",
+  [
+    30
+  ],
+  [
+    "font-size: 18px;"
+  ],
+  [
+    "Telegram: @kortexm"
+  ],
+  "_get_link_button_style",
+  "setCursor",
+  "CursorShape",
+  "PointingHandCursor",
+  "<lambda>",
+  "HomeTab.init_ui.<locals>.<lambda>",
+  "addStretch",
+  [
+    "💳"
+  ],
+  [
+    "FunPay: Купить ключ"
+  ],
+  "setWidget",
+  "Инициализация интерфейса",
+  "self",
+  "_open_url",
+  [
+    "https://t.me/kortexm"
+  ],
+  [
+    "https://funpay.com/users/8394144/"
+  ],
+  "setObjectName",
+  [
+    "infoCard"
+  ],
+  "\n            QFrame#infoCard {\n                background-color: ",
+  "CARD_COLOR",
+  ";\n                border-radius: 12px;\n            }\n        ",
+  [
+    16,
+    16,
+    16,
+    16
+  ],
+  "\n            font-size: 15px;\n            font-weight: 600;\n            color: ",
+  ";\n            margin-bottom: 4px;\n        ",
+  "Создать карточку с заголовком, возвращает (card_frame, content_layout)",
+  "font-size: 13px; color: ",
+  "; min-width: 100px;",
+  "; font-weight: 500;",
+  "Создать строку с информацией",
+  "\n            QPushButton {\n                background-color: transparent;\n                color: ",
+  ";\n                text-decoration: underline;\n                text-align: left;\n                padding: 8px;\n                border: none;\n                font-size: 13px;\n                font-weight: 600;\n            }\n            QPushButton:hover {\n                color: #FF1A90;\n                background-color: rgba(255, 0, 128, 0.1);\n                border-radius: 6px;\n            }\n        ",
+  "Стиль для кнопок-ссылок",
+  "QDesktopServices",
+  "openUrl",
+  "QUrl",
+  "logger",
+  "info",
+  "Opening URL: ",
+  "Открыть URL в браузере",
+  "_license_key",
+  [
+    "❌ Не активирована"
+  ],
+  "ERROR_COLOR",
+  "; font-weight: 600;",
+  [
+    "-"
+  ],
+  "_license_data",
+  [
+    "⚠️ Нет данных"
+  ],
+  "WARNING_COLOR",
+  "_is_valid",
+  [
+    "✅ Активна"
+  ],
+  "SUCCESS_COLOR",
+  [
+    "❌ Истекла"
+  ],
+  [
+    "expires_at",
+    ""
+  ],
+  "endswith",
+  [
+    "Z"
+  ],
+  "datetime",
+  "fromisoformat",
+  "replace",
+  [
+    "Z",
+    "+00:00"
+  ],
+  "astimezone",
+  "strftime",
+  [
+    "%d.%m.%Y %H:%M:%S"
+  ],
+  "now",
+  "timezone",
+  "utc",
+  "total_seconds",
+  "days",
+  "seconds",
+  3600,
+  60,
+  " дн. ",
+  " ч. ",
+  " мин.",
+  [
+    "Истекла"
+  ],
+  "error",
+  "Error parsing expiration date: ",
+  {
+    "__slice__": [
+      null,
+      4,
+      null
+    ]
+  },
+  "-****-****-",
+  {
+    "__slice__": [
+      -4,
+      null,
+      null
+    ]
+  },
+  "-",
+  "Error updating license info: ",
+  {
+    "__dict_items__": [
+      [
+        "exc_info",
+        true
+      ]
+    ]
+  },
+  "Обновить информацию о лицензии",
+  "requests",
+  "license",
+  [
+    "LicenseClient"
+  ],
+  "LicenseClient",
+  "SERVER_URL",
+  "/kortexworker/info_text",
+  "Loading server info from: ",
+  {
+    "__dict_items__": [
+      [
+        "timeout",
+        10
+      ]
+    ]
+  },
+  "Server info response: ",
+  "status_code",
+  200,
+  "json",
+  [
+    "text",
+    "Информация отсутствует"
+  ],
+  "Server info loaded: ",
+  " characters",
+  "_convert_text_to_html",
+  "Сервер вернул код ",
+  "warning",
+  "<span style='color: ",
+  ";'>",
+  "</span>",
+  "Error loading server info: ",
+  ";'>Ошибка загрузки: ",
+  "Загрузить информацию с сервера",
+  "re",
+  [
+    "&",
+    "&amp;"
+  ],
+  [
+    "<",
+    "&lt;"
+  ],
+  [
+    ">",
+    "&gt;"
+  ],
+  [
+    "\n",
+    "<br>"
+  ],
+  "sub",
+  "(https?://[^\\s<>]+|t\\.me/[^\\s<>]+)",
+  "<a href=\"\\1\" style=\"color: #FF0080; font-weight: 700; text-decoration: none;\">\\1</a>",
+  "<div style=\"color: #FFFFFF; font-weight: 600; line-height: 1.8; font-size: 13px;\">",
+  "</div>",
+  "Конвертировать обычный текст в HTML с кликабельными ссылками",
+  "text",
+  "strip",
+  [
+    "⚠️ Введите промокод"
+  ],
+  [
+    "❌ Сначала активируйте лицензию"
+  ],
+  "setEnabled",
+  [
+    false
+  ],
+  [
+    "⏳ Применение промокода..."
+  ],
+  "post",
+  "/kortexworker/use_promocode",
+  "promocode",
+  "key",
+  "hwid",
+  "_hwid",
+  10,
+  [
+    "json",
+    "timeout"
+  ],
+  [
+    "message",
+    "Промокод применён успешно"
+  ],
+  "✅ ",
+  "clear",
+  "singleShot",
+  1000,
+  [
+    "detail",
+    "Неизвестная ошибка"
+  ],
+  "❌ ",
+  "Error applying promocode: ",
+  "❌ Ошибка: ",
+  "Применить промокод",
+  "\nВкладка \"Главная\" для KortexWorker\nИнформация о лицензии, промокоды, информация с сервера\n",
+  "origin",
+  "has_location",
+  "os",
+  "sys",
+  "logging",
+  [
+    "datetime",
+    "timezone"
+  ],
+  "PyQt6.QtWidgets",
+  [
+    "QWidget",
+    "QVBoxLayout",
+    "QHBoxLayout",
+    "QPushButton",
+    "QLabel",
+    "QFrame",
+    "QScrollArea",
+    "QLineEdit",
+    "QTextEdit"
+  ],
+  "QTextEdit",
+  "PyQt6.QtCore",
+  [
+    "Qt",
+    "QTimer",
+    "QUrl"
+  ],
+  "PyQt6.QtGui",
+  [
+    "QFont",
+    "QDesktopServices"
+  ],
+  "QFont",
+  "insert",
+  "getLogger",
+  [
+    "HomeTab"
+  ],
+  "#2C2C2E",
+  "#3A3A3C",
+  "#FFFFFF",
+  "#FF0080",
+  "#8E8E93",
+  "#34C759",
+  "#FF9500",
+  "#FF3B30",
+  "__prepare__",
+  "HomeTab",
+  "__getitem__",
+  "%s.__prepare__() must return a mapping, not %s",
+  "<metaclass>",
+  "ui.home_tab",
+  "Вкладка с информацией о лицензии",
+  "__qualname__",
+  [
+    null
+  ],
+  "HomeTab.__init__",
+  "HomeTab.init_ui",
+  "title",
+  "str",
+  "HomeTab._create_card",
+  "label_text",
+  "value_text",
+  "HomeTab._create_info_row",
+  "return",
+  "HomeTab._get_link_button_style",
+  "url",
+  "HomeTab._open_url",
+  "HomeTab.update_license_info",
+  "HomeTab.load_server_info",
+  "HomeTab._convert_text_to_html",
+  "HomeTab.apply_promocode",
+  "__orig_bases__",
+  "ui\\home_tab.py",
+  [
+    "self"
+  ],
+  "<module ui.home_tab>",
+  [
+    "__class__"
+  ],
+  [
+    "self",
+    "license_client",
+    "parent",
+    "__class__"
+  ],
+  [
+    "self",
+    "text",
+    "re",
+    "url_pattern",
+    "html"
+  ],
+  [
+    "self",
+    "title",
+    "card",
+    "card_layout",
+    "title_label"
+  ],
+  [
+    "self",
+    "label_text",
+    "value_text",
+    "layout",
+    "label",
+    "value"
+  ],
+  [
+    "self",
+    "url"
+  ],
+  [
+    "self",
+    "promocode",
+    "requests",
+    "LicenseClient",
+    "response",
+    "data",
+    "message",
+    "error",
+    "e"
+  ],
+  [
+    "self",
+    "main_layout",
+    "scroll",
+    "scroll_content",
+    "scroll_layout",
+    "server_info_card",
+    "server_info_layout",
+    "promo_card",
+    "promo_layout",
+    "promo_input_layout",
+    "license_card",
+    "license_layout",
+    "status_row",
+    "expires_row",
+    "remaining_row",
+    "key_row",
+    "links_card",
+    "links_layout",
+    "tg_layout",
+    "tg_icon",
+    "tg_link",
+    "fp_layout",
+    "fp_icon",
+    "fp_link"
+  ],
+  [
+    "self",
+    "requests",
+    "LicenseClient",
+    "url",
+    "response",
+    "data",
+    "info_text",
+    "html_text",
+    "error_msg",
+    "e"
+  ],
+  [
+    "self",
+    "license_data",
+    "expires_at",
+    "expires_dt",
+    "local_dt",
+    "formatted_date",
+    "now",
+    "remaining",
+    "days",
+    "hours",
+    "minutes",
+    "remaining_text",
+    "e",
+    "key",
+    "masked_key"
+  ]
+]

@@ -1,0 +1,201 @@
+[
+  "winreg",
+  "KEY_READ",
+  "KEY_WOW64_64KEY",
+  "KEY_WOW64_32KEY",
+  "OpenKey",
+  "HKEY_LOCAL_MACHINE",
+  "SOFTWARE\\Microsoft\\Cryptography",
+  "QueryValueEx",
+  "MachineGuid",
+  "strip",
+  [
+    null,
+    null,
+    null
+  ],
+  "logger",
+  "warning",
+  [
+    "get_windows_machine_guid: failed to read MachineGuid from registry"
+  ],
+  "UNKNOWN_GUID",
+  "Windows Machine GUID из реестра — уникален для каждой установки ОС.",
+  "windll",
+  "kernel32",
+  "GetVolumeInformationW",
+  "c_wchar_p",
+  "c_uint",
+  "POINTER",
+  "c_ulong",
+  "argtypes",
+  "c_int",
+  "restype",
+  "environ",
+  [
+    "SystemDrive",
+    ""
+  ],
+  "rstrip",
+  [
+    "\\/"
+  ],
+  [
+    "SystemRoot",
+    ""
+  ],
+  ":",
+  {
+    "__slice__": [
+      null,
+      2,
+      null
+    ]
+  },
+  "C:\\",
+  "seen",
+  "add",
+  [
+    0
+  ],
+  "get_volume_info",
+  "byref",
+  "value",
+  "08X",
+  "get_volume_serial: ",
+  [
+    "get_volume_serial: failed to read volume serial"
+  ],
+  "UNKNOWN_SERIAL",
+  "Серийный номер тома системного диска через Win32 API (мгновенно, без WMI).",
+  [
+    "COMPUTERNAME",
+    ""
+  ],
+  [
+    "USERNAME",
+    ""
+  ],
+  "platform",
+  "machine",
+  "release",
+  "|",
+  "hashlib",
+  "sha256",
+  "utf-8",
+  "hexdigest",
+  {
+    "__slice__": [
+      null,
+      32,
+      null
+    ]
+  },
+  "Стабильный fallback ID, если оба базовых источника недоступны.",
+  "info",
+  [
+    "Generating HWID..."
+  ],
+  "get_windows_machine_guid",
+  "get_volume_serial",
+  "debug",
+  "Windows GUID: ",
+  "Volume Serial: ",
+  "get_stable_fallback_id",
+  "FALLBACK|",
+  [
+    "HWID fallback path used (GUID/SERIAL unavailable)"
+  ],
+  "encode",
+  [
+    "utf-8"
+  ],
+  "Generated HWID: ",
+  "error",
+  "Critical HWID generation error: ",
+  [
+    {
+      "__bytes__": "454d455247454e43595f48574944",
+      "size": 14
+    }
+  ],
+  [
+    "Using emergency HWID fallback"
+  ],
+  "\n    Генерирует уникальный HWID устройства.\n    SHA256(MachineGuid|VolumeSerial)\n\n    Returns:\n        str: SHA256 хеш\n    ",
+  "windows_machine_guid",
+  "volume_serial",
+  "hwid",
+  "get_hwid",
+  "Получить все компоненты HWID для отладки.",
+  "\nHWID Generator для KortexWorker\nГенерирует уникальный идентификатор устройства на основе:\n- Windows Machine GUID   (winreg)\n- Volume Serial системного диска (ctypes Win32 API)\n\nТолько winreg + ctypes + os — никакого WMI, subprocess, pywin32.\nРаботает мгновенно на любой Windows 10/11 без исключений.\nСистемный диск определяется автоматически (C:, D: и т.д.).\n",
+  "origin",
+  "has_location",
+  "ctypes",
+  "os",
+  "logging",
+  "getLogger",
+  [
+    "HWIDGenerator"
+  ],
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "str"
+        }
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "dict"
+        }
+      ]
+    ]
+  },
+  "get_hwid_components",
+  "license\\hwid_generator.py",
+  "<module license.hwid_generator>",
+  [
+    "win_guid",
+    "vol_serial",
+    "fallback",
+    "combined",
+    "hwid_hash",
+    "e",
+    "emergency"
+  ],
+  [
+    "computer_name",
+    "username",
+    "system_root",
+    "machine",
+    "release",
+    "seed"
+  ],
+  [
+    "kernel32",
+    "get_volume_info",
+    "drives_to_try",
+    "sys_drive",
+    "system_root",
+    "seen",
+    "drive",
+    "volume_serial",
+    "ok",
+    "serial",
+    "e"
+  ],
+  [
+    "flags_to_try",
+    "flags",
+    "key",
+    "value",
+    "_"
+  ]
+]

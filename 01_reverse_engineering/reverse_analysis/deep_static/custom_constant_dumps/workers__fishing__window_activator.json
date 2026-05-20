@@ -1,0 +1,190 @@
+[
+  "callback",
+  "WindowActivator.find_window_by_process.<locals>.callback",
+  "win32gui",
+  "EnumWindows",
+  "Найти главное окно процесса",
+  "IsWindowVisible",
+  "win32process",
+  "GetWindowThreadProcessId",
+  "psutil",
+  "Process",
+  "process_name",
+  "GetWindowText",
+  "append",
+  "IsWindow",
+  "IsIconic",
+  "hwnd",
+  "ShowWindow",
+  "win32con",
+  "SW_RESTORE",
+  "time",
+  "sleep",
+  [
+    0.1
+  ],
+  "SW_SHOW",
+  [
+    0.05
+  ],
+  "BringWindowToTop",
+  "GetForegroundWindow",
+  "windll",
+  "user32",
+  "AttachThreadInput",
+  "SetForegroundWindow",
+  "SetFocus",
+  "POINTER",
+  "c_ulong",
+  "Structure",
+  "__prepare__",
+  "KEYBDINPUT",
+  "__getitem__",
+  "%s.__prepare__() must return a mapping, not %s",
+  "<metaclass>",
+  "workers.fishing.window_activator",
+  "WindowActivator.activate_window.<locals>.KEYBDINPUT",
+  "__qualname__",
+  "wVk",
+  "c_ushort",
+  "wScan",
+  "dwFlags",
+  "dwExtraInfo",
+  "PUL",
+  "_fields_",
+  "__orig_bases__",
+  "INPUT",
+  "WindowActivator.activate_window.<locals>.INPUT",
+  "ki",
+  [
+    0
+  ],
+  18,
+  "pointer",
+  "SendInput",
+  "sizeof",
+  [
+    0.01
+  ],
+  2,
+  "AllowSetForegroundWindow",
+  [
+    0.02
+  ],
+  "SwitchToThisWindow",
+  "[SUCCESS] GTA5 окно активировано (попытка ",
+  ")",
+  "max_attempts",
+  "[INFO] Окно не активировано, повтор ",
+  "...",
+  [
+    0.2
+  ],
+  "[WARNING] Ошибка активации окна (попытка ",
+  "): ",
+  [
+    "[WARNING] Не удалось активировать окно GTA5 после всех попыток"
+  ],
+  "\n        Активировать окно с гарантией (несколько методов + retry)\n        Возвращает True если окно активировано успешно\n        \n        ВАЖНО: Windows не позволяет приложению активировать другое окно\n        если пользователь не взаимодействовал с приложением недавно.\n        Используем комбинацию методов для обхода этого ограничения.\n        ",
+  "WindowActivator",
+  "find_window_by_process",
+  [
+    "gta5.exe"
+  ],
+  [
+    "[ERROR] Окно GTA5 не найдено!"
+  ],
+  "activate_window",
+  {
+    "__dict_items__": [
+      [
+        "max_attempts",
+        3
+      ]
+    ]
+  },
+  "\n        Найти и активировать окно GTA5\n        Возвращает True если успешно\n        ",
+  "\nНадёжная активация окна GTA5\nИспользует 5 различных методов для 100% гарантии активации окна\n\nМЕТОДЫ АКТИВАЦИИ (в порядке применения):\n1. Подготовка окна (ShowWindow, BringWindowToTop) - подготовить окно к активации\n2. AttachThreadInput - КЛЮЧЕВОЙ метод обхода ограничений Windows\n3. SendInput (Alt key) - имитация пользовательского ввода для разблокировки\n4. AllowSetForegroundWindow - явное разрешение активации целевому процессу\n5. SwitchToThisWindow - недокументированный API, работает надёжнее SetForegroundWindow\n\nПРОБЛЕМА Windows:\nSetForegroundWindow блокируется Windows через LockSetForegroundWindow если:\n- Приложение не имеет активного окна\n- Пользователь не взаимодействовал с приложением недавно\n- Другое приложение использует LockSetForegroundWindow\n\nРЕШЕНИЕ:\nКомбинация методов обходит все ограничения:\n- AttachThreadInput присоединяет потоки → даёт право активации\n- SendInput имитирует ввод → Windows разблокирует SetForegroundWindow\n- AllowSetForegroundWindow явно разрешает активацию\n- SwitchToThisWindow обходит блокировку через недокументированный API\n\nОСОБЕННОСТИ:\n- Retry логика (по умолчанию 3 попытки)\n- Проверка успешности активации после каждой попытки\n- Fallback на альтернативные методы если основной не работает\n- Минимальные задержки между методами для максимальной скорости\n",
+  "origin",
+  "has_location",
+  "ctypes",
+  "wintypes",
+  "Класс для надёжной активации окна процесса",
+  {
+    "__dict_items__": [
+      [
+        "process_name",
+        {
+          "__builtin__": "str"
+        }
+      ]
+    ]
+  },
+  "WindowActivator.find_window_by_process",
+  [
+    3
+  ],
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "WindowActivator.activate_window",
+  "force_activate_gta5",
+  "WindowActivator.force_activate_gta5",
+  "workers\\fishing\\window_activator.py",
+  "<module workers.fishing.window_activator>",
+  [
+    "__class__",
+    "KEYBDINPUT"
+  ],
+  [
+    "__class__",
+    "PUL"
+  ],
+  [
+    "__class__"
+  ],
+  [
+    "hwnd",
+    "max_attempts",
+    "attempt",
+    "foreground_hwnd",
+    "foreground_thread_id",
+    "_",
+    "target_thread_id",
+    "result",
+    "e",
+    "PUL",
+    "KEYBDINPUT",
+    "INPUT",
+    "extra",
+    "ii_",
+    "target_pid"
+  ],
+  [
+    "hwnd",
+    "hwnds",
+    "_",
+    "pid",
+    "process",
+    "title",
+    "process_name"
+  ],
+  [
+    "process_name"
+  ],
+  [
+    "process_name",
+    "callback",
+    "hwnds"
+  ],
+  [
+    "hwnd"
+  ]
+]

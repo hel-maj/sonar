@@ -1,0 +1,19 @@
+[
+  "\nFishing Bot - модули рыбалки для GTA5\n",
+  "join",
+  "environ",
+  [
+    "NUITKA_PACKAGE_workers",
+    "\\not_existing"
+  ],
+  "fishing",
+  [
+    "NUITKA_PACKAGE_workers_fishing",
+    "\\not_existing"
+  ],
+  "origin",
+  "has_location",
+  "submodule_search_locations",
+  "workers\\fishing\\__init__.py",
+  "<module workers.fishing>"
+]

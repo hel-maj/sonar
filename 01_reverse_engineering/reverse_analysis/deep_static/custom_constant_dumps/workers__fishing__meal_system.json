@@ -1,0 +1,702 @@
+[
+  "process_name",
+  "hwnd",
+  "callback",
+  "WindowCapture.find_window_by_process.<locals>.callback",
+  "win32gui",
+  "EnumWindows",
+  "self",
+  "Найти дескриптор окна по имени процесса",
+  "IsWindowVisible",
+  "win32process",
+  "GetWindowThreadProcessId",
+  "psutil",
+  "Process",
+  "append",
+  "GetWindowText",
+  "IsWindow",
+  [
+    0,
+    0
+  ],
+  "GetClientRect",
+  "Получить ширину и высоту окна",
+  "GetWindowDC",
+  "win32ui",
+  "CreateDCFromHandle",
+  "CreateCompatibleDC",
+  "CreateBitmap",
+  "CreateCompatibleBitmap",
+  "SelectObject",
+  "BitBlt",
+  "win32con",
+  "SRCCOPY",
+  "GetInfo",
+  "GetBitmapBits",
+  [
+    true
+  ],
+  "np",
+  "frombuffer",
+  "uint8",
+  [
+    "dtype"
+  ],
+  "bmHeight",
+  "bmWidth",
+  4,
+  "shape",
+  "cv2",
+  "cvtColor",
+  "COLOR_BGRA2BGR",
+  "DeleteObject",
+  "GetHandle",
+  "DeleteDC",
+  "ReleaseDC",
+  "Ошибка захвата: ",
+  "Захватить скриншот окна",
+  "GetWindowRect",
+  2,
+  3,
+  "win32api",
+  "GetCursorPos",
+  "pydirectinput",
+  "moveTo",
+  "time",
+  "sleep",
+  [
+    0.05
+  ],
+  "click",
+  "DOUBLE_CLICK_DELAY",
+  "Ошибка двойного клика: ",
+  "Выполнить двойной клик в указанных координатах окна",
+  "WindowCapture",
+  [
+    "gta5.exe"
+  ],
+  "capture",
+  "resolution",
+  "inventory_roi",
+  "food_check_roi",
+  "thirst_check_roi",
+  "templates",
+  "get_fishing_resources",
+  "meal",
+  "resources_path",
+  [
+    "Поиск окна GTA5..."
+  ],
+  "find_window_by_process",
+  [
+    "❌ Окно GTA5 не найдено!"
+  ],
+  "get_window_size",
+  "Размер окна: ",
+  "x",
+  1920,
+  1080,
+  "FULLHD",
+  "INVENTORY_ROI_FULLHD",
+  "FOOD_CHECK_ROI_FULLHD",
+  "THIRST_CHECK_ROI_FULLHD",
+  "template_suffix",
+  [
+    "✓ Определено разрешение: FullHD (1920x1080)"
+  ],
+  2560,
+  1440,
+  "2K",
+  "INVENTORY_ROI_2K",
+  "FOOD_CHECK_ROI_2K",
+  "THIRST_CHECK_ROI_2K",
+  "2k",
+  [
+    "✓ Определено разрешение: 2K (2560x1440)"
+  ],
+  "❌ Неподдерживаемое разрешение: ",
+  [
+    "Поддерживаются только: 1920x1080 (FullHD) и 2560x1440 (2K)"
+  ],
+  "load_templates",
+  "Инициализация системы",
+  "❌ Папка с шаблонами не найдена: ",
+  "Загрузка шаблонов из: ",
+  {
+    "__dict_items__": [
+      [
+        "irp",
+        "irp.png"
+      ],
+      [
+        "donut",
+        "donut.png"
+      ],
+      [
+        "cocktail",
+        "cocktail.png"
+      ],
+      [
+        "full_indicator",
+        "100%.png"
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "irp",
+        "irp2k.png"
+      ],
+      [
+        "donut",
+        "donut2k.png"
+      ],
+      [
+        "cocktail",
+        "cocktail2k.png"
+      ],
+      [
+        "full_indicator",
+        "100%_2k.png"
+      ]
+    ]
+  },
+  "❌ Файл ",
+  " не найден!",
+  "imread",
+  "❌ Не удалось загрузить ",
+  "✓ Загружен шаблон ",
+  "Загрузить шаблоны изображений",
+  "y",
+  "height",
+  "width",
+  "matchTemplate",
+  "TM_CCOEFF_NORMED",
+  "minMaxLoc",
+  "CONFIDENCE_THRESHOLD",
+  {
+    "__slice__": [
+      null,
+      2,
+      null
+    ]
+  },
+  "\n        Найти шаблон на скриншоте\n        Возвращает (найдено, x_центр, y_центр, уверенность)\n        ",
+  "find_template",
+  "full_indicator",
+  "Проверить, заполнена ли шкала еды на 100%",
+  "Проверить, заполнена ли шкала жажды на 100%",
+  "\n        Найти предмет в инвентаре\n        Возвращает (найдено, x, y, уверенность)\n        ",
+  "   🍴 Употребление ",
+  "...",
+  "   Двойной клик по позиции: (",
+  ", ",
+  ")",
+  "double_click_at",
+  "   ❌ Не удалось кликнуть по ",
+  "   ⏳ Ожидание ",
+  "CONSUMPTION_WAIT",
+  " секунд...",
+  "Употребить предмет двойным кликом",
+  [
+    "\n🔍 Поиск ИРП в инвентаре..."
+  ],
+  [
+    "❌ Не удалось сделать скриншот"
+  ],
+  "find_item_in_inventory",
+  "irp",
+  "✓ ИРП найден! (уверенность: ",
+  ".2f",
+  "consume_item",
+  "ИРП",
+  [
+    "✅ ИРП употреблен! Еда и жажда: 100%"
+  ],
+  "❌ ИРП не найден (уверенность: ",
+  "Найти и употребить ИРП (одноразово, дает 100%)",
+  [
+    "\n🍩 Начинаем употребление пончиков..."
+  ],
+  "check_food_full",
+  "✅ Еда: 100%! Употреблено пончиков: ",
+  "consumed_count",
+  "donut",
+  "⚠️ Пончики закончились в инвентаре (употреблено: ",
+  "[",
+  "] Пончик найден (уверенность: ",
+  "пончик",
+  [
+    "❌ Не удалось употребить пончик"
+  ],
+  "Употреблять пончики пока еда не станет 100%",
+  [
+    "\n🍹 Начинаем употребление коктейлей..."
+  ],
+  "check_thirst_full",
+  "✅ Жажда: 100%! Употреблено коктейлей: ",
+  "cocktail",
+  "⚠️ Коктейли закончились в инвентаре (употреблено: ",
+  "] Коктейль найден (уверенность: ",
+  "коктейль",
+  [
+    "❌ Не удалось употребить коктейль"
+  ],
+  "Употреблять коктейли пока жажда не станет 100%",
+  "initialize",
+  [
+    "\n======================================================================"
+  ],
+  [
+    "АВТОМАТИЧЕСКАЯ СИСТЕМА ПИТАНИЯ"
+  ],
+  [
+    "======================================================================"
+  ],
+  "Разрешение: ",
+  "Инвентарь ROI: X=",
+  ", Y=",
+  ", W=",
+  ", H=",
+  [
+    "\nПриоритет:"
+  ],
+  [
+    "  1. ИРП (одноразово, дает 100% еды и жажды)"
+  ],
+  [
+    "  2. Пончик (пока еда не 100%)"
+  ],
+  [
+    "  3. Коктейль (пока жажда не 100%)"
+  ],
+  [
+    "======================================================================\n"
+  ],
+  "consume_irp",
+  [
+    "✅ ЗАВЕРШЕНО: ИРП употреблен, еда и жажда 100%"
+  ],
+  [
+    "\n📋 ИРП не найден, переходим к пончикам и коктейлям"
+  ],
+  [
+    "❌ ОСТАНОВКА: Ничего не найдено в инвентаре"
+  ],
+  "consume_donuts_until_full",
+  "consume_cocktails_until_full",
+  [
+    "ЗАВЕРШЕНО"
+  ],
+  "Еда: ",
+  "✅ 100%",
+  "❌ Не достигнута 100%",
+  "Жажда: ",
+  [
+    "\n✅ Успех! Еда и жажда на 100%"
+  ],
+  [
+    "\n⚠️ Предметы закончились до достижения 100%"
+  ],
+  [
+    "\n⚠️ Не все показатели достигли 100%"
+  ],
+  [
+    "\n\n======================================================================"
+  ],
+  [
+    "ПРОГРАММА ОСТАНОВЛЕНА ПОЛЬЗОВАТЕЛЕМ"
+  ],
+  "Основной процесс управления едой и напитками",
+  [
+    "\n╔══════════════════════════════════════════════════════════════════╗\n║     GTA5 MEAL SYSTEM - АВТОМАТИЧЕСКОЕ ПИТАНИЕ                   ║\n╚══════════════════════════════════════════════════════════════════╝\n    "
+  ],
+  "MealSystem",
+  "run",
+  "Точка входа",
+  "\nGTA5 Meal System - Автоматическое употребление еды и напитков\nУправляет сытостью и жаждой персонажа\n",
+  "origin",
+  "has_location",
+  "numpy",
+  "sys",
+  "os",
+  "pathlib",
+  [
+    "Path"
+  ],
+  "Path",
+  "path_utils",
+  [
+    "get_fishing_resources"
+  ],
+  {
+    "__dict_items__": [
+      [
+        "x",
+        1077
+      ],
+      [
+        "y",
+        90
+      ],
+      [
+        "width",
+        538
+      ],
+      [
+        "height",
+        986
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "x",
+        1436
+      ],
+      [
+        "y",
+        99
+      ],
+      [
+        "width",
+        717
+      ],
+      [
+        "height",
+        1341
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "x",
+        1106
+      ],
+      [
+        "y",
+        482
+      ],
+      [
+        "width",
+        53
+      ],
+      [
+        "height",
+        22
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "x",
+        1472
+      ],
+      [
+        "y",
+        641
+      ],
+      [
+        "width",
+        72
+      ],
+      [
+        "height",
+        35
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "x",
+        1106
+      ],
+      [
+        "y",
+        507
+      ],
+      [
+        "width",
+        60
+      ],
+      [
+        "height",
+        26
+      ]
+    ]
+  },
+  {
+    "__dict_items__": [
+      [
+        "x",
+        1472
+      ],
+      [
+        "y",
+        676
+      ],
+      [
+        "width",
+        80
+      ],
+      [
+        "height",
+        35
+      ]
+    ]
+  },
+  0.75,
+  0.1,
+  10,
+  "workers.fishing.meal_system",
+  "Захват скриншотов окна по имени процесса",
+  "__qualname__",
+  {
+    "__dict_items__": [
+      [
+        "process_name",
+        {
+          "__builtin__": "str"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.__init__",
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.find_window_by_process",
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "tuple"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.get_window_size",
+  "return",
+  "ndarray",
+  "WindowCapture.capture",
+  {
+    "__dict_items__": [
+      [
+        "x",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "y",
+        {
+          "__builtin__": "int"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.double_click_at",
+  "Класс для автоматического управления едой и напитками",
+  "MealSystem.__init__",
+  "MealSystem.initialize",
+  "MealSystem.load_templates",
+  [
+    null
+  ],
+  "screenshot",
+  "template",
+  "roi",
+  "MealSystem.find_template",
+  "MealSystem.check_food_full",
+  "MealSystem.check_thirst_full",
+  "item_key",
+  "MealSystem.find_item_in_inventory",
+  {
+    "__dict_items__": [
+      [
+        "x",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "y",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "item_name",
+        {
+          "__builtin__": "str"
+        }
+      ],
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "MealSystem.consume_item",
+  "MealSystem.consume_irp",
+  "MealSystem.consume_donuts_until_full",
+  "MealSystem.consume_cocktails_until_full",
+  "MealSystem.run",
+  "main",
+  "workers\\fishing\\meal_system.py",
+  "<module workers.fishing.meal_system>",
+  [
+    "__class__"
+  ],
+  [
+    "self"
+  ],
+  [
+    "self",
+    "process_name"
+  ],
+  [
+    "hwnd",
+    "hwnds",
+    "_",
+    "pid",
+    "process",
+    "self"
+  ],
+  [
+    "self",
+    "left",
+    "top",
+    "right",
+    "bottom",
+    "width",
+    "height",
+    "hwndDC",
+    "mfcDC",
+    "saveDC",
+    "saveBitMap",
+    "bmpinfo",
+    "bmpstr",
+    "img",
+    "e"
+  ],
+  [
+    "self",
+    "screenshot",
+    "found",
+    "_",
+    "conf"
+  ],
+  [
+    "self",
+    "consumed_count",
+    "screenshot",
+    "found",
+    "x",
+    "y",
+    "conf"
+  ],
+  [
+    "self",
+    "screenshot",
+    "found",
+    "x",
+    "y",
+    "conf"
+  ],
+  [
+    "self",
+    "x",
+    "y",
+    "item_name"
+  ],
+  [
+    "self",
+    "x",
+    "y",
+    "rect",
+    "client_rect",
+    "border_x",
+    "border_y",
+    "screen_x",
+    "screen_y",
+    "win32api",
+    "original_pos",
+    "e"
+  ],
+  [
+    "self",
+    "screenshot",
+    "item_key"
+  ],
+  [
+    "self",
+    "screenshot",
+    "template",
+    "roi",
+    "search_area",
+    "result",
+    "min_val",
+    "max_val",
+    "min_loc",
+    "max_loc",
+    "h",
+    "w",
+    "center_x",
+    "center_y"
+  ],
+  [
+    "self",
+    "callback",
+    "hwnds",
+    "hwnd",
+    "title"
+  ],
+  [
+    "self",
+    "left",
+    "top",
+    "right",
+    "bottom"
+  ],
+  [
+    "self",
+    "width",
+    "height"
+  ],
+  [
+    "self",
+    "template_files",
+    "key",
+    "filename",
+    "file_path",
+    "template"
+  ],
+  [
+    "meal_system"
+  ],
+  [
+    "self",
+    "screenshot",
+    "has_donut",
+    "_",
+    "has_cocktail",
+    "food_full",
+    "thirst_full"
+  ]
+]

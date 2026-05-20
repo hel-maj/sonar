@@ -1,0 +1,54 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build output
+build/
+dist/
+*.egg-info/
+*.build/
+*.dist/
+*.onefile-build/
+
+# Local runtime config and secrets
+/config/*.json
+/config/*.enc
+/config/*.key
+/config/*.secret
+/config/*.local.*
+!/config/*.example.json
+
+# Runtime logs, captures, and generated data
+/logs/
+/debug_capture/
+/training_data/TEMP_DELETE_LATER*/
+
+# Reverse-engineering tool caches and binaries
+/01_reverse_engineering/_tools/ghidra_12.1_PUBLIC*/
+/01_reverse_engineering/_tools/*.zip
+/01_reverse_engineering/_tools/**/nuitka-extractor*.exe
+
+# Keep extracted reverse-engineering snapshots versioned.
+!/01_reverse_engineering/kortexworker.exe_extracted*/
+!/01_reverse_engineering/kortexworker.exe_extracted*/**

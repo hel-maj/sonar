@@ -1,0 +1,46 @@
+from sonar.config.models import FishingSettings, LicenseSettings, TelegramSettings
+
+
+def test_fishing_settings_merges_defaults():
+    settings = FishingSettings.from_dict({"fish_settings": {"albula": False}, "garbage_settings": {"bag": False}})
+
+    assert settings.fish_settings["albula"] is False
+    assert settings.fish_settings["marlin"] is True
+    assert settings.garbage_settings["bag"] is False
+    assert settings.garbage_settings["corn"] is True
+    assert settings.start_stop_sound_enabled is True
+
+
+def test_fishing_settings_accepts_start_stop_sound_toggle():
+    settings = FishingSettings.from_dict({"start_stop_sound_enabled": False})
+
+    assert settings.start_stop_sound_enabled is False
+
+
+def test_telegram_settings_accepts_comma_separated_ids():
+    settings = TelegramSettings.from_dict({"enabled": True, "admin_ids": "1, 2, bad"})
+
+    assert settings.enabled is True
+    assert settings.admin_ids == [1, 2]
+
+
+def test_license_settings_serializes_only_runtime_license_state():
+    settings = LicenseSettings.from_dict(
+        {
+            "server_url": "https://example.invalid",
+            "account_id": "account",
+            "license_key": "FA5B1-ABCDE-G2K34",
+            "license_id": "license-id",
+            "last_validated_at": "2026-05-19T10:00:00+00:00",
+            "expires_at": "2026-06-19T10:00:00+00:00",
+            "latest_version": "9.9.9",
+            "update_message": "not persisted",
+        }
+    )
+
+    assert settings.to_dict() == {
+        "license_key": "FA5B1-ABCDE-G2K34",
+        "license_id": "license-id",
+        "last_validated_at": "2026-05-19T10:00:00+00:00",
+        "expires_at": "2026-06-19T10:00:00+00:00",
+    }

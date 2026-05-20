@@ -1,0 +1,429 @@
+[
+  "license_client",
+  "setWindowFlags",
+  "Qt",
+  "WindowType",
+  "Dialog",
+  "MSWindowsFixedSizeDialogHint",
+  "setup_ui",
+  "\n        Args:\n            license_client: Экземпляр LicenseClient\n            parent: Родительский виджет\n        ",
+  "setWindowTitle",
+  [
+    "KortexWorker - Активация Лицензии"
+  ],
+  "setFixedSize",
+  [
+    550,
+    600
+  ],
+  "setStyleSheet",
+  "\n            QDialog {\n                background-color: ",
+  "BACKGROUND_COLOR",
+  ";\n            }\n            QLabel {\n                color: ",
+  "TEXT_COLOR",
+  ";\n            }\n            QLineEdit {\n                background-color: ",
+  "CARD_COLOR",
+  ";\n                border: 2px solid ",
+  "SIDEBAR_COLOR",
+  ";\n                border-radius: 12px;\n                padding: 14px 16px;\n                color: ",
+  ";\n                font-size: 15px;\n                font-family: 'Consolas', 'Courier New', monospace;\n                font-weight: 600;\n            }\n            QLineEdit:focus {\n                border-color: ",
+  "MAGENTA_COLOR",
+  ";\n            }\n            QPushButton {\n                background-color: ",
+  ";\n                color: ",
+  ";\n                border: none;\n                border-radius: 12px;\n                padding: 14px 24px;\n                font-size: 14px;\n                font-weight: 600;\n            }\n            QPushButton:hover {\n                background-color: #4A4A4C;\n            }\n            QPushButton:pressed {\n                background-color: #2A2A2C;\n            }\n            QPushButton:disabled {\n                background-color: #2A2A2C;\n                color: #5A5A5C;\n            }\n            QPushButton#activateButton {\n                background-color: ",
+  ";\n                color: white;\n            }\n            QPushButton#activateButton:hover {\n                background-color: #FF1A90;\n            }\n            QPushButton#activateButton:pressed {\n                background-color: #E00070;\n            }\n            QPushButton#closeButton {\n                background-color: ",
+  ";\n            }\n            QPushButton#closeButton:hover {\n                background-color: #2C2C2E;\n            }\n            QTextEdit {\n                background-color: ",
+  ";\n                border: 1px solid ",
+  ";\n                border-radius: 12px;\n                padding: 12px;\n                color: ",
+  ";\n                font-size: 12px;\n            }\n            QFrame#infoCard {\n                background-color: ",
+  ";\n                border-radius: 12px;\n                padding: 12px;\n            }\n        ",
+  "QVBoxLayout",
+  "setContentsMargins",
+  [
+    30,
+    30,
+    30,
+    30
+  ],
+  "setSpacing",
+  [
+    16
+  ],
+  "QLabel",
+  [
+    "🔒 Активация Лицензии"
+  ],
+  "\n            font-size: 26px;\n            font-weight: bold;\n            color: ",
+  ";\n            margin-bottom: 4px;\n        ",
+  "setAlignment",
+  "AlignmentFlag",
+  "AlignCenter",
+  "addWidget",
+  [
+    "Введите лицензионный ключ для активации"
+  ],
+  "\n            font-size: 13px;\n            color: ",
+  "TEXT_SECONDARY",
+  ";\n            margin-bottom: 12px;\n        ",
+  "setWordWrap",
+  [
+    true
+  ],
+  "addSpacing",
+  [
+    8
+  ],
+  "QFrame",
+  "setObjectName",
+  [
+    "infoCard"
+  ],
+  [
+    12,
+    10,
+    12,
+    10
+  ],
+  [
+    4
+  ],
+  "get_hwid",
+  [
+    "ID устройства"
+  ],
+  "font-size: 11px; color: ",
+  "; font-weight: 600;",
+  {
+    "__slice__": [
+      null,
+      32,
+      null
+    ]
+  },
+  "...",
+  "font-size: 10px; color: ",
+  "; font-family: 'Consolas';",
+  "setTextInteractionFlags",
+  "TextInteractionFlag",
+  "TextSelectableByMouse",
+  [
+    "Лицензионный ключ"
+  ],
+  [
+    "font-size: 14px; font-weight: 600; margin-top: 4px;"
+  ],
+  "QLineEdit",
+  "key_input",
+  "setPlaceholderText",
+  [
+    "XXXX-XXXX-XXXX-XXXX"
+  ],
+  "setMaxLength",
+  [
+    19
+  ],
+  "textChanged",
+  "connect",
+  "_format_key_input",
+  "returnPressed",
+  "_on_activate_clicked",
+  "QTextEdit",
+  "status_text",
+  "setReadOnly",
+  "setMaximumHeight",
+  [
+    80
+  ],
+  [
+    "Статус активации..."
+  ],
+  "QHBoxLayout",
+  [
+    12
+  ],
+  "QPushButton",
+  [
+    "✓ Активировать"
+  ],
+  "activate_button",
+  [
+    "activateButton"
+  ],
+  "clicked",
+  "setMinimumHeight",
+  [
+    48
+  ],
+  [
+    "✕ Закрыть"
+  ],
+  "close_button",
+  [
+    "closeButton"
+  ],
+  "reject",
+  "addLayout",
+  [
+    16,
+    12,
+    16,
+    12
+  ],
+  [
+    10
+  ],
+  [
+    "🛒 Приобрести лицензию"
+  ],
+  "font-size: 13px; font-weight: 600; color: ",
+  ";",
+  [
+    "📱 Telegram:"
+  ],
+  "font-size: 12px; color: ",
+  "; min-width: 90px;",
+  [
+    "@kortexm"
+  ],
+  "\n            QPushButton {\n                background-color: transparent;\n                color: ",
+  ";\n                text-decoration: underline;\n                text-align: left;\n                padding: 0;\n                border: none;\n                font-size: 12px;\n                font-weight: 600;\n            }\n            QPushButton:hover {\n                color: #FF1A90;\n            }\n        ",
+  "setCursor",
+  "CursorShape",
+  "PointingHandCursor",
+  "<lambda>",
+  "ActivationDialog.setup_ui.<locals>.<lambda>",
+  "addStretch",
+  [
+    "💳 FunPay:"
+  ],
+  [
+    "Купить ключ"
+  ],
+  "QTimer",
+  "singleShot",
+  100,
+  "Настроить интерфейс",
+  "self",
+  "_open_url",
+  [
+    "https://t.me/kortexm"
+  ],
+  [
+    "https://funpay.com/users/8394144/"
+  ],
+  "setFocus",
+  "-",
+  4,
+  "cursorPosition",
+  "blockSignals",
+  "setText",
+  [
+    false
+  ],
+  "setCursorPosition",
+  "min",
+  "Форматировать ввод ключа с дефисами",
+  "isalnum",
+  "upper",
+  "<genexpr>",
+  "ActivationDialog._format_key_input.<locals>.<genexpr>",
+  "cleaned",
+  "text",
+  "replace",
+  [
+    "-",
+    ""
+  ],
+  "strip",
+  "_show_status",
+  [
+    "❌ Ключ должен содержать 16 символов",
+    "error"
+  ],
+  [
+    "⏳ Активация лицензии...",
+    "info"
+  ],
+  "setEnabled",
+  "ActivationDialog._on_activate_clicked.<locals>.<lambda>",
+  "Обработка нажатия кнопки активации",
+  "_do_activation",
+  "key",
+  "activate",
+  "✓ ",
+  "success",
+  "license_activated",
+  "emit",
+  1500,
+  "accept",
+  "❌ ",
+  "error",
+  "logger",
+  "Activation error: ",
+  "❌ Ошибка: ",
+  "Выполнить активацию",
+  "info",
+  "#00FF88",
+  "#FF4444",
+  "<p style=\"color: ",
+  "; font-weight: 600; margin: 4px 0;\">",
+  "</p>",
+  "append",
+  "verticalScrollBar",
+  "setValue",
+  "maximum",
+  "Показать статус",
+  "QDesktopServices",
+  "openUrl",
+  "QUrl",
+  "Opening URL: ",
+  "Открыть URL в браузере",
+  "\nДиалог активации лицензии для KortexWorker\nВ стиле основного приложения (серый + маджента)\n",
+  "origin",
+  "has_location",
+  "sys",
+  "logging",
+  "PyQt6.QtWidgets",
+  [
+    "QDialog",
+    "QVBoxLayout",
+    "QHBoxLayout",
+    "QLabel",
+    "QLineEdit",
+    "QPushButton",
+    "QTextEdit",
+    "QFrame",
+    "QApplication"
+  ],
+  "QDialog",
+  "QApplication",
+  "PyQt6.QtCore",
+  [
+    "Qt",
+    "QTimer",
+    "pyqtSignal",
+    "QUrl"
+  ],
+  "pyqtSignal",
+  "PyQt6.QtGui",
+  [
+    "QFont",
+    "QDesktopServices"
+  ],
+  "QFont",
+  "getLogger",
+  [
+    "ActivationDialog"
+  ],
+  "#2C2C2E",
+  "#1C1C1E",
+  "#3A3A3C",
+  "#FFFFFF",
+  "#FF0080",
+  "#8E8E93",
+  "__prepare__",
+  "ActivationDialog",
+  "__getitem__",
+  "%s.__prepare__() must return a mapping, not %s",
+  "<metaclass>",
+  "license.activation_dialog",
+  "Диалог активации лицензии",
+  "__qualname__",
+  "str",
+  [
+    null
+  ],
+  "ActivationDialog.__init__",
+  "ActivationDialog.setup_ui",
+  "ActivationDialog._format_key_input",
+  "ActivationDialog._on_activate_clicked",
+  "ActivationDialog._do_activation",
+  [
+    "info"
+  ],
+  "message",
+  "status_type",
+  "ActivationDialog._show_status",
+  "url",
+  "ActivationDialog._open_url",
+  "__orig_bases__",
+  "license\\activation_dialog.py",
+  [
+    ".0",
+    "c"
+  ],
+  [
+    ".0",
+    "i",
+    "cleaned"
+  ],
+  [
+    "self",
+    "key"
+  ],
+  [
+    "key",
+    "self"
+  ],
+  [
+    "self"
+  ],
+  "<module license.activation_dialog>",
+  [
+    "__class__"
+  ],
+  [
+    "self",
+    "license_client",
+    "parent",
+    "__class__"
+  ],
+  [
+    "self",
+    "key",
+    "success",
+    "message",
+    "e"
+  ],
+  [
+    "self",
+    "text",
+    "cleaned",
+    "formatted",
+    "cursor_pos"
+  ],
+  [
+    "self",
+    "url"
+  ],
+  [
+    "self",
+    "message",
+    "status_type",
+    "color",
+    "html",
+    "scrollbar"
+  ],
+  [
+    "self",
+    "main_layout",
+    "title_label",
+    "subtitle_label",
+    "hwid_card",
+    "hwid_layout",
+    "hwid",
+    "hwid_title",
+    "hwid_value",
+    "key_label",
+    "button_layout",
+    "links_card",
+    "links_layout",
+    "links_title",
+    "tg_layout",
+    "tg_label",
+    "tg_link",
+    "fp_layout",
+    "fp_label",
+    "fp_link"
+  ]
+]

@@ -1,0 +1,1 @@
+"""Fishing automation modules."""

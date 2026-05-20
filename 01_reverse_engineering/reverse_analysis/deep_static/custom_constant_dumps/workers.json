@@ -1,0 +1,13 @@
+[
+  "\nWorkers - Fishing Bot Package\n",
+  "environ",
+  [
+    "NUITKA_PACKAGE_workers",
+    "\\not_existing"
+  ],
+  "origin",
+  "has_location",
+  "submodule_search_locations",
+  "workers\\__init__.py",
+  "<module workers>"
+]

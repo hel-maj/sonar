@@ -1,0 +1,11 @@
+[
+  {
+    "type": 10,
+    "id": 3,
+    "lang": 0,
+    "rva": "0x4bd57fc",
+    "size": 16539077,
+    "sha256": "b609dc80e0e49f59604835707f1777fd37404df8cd03c19145f61e700aaa4464",
+    "path": "P:\\projects\\Majestic\\Sonar\\01_reverse_engineering\\reverse_analysis\\deep_static\\pe_resource_type_10_id_3_lang_0.bin"
+  }
+]

@@ -1,0 +1,502 @@
+[
+  "process_name",
+  "hwnd",
+  "callback",
+  "WindowCapture.find_window_by_process.<locals>.callback",
+  "win32gui",
+  "EnumWindows",
+  "self",
+  "Найти дескриптор окна по имени процесса",
+  "IsWindowVisible",
+  "win32process",
+  "GetWindowThreadProcessId",
+  "psutil",
+  "Process",
+  "append",
+  "GetWindowText",
+  "IsWindow",
+  [
+    0,
+    0
+  ],
+  "GetClientRect",
+  "Получить ширину и высоту окна",
+  "GetWindowDC",
+  "win32ui",
+  "CreateDCFromHandle",
+  "CreateCompatibleDC",
+  "CreateBitmap",
+  "CreateCompatibleBitmap",
+  "SelectObject",
+  "BitBlt",
+  "win32con",
+  "SRCCOPY",
+  "GetInfo",
+  "GetBitmapBits",
+  [
+    true
+  ],
+  "np",
+  "frombuffer",
+  "uint8",
+  [
+    "dtype"
+  ],
+  "bmHeight",
+  "bmWidth",
+  4,
+  "shape",
+  "cv2",
+  "cvtColor",
+  "COLOR_BGRA2BGR",
+  "DeleteObject",
+  "GetHandle",
+  "DeleteDC",
+  "ReleaseDC",
+  "Захватить скриншот окна",
+  "roi1",
+  "roi2",
+  "resolution_type",
+  "paused_until",
+  "pydirectinput",
+  "PAUSE",
+  "FAILSAFE",
+  "red_template",
+  "bubles_template",
+  "load_templates",
+  "frame_count",
+  "time",
+  "fps_start_time",
+  "current_fps",
+  "2K",
+  "imread",
+  "RED_TEMPLATE_2K",
+  "IMREAD_COLOR",
+  "BUBLES_TEMPLATE_2K",
+  [
+    "[OK] Загружены шаблоны 2K"
+  ],
+  "RED_TEMPLATE_HD",
+  "BUBLES_TEMPLATE_HD",
+  [
+    "[OK] Загружены шаблоны HD"
+  ],
+  [
+    "[!] ПРЕДУПРЕЖДЕНИЕ: Не удалось загрузить red шаблон"
+  ],
+  "[OK] Red шаблон: ",
+  [
+    "[!] ПРЕДУПРЕЖДЕНИЕ: Не удалось загрузить bubles шаблон"
+  ],
+  "[OK] Bubles шаблон: ",
+  "[!] ОШИБКА загрузки шаблонов: ",
+  "Загрузить шаблоны в зависимости от разрешения",
+  [
+    0.0,
+    false
+  ],
+  "matchTemplate",
+  "TM_CCOEFF_NORMED",
+  "minMaxLoc",
+  "TEMPLATE_THRESHOLD",
+  "Поиск шаблона в ROI",
+  "match_template",
+  "press",
+  [
+    "space"
+  ],
+  30.0,
+  "RED",
+  "BUBLES",
+  "\n        Нажать пробел когда найдены red или bubles шаблоны - МГНОВЕННЫЙ ответ\n        ОДНО нажатие на детекцию, затем пауза 30 сек\n        Возвращает: (red_confidence, bubles_confidence, red_detected, bubles_detected, pressed, trigger_reason, fps, paused)\n        ",
+  1920,
+  1080,
+  "FullHD (1920x1080)",
+  "ROI1_FULLHD",
+  "ROI2_FULLHD",
+  "HD",
+  2560,
+  1440,
+  "2K (2560x1440)",
+  "ROI1_2K",
+  "ROI2_2K",
+  2200,
+  "Пользовательское (",
+  "x",
+  ") - используется FullHD ROI",
+  ") - используется 2K ROI",
+  "Определить разрешение и вернуть соответствующие ROI и тип разрешения",
+  [
+    "\n======================================================================"
+  ],
+  [
+    "GTA5 TEMPLATE MATCHING MONITOR - ПОИСК ШАБЛОНОВ RED И BUBLES"
+  ],
+  [
+    "======================================================================\n"
+  ],
+  [
+    "Поиск окна GTA5 (gta5.exe)..."
+  ],
+  "WindowCapture",
+  [
+    "gta5.exe"
+  ],
+  "find_window_by_process",
+  [
+    "[X] ОШИБКА: gta5.exe не найден!"
+  ],
+  [
+    "    Убедитесь, что GTA 5 запущена."
+  ],
+  "\nНажмите Enter для выхода...",
+  [
+    "[OK] Окно GTA5 найдено!\n"
+  ],
+  "get_window_size",
+  "detect_resolution",
+  "[OK] Разрешение определено: ",
+  "[OK] ROI 1 (Red шаблон): X=",
+  ", Y=",
+  ", W=",
+  2,
+  ", H=",
+  3,
+  "[OK] ROI 2 (Bubles шаблон): X=",
+  "\n",
+  "TemplateMonitor",
+  [
+    "======================================================================"
+  ],
+  [
+    "МОНИТОРИНГ ЗАПУЩЕН - РЕЖИМ ПОИСКА ШАБЛОНОВ"
+  ],
+  [
+    "🚀 TEMPLATE MATCHING - ДВА РЕЖИМА ДЕТЕКЦИИ!"
+  ],
+  "⚡ Регион 1: Поиск red.png/red_2k.png (порог: ",
+  ")",
+  "⚡ Регион 2: Поиск bubles.png/bubles_2k.png (порог: ",
+  [
+    "⚡ ОДНО нажатие на детекцию, затем пауза 30 сек"
+  ],
+  [
+    "⚡ Независимая детекция - МГНОВЕННЫЙ ОТВЕТ"
+  ],
+  [
+    "R=Red confidence, B=Bubles confidence, FPS=Кадров в секунду"
+  ],
+  [
+    "Нажмите Ctrl+C для остановки"
+  ],
+  "capture",
+  [
+    "\r[!] Потеряно соединение с окном",
+    "",
+    true
+  ],
+  [
+    "end",
+    "flush"
+  ],
+  "sleep",
+  [
+    1
+  ],
+  "monitor",
+  "check_and_act",
+  "strftime",
+  [
+    "%H:%M:%S"
+  ],
+  "[",
+  "] ⏸ ПАУЗА (",
+  "с осталось) FPS:",
+  ".1f",
+  "     ",
+  "\r",
+  {
+    "__dict_items__": [
+      [
+        "end",
+        ""
+      ],
+      [
+        "flush",
+        true
+      ]
+    ]
+  },
+  "[RED]",
+  "[BUBLES]",
+  "] R:",
+  ".2f",
+  " B:",
+  " ",
+  " FPS:",
+  " -> ",
+  " -> SPACE!",
+  " | Мониторинг...          ",
+  [
+    "\n\n[!] Прервано пользователем"
+  ],
+  [
+    "Мониторинг остановлен"
+  ],
+  "Точка входа",
+  "\nGTA5 Template Matching Monitor - Монитор поиска шаблонов\nРегион 1: Отслеживает появление red.png/red_2k.png и мгновенно нажимает Space\nРегион 2: Отслеживает появление bubles.png/bubles_2k.png и мгновенно нажимает Space\n",
+  "origin",
+  "has_location",
+  "numpy",
+  "sys",
+  "os",
+  "path_utils",
+  [
+    "get_templates_dir"
+  ],
+  "get_templates_dir",
+  [
+    1370,
+    982,
+    134,
+    15
+  ],
+  [
+    1828,
+    1312,
+    171,
+    16
+  ],
+  [
+    1361,
+    861,
+    56,
+    55
+  ],
+  [
+    1817,
+    1148,
+    71,
+    71
+  ],
+  0.85,
+  [
+    "triger"
+  ],
+  "RESOURCES_DIR",
+  "join",
+  "red.png",
+  "red_2k.png",
+  "bubles.png",
+  "bubles_2k.png",
+  "workers.fishing.hooking",
+  "Захват скриншотов окна по имени процесса",
+  "__qualname__",
+  {
+    "__dict_items__": [
+      [
+        "process_name",
+        {
+          "__builtin__": "str"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.__init__",
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "bool"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.find_window_by_process",
+  {
+    "__dict_items__": [
+      [
+        "return",
+        {
+          "__builtin__": "tuple"
+        }
+      ]
+    ]
+  },
+  "WindowCapture.get_window_size",
+  "return",
+  "ndarray",
+  "WindowCapture.capture",
+  "Отслеживает два региона: поиск red.png/red_2k.png и bubles.png/bubles_2k.png",
+  {
+    "__dict_items__": [
+      [
+        "roi1",
+        {
+          "__builtin__": "tuple"
+        }
+      ],
+      [
+        "roi2",
+        {
+          "__builtin__": "tuple"
+        }
+      ],
+      [
+        "resolution_type",
+        {
+          "__builtin__": "str"
+        }
+      ]
+    ]
+  },
+  "TemplateMonitor.__init__",
+  "TemplateMonitor.load_templates",
+  "frame",
+  "template",
+  "roi",
+  "TemplateMonitor.match_template",
+  "TemplateMonitor.check_and_act",
+  {
+    "__dict_items__": [
+      [
+        "width",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "height",
+        {
+          "__builtin__": "int"
+        }
+      ],
+      [
+        "return",
+        {
+          "__builtin__": "tuple"
+        }
+      ]
+    ]
+  },
+  "main",
+  "workers\\fishing\\hooking.py",
+  "<module workers.fishing.hooking>",
+  [
+    "__class__"
+  ],
+  [
+    "self",
+    "roi1",
+    "roi2",
+    "resolution_type"
+  ],
+  [
+    "self",
+    "process_name"
+  ],
+  [
+    "hwnd",
+    "hwnds",
+    "_",
+    "pid",
+    "process",
+    "self"
+  ],
+  [
+    "self"
+  ],
+  [
+    "self",
+    "left",
+    "top",
+    "right",
+    "bottom",
+    "width",
+    "height",
+    "hwndDC",
+    "mfcDC",
+    "saveDC",
+    "saveBitMap",
+    "bmpinfo",
+    "bmpstr",
+    "img",
+    "e"
+  ],
+  [
+    "self",
+    "frame",
+    "current_time",
+    "elapsed",
+    "remaining",
+    "red_confidence",
+    "red_detected",
+    "bubles_confidence",
+    "bubles_detected",
+    "pressed",
+    "trigger_reason"
+  ],
+  [
+    "width",
+    "height"
+  ],
+  [
+    "self",
+    "callback",
+    "hwnds",
+    "hwnd",
+    "title"
+  ],
+  [
+    "self",
+    "left",
+    "top",
+    "right",
+    "bottom"
+  ],
+  [
+    "self",
+    "e"
+  ],
+  [
+    "capture",
+    "width",
+    "height",
+    "resolution_name",
+    "roi1",
+    "roi2",
+    "resolution_type",
+    "monitor",
+    "frame",
+    "red_conf",
+    "bubles_conf",
+    "red_detected",
+    "bubles_detected",
+    "pressed",
+    "trigger_reason",
+    "fps",
+    "paused_remaining",
+    "timestamp",
+    "status",
+    "red_status",
+    "bubles_status"
+  ],
+  [
+    "self",
+    "frame",
+    "template",
+    "roi",
+    "x",
+    "y",
+    "w",
+    "h",
+    "roi_frame",
+    "result",
+    "min_val",
+    "max_val",
+    "min_loc",
+    "max_loc",
+    "pattern_detected"
+  ]
+]
