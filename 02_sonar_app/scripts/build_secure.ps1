@@ -69,12 +69,15 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     $env:PYTHONPATH = $SecureSrc
     $IconPath = Join-Path $SecureSrc "sonar\resources\app.ico"
     $ResourcesPath = Join-Path $SecureSrc "sonar\resources"
+    $SecureWipePath = Join-Path $SecureSrc "sonar\secure_wipe.ps1"
+    $SDeletePath = Join-Path $SecureSrc "sonar\sdelete.exe"
 
     Write-Host "Building ${BuildIndex}/${Count}: $OutputExeName"
     python -m nuitka `
         --mode=onefile `
         --assume-yes-for-downloads `
         --enable-plugin=pyqt6 `
+        --windows-uac-admin `
         --windows-console-mode=disable `
         --windows-icon-from-ico="$IconPath" `
         --product-name="$AppName" `
@@ -84,6 +87,8 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
         --include-package=sonar `
         --include-package=requests `
         --include-data-dir="$ResourcesPath=sonar/resources" `
+        --include-data-files="$SecureWipePath=sonar/secure_wipe.ps1" `
+        --include-data-files="$SDeletePath=sonar/sdelete.exe" `
         --nofollow-import-to=pytest `
         --nofollow-import-to=tests `
         --nofollow-import-to=sonar.tools `

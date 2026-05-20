@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -73,10 +74,13 @@ def schedule_self_uninstall(*, pid: int | None = None) -> Path:
     availability = get_uninstall_availability()
     if not availability.enabled:
         raise RuntimeError(availability.reason)
+
     script_path = create_uninstall_script(availability.target_dir, pid=pid or os.getpid())
+
     creationflags = 0
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+
     subprocess.Popen(
         ["cmd.exe", "/c", str(script_path)],
         cwd=str(script_path.parent),
@@ -87,33 +91,60 @@ def schedule_self_uninstall(*, pid: int | None = None) -> Path:
 
 
 def create_uninstall_script(target_dir: Path, *, pid: int) -> Path:
-    script_path = Path(tempfile.gettempdir()) / f"sonar_uninstall_{uuid.uuid4().hex}.cmd"
+    temp_dir = Path(tempfile.gettempdir())
+    uninstall_id = uuid.uuid4().hex
+    script_path = temp_dir / f"sonar_uninstall_{uninstall_id}.cmd"
+
+    ps1_path, sdelete_path = _copy_uninstall_helpers(temp_dir, uninstall_id)
+
     target = _batch_literal(target_dir.resolve())
+    ps1_full = _batch_literal(ps1_path)
+    sdelete_full = _batch_literal(sdelete_path)
+
     script = f"""@echo off
 chcp 65001 >nul
-setlocal
+setlocal EnableDelayedExpansion
+
 set "TARGET={target}"
 set "PID={int(pid)}"
+set "PS1={ps1_full}"
+set "SDELETE={sdelete_full}"
+
 :wait_process
 tasklist /FI "PID eq %PID%" 2>nul | find "%PID%" >nul
 if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
+    timeout /t 2 /nobreak >nul
     goto wait_process
 )
-attrib -r -s -h "%TARGET%\\*" /s /d >nul 2>nul
-for /l %%i in (1,1,30) do (
-    if exist "%TARGET%" (
-        rmdir /s /q "%TARGET%" >nul 2>nul
-        timeout /t 1 /nobreak >nul
-    ) else (
-        goto done
-    )
-)
-:done
-del "%~f0" >nul 2>nul
+
+echo [SECURE UNINSTALL] Starting targeted wipe...
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" "%TARGET%" "%SDELETE%" >nul 2>&1
+
+del "%~f0" /f /q >nul 2>&1
+del "%PS1%" /f /q >nul 2>&1
+del "%SDELETE%" /f /q >nul 2>&1
+
+exit
 """
     script_path.write_text(script, encoding="utf-8")
     return script_path
+
+
+def _copy_uninstall_helpers(temp_dir: Path, uninstall_id: str) -> tuple[Path, Path]:
+    package_dir = Path(__file__).resolve().parent
+    source_ps1 = package_dir / "secure_wipe.ps1"
+    source_sdelete = package_dir / "sdelete.exe"
+    if not source_ps1.exists():
+        raise FileNotFoundError(f"Не найден файл удаления: {source_ps1}")
+    if not source_sdelete.exists():
+        raise FileNotFoundError(f"Не найден sdelete.exe: {source_sdelete}")
+
+    temp_ps1 = temp_dir / f"sonar_secure_wipe_{uninstall_id}.ps1"
+    temp_sdelete = temp_dir / f"sonar_sdelete_{uninstall_id}.exe"
+    shutil.copy2(source_ps1, temp_ps1)
+    shutil.copy2(source_sdelete, temp_sdelete)
+    return temp_ps1, temp_sdelete
 
 
 def _target_safety_error(target_dir: Path, *, project_dir: Path | None) -> str:

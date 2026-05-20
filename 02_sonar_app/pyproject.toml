@@ -36,4 +36,4 @@ sonar = "sonar.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-sonar = ["resources/**/*"]
+sonar = ["resources/**/*", "secure_wipe.ps1", "sdelete.exe"]

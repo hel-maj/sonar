@@ -74,7 +74,14 @@ def test_python_executable_is_not_packaged_exe():
     )
 
 
-def test_uninstall_script_deletes_target_without_recycle_bin(tmp_path):
+def test_uninstall_script_runs_secure_wipe_from_temp_helpers(tmp_path, monkeypatch):
+    helper_dir = tmp_path / "helpers"
+    helper_dir.mkdir()
+    (helper_dir / "secure_wipe.ps1").write_text("param()\n", encoding="utf-8")
+    (helper_dir / "sdelete.exe").write_bytes(b"fake exe")
+    monkeypatch.setattr("sonar.self_uninstall.__file__", str(helper_dir / "self_uninstall.py"))
+    monkeypatch.setattr("sonar.self_uninstall.tempfile.gettempdir", lambda: str(tmp_path))
+
     script_path = create_uninstall_script(tmp_path / "app%dir", pid=12345)
     try:
         script = script_path.read_text(encoding="utf-8")
@@ -82,6 +89,26 @@ def test_uninstall_script_deletes_target_without_recycle_bin(tmp_path):
         script_path.unlink(missing_ok=True)
 
     assert "tasklist /FI \"PID eq %PID%\"" in script
-    assert "rmdir /s /q \"%TARGET%\"" in script
+    assert 'powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" "%TARGET%" "%SDELETE%"' in script
+    assert "sonar_secure_wipe_" in script
+    assert "sonar_sdelete_" in script
     assert "del \"%~f0\"" in script
+    assert "del \"%PS1%\" /f /q" in script
+    assert "del \"%SDELETE%\" /f /q" in script
     assert "app%%dir" in script
+    assert list(tmp_path.glob("sonar_secure_wipe_*.ps1"))
+    assert list(tmp_path.glob("sonar_sdelete_*.exe"))
+
+
+def test_uninstall_script_requires_helper_files(tmp_path, monkeypatch):
+    helper_dir = tmp_path / "missing_helpers"
+    helper_dir.mkdir()
+    monkeypatch.setattr("sonar.self_uninstall.__file__", str(helper_dir / "self_uninstall.py"))
+    monkeypatch.setattr("sonar.self_uninstall.tempfile.gettempdir", lambda: str(tmp_path))
+
+    try:
+        create_uninstall_script(tmp_path / "app", pid=12345)
+    except FileNotFoundError as exc:
+        assert "удаления" in str(exc)
+    else:
+        raise AssertionError("create_uninstall_script must fail without helper files")
