@@ -38,6 +38,7 @@ from sonar.fishing.meal_system import MealSystem
 from sonar.fishing.memory_reeling import MemoryReelingTracker
 from sonar.fishing.statistics import FishingSessionStats, parse_fish_prices_from_markdown
 from sonar.fishing.store_fish import FishStorer
+from sonar.fishing.tackle_detection import TackleDetector, TackleScanResult, format_tackle_items
 from sonar.fishing.trigger_monitor import TriggerMonitor
 from sonar.telegram.notifier import NotificationManager
 from sonar.paths import APP_DIR, LOG_DIR, LOGS_ENABLED
@@ -59,6 +60,8 @@ AUTO_STOP_TIMEOUT_SECONDS = 40.0
 STOP_REASON_MANUAL = "вручную"
 STOP_REASON_START_FAILED = "не смог начать рыбалку в течение 40 секунд"
 STOP_REASON_NO_STAGE = "не в зоне рыбалки или не видно стадии рыбалки 40 секунд"
+STOP_REASON_WALKING_GUARD = "Сработала защита от ходьбы"
+STOP_REASON_TACKLE_UNREADABLE = "Не удалось прочитать снаряжение"
 REEL_CATCH_SCREEN_TIMEOUT_SECONDS = 3.0
 CATCH_SCREEN_CURRENT_TIMEOUT_SECONDS = 1.2
 CATCH_SCREEN_POLL_SECONDS = 0.05
@@ -68,11 +71,34 @@ RANDOM_DELAY_JITTER_SECONDS = 0.6
 TACKLE_ACTION_DELAY_SECONDS = 0.5
 CAST_GREEN_DETECTION_DELAY_SECONDS = 1.0
 FOCUS_STATE_CHECK_INTERVAL_SECONDS = 0.5
+REELING_WALKING_GUARD_INTERVAL_SECONDS = 0.5
+REELING_IDLE_RETURN_TIMEOUT_SECONDS = 2.0
+REELING_IDLE_RETURN_POLL_SECONDS = 0.1
 START_MENU_OPEN_DELAY_SECONDS = 0.65
 STORAGE_SELECTION_RETRY_SECONDS = 0.75
 STORAGE_SELECTION_GIVE_UP_SECONDS = 3.0
 STORAGE_SELECTION_CLICK_PAUSE_SECONDS = 0.58
 CAST_CONTROL_POLL_SECONDS = 0.001
+TACKLE_OBSCURED_INITIAL_WAIT_SECONDS = 6.0
+TACKLE_OBSCURED_RETRY_WAIT_SECONDS = 2.0
+TACKLE_OBSCURED_RETRIES = 3
+TACKLE_DEPLETION_CONFIRM_DELAY_SECONDS = 0.5
+TACKLE_DEPLETION_CONFIRM_ATTEMPTS = 2
+REELING_PROBLEM_ACTIONS = frozenset({"target_search", "position_unreadable", "memory_unavailable", "control_error"})
+REELING_KNOWN_INTERRUPTION_TRIGGERS = frozenset(
+    {
+        "ad",
+        "start2",
+        "wait_tension",
+        "start1",
+        "start",
+        "changed_bait",
+        "gear",
+        "pereves",
+        "thirst",
+        "hunger",
+    }
+)
 
 
 @dataclass
@@ -111,6 +137,7 @@ class FishingBot:
         self.meal_system = MealSystem(self.process_name, input_controller=self.input_controller)
         self.fish_storer = FishStorer(self.process_name, input_controller=self.input_controller)
         self.reeling_tracker = MemoryReelingTracker(self.process_name, input_controller=self.input_controller, log_callback=self._log)
+        self.tackle_detector = TackleDetector()
         self.casting_monitor: GreenPixelMonitor | None = None
         self.hooking_monitor: TemplateMonitor | None = None
         self._stop_event = threading.Event()
@@ -155,6 +182,9 @@ class FishingBot:
             stats_callback=self.session_stats.totals,
             stats_rows_callback=self.session_stats.rows,
             has_stats_callback=self.session_stats.has_catches,
+            tackle_callback=self.session_stats.tackle_items,
+            tackle_image_callback=self.session_stats.tackle_image_bytes,
+            tackle_scanned_at_callback=self.session_stats.tackle_scanned_at,
             screenshot_callback=self._capture_screenshot_bytes,
             focus_game_callback=self._force_focus_game,
             shutdown_game_callback=self._shutdown_game,
@@ -220,6 +250,7 @@ class FishingBot:
         self._start_attempt_since = None
         self._last_focus_state_check_at = 0.0
         self._focus_lost_notified = False
+        self.session_stats.clear_tackle_scan()
         self.session_stats.start_timer()
         self._brain_thread = threading.Thread(target=self._brain_loop, name="sonar-brain", daemon=True)
         self._brain_thread.start()
@@ -426,6 +457,7 @@ class FishingBot:
         self.reeling_tracker.start_control_loop()
         last_recognition_at = 0.0
         last_trigger_check_at = 0.0
+        last_walking_guard_at = 0.0
         last_action_log_at = 0.0
         seen_ad_stage = False
         started_at = time.time()
@@ -465,6 +497,10 @@ class FishingBot:
                         self._log("Вываживание: стадия закончилась")
                         break
             state = self.reeling_tracker.latest_state()
+            if seen_ad_stage and now - last_walking_guard_at >= REELING_WALKING_GUARD_INTERVAL_SECONDS:
+                last_walking_guard_at = now
+                if self._check_reeling_walking_guard(state.action):
+                    break
             if now - last_action_log_at >= 1.0:
                 details = f", distance={state.distance:.2f}" if state.distance is not None else ""
                 if state.move_val is not None:
@@ -495,6 +531,64 @@ class FishingBot:
         if fish_name:
             return fish_name, confidence
         return None, 0.0
+
+    def _check_reeling_walking_guard(self, reeling_action: str) -> bool:
+        if not self._should_stop_for_reeling_walking_guard(reeling_action):
+            return False
+        current_state = self._detect_reeling_interruption_state()
+        if current_state is not None:
+            self._log(f"Вываживание прервано: найдено состояние {current_state}")
+            return False
+        if self._try_return_to_fishing_from_idle():
+            return False
+        self._log(f"Автостоп: {STOP_REASON_WALKING_GUARD}")
+        self._stop_from_brain(STOP_REASON_WALKING_GUARD)
+        return True
+
+    def _should_stop_for_reeling_walking_guard(self, reeling_action: str) -> bool:
+        if reeling_action not in REELING_PROBLEM_ACTIONS:
+            return False
+        if "ad" in self._last_triggers:
+            return False
+        if self._has_pending_catch():
+            return False
+        return True
+
+    def _detect_reeling_interruption_state(self) -> str | None:
+        frame = self.capture.capture()
+        if self.game_menu_detector.is_open(frame):
+            return "меню игры"
+        if self.inventory_detector.is_open(frame):
+            return "инвентарь"
+        catch_result = self.catch_detector.detect(frame)
+        if catch_result.visible:
+            self._last_catch_result = catch_result
+            self._save_catch_panel_snapshot(frame, catch_result)
+            return "пойманная рыба"
+        matches = self.trigger_monitor.find_detections(frame)
+        self._last_trigger_matches = matches
+        self._last_triggers = {name: match.confidence for name, match in matches.items()}
+        stage = self._detect_stage(self._last_triggers)
+        if stage is not None:
+            self._publish_stage(self._stage_label(stage))
+            return self._stage_label(stage)
+        for name in sorted(REELING_KNOWN_INTERRUPTION_TRIGGERS):
+            if name in self._last_triggers:
+                return name
+        return None
+
+    def _try_return_to_fishing_from_idle(self, timeout: float = REELING_IDLE_RETURN_TIMEOUT_SECONDS) -> bool:
+        self._log("Вываживание прервано: состояние не найдено, проверяю возврат клавишей E")
+        self._focus_game()
+        self.input_controller.press_key("e")
+        deadline = time.time() + timeout
+        while time.time() < deadline and not self._stop_event.is_set():
+            state = self._detect_reeling_interruption_state()
+            if state is not None:
+                self._log(f"Вываживание прервано: после E найдено состояние {state}")
+                return True
+            self._sleep(REELING_IDLE_RETURN_POLL_SECONDS)
+        return False
 
     def _wait_for_catch_screen(self, timeout: float) -> tuple[str | None, float]:
         self.state.phase = BotPhase.CATCH
@@ -1249,6 +1343,7 @@ class FishingBot:
         storage_pending = False
         storage_selector_opened = False
         storage_anchor: TemplateMatch | None = None
+        tackle_checked = False
         while time.time() < deadline and not self._stop_event.is_set():
             frame = self.capture.capture()
             matches = self.trigger_monitor.find_detections(frame)
@@ -1269,6 +1364,10 @@ class FishingBot:
             if "start1" in matches:
                 self._log("Стадия: Заброс")
                 return "casting"
+            if "start" in matches and not tackle_checked:
+                tackle_checked = True
+                if not self._check_tackle_before_start(frame):
+                    return None
             if "storage" not in clicked and not storage_gave_up and "start" in matches:
                 if storage_started_at == 0.0:
                     storage_started_at = time.time()
@@ -1318,6 +1417,110 @@ class FishingBot:
                     continue
             self._sleep(PREPARE_START_POLL_SECONDS)
         return None
+
+    def _check_tackle_before_start(self, frame=None) -> bool:
+        scan = self._read_tackle_until_clear(frame)
+        if scan is None:
+            return False
+        self._log("Снаряжение:\n" + format_tackle_items(scan.items))
+        depletion = self._find_tackle_depletion(scan)
+        if depletion is None:
+            return not self._handle_tackle_depletion(scan)
+        scan = self._confirm_tackle_depletion(scan, depletion[0])
+        if scan is None:
+            return False
+        self._log("Снаряжение после перепроверки:\n" + format_tackle_items(scan.items))
+        return not self._handle_tackle_depletion(scan)
+
+    def _read_tackle_until_clear(self, frame=None) -> TackleScanResult | None:
+        waits = [0.0, TACKLE_OBSCURED_INITIAL_WAIT_SECONDS]
+        waits.extend([TACKLE_OBSCURED_RETRY_WAIT_SECONDS] * TACKLE_OBSCURED_RETRIES)
+        for attempt, wait_seconds in enumerate(waits):
+            if wait_seconds > 0:
+                self._log(f"Снаряжение перекрыто уведомлением, жду {wait_seconds:.0f} сек")
+                self._sleep(wait_seconds)
+                if self._stop_event.is_set():
+                    return None
+            current_frame = frame if attempt == 0 and frame is not None else self.capture.capture()
+            scan = self.tackle_detector.detect(current_frame)
+            if scan.obscured:
+                continue
+            if self._is_empty_tackle_scan(scan):
+                continue
+            self._store_tackle_scan(scan, current_frame)
+            return scan
+        self._log(f"Автостоп: {STOP_REASON_TACKLE_UNREADABLE}")
+        self._stop_from_brain(STOP_REASON_TACKLE_UNREADABLE)
+        return None
+
+    def _store_tackle_scan(self, scan: TackleScanResult, frame) -> None:
+        row = self.tackle_detector.crop_row(frame)
+        self.session_stats.set_tackle_scan(
+            scan.items,
+            image_bytes=self._encode_png_bytes(row),
+            scanned_at=scan.scanned_at,
+        )
+
+    @staticmethod
+    def _is_empty_tackle_scan(scan: TackleScanResult) -> bool:
+        return all(item.count <= 0 for item in scan.items)
+
+    def _find_tackle_depletion(self, scan: TackleScanResult) -> tuple[str, str, str, bool] | None:
+        checks = (
+            ("rod", "Удочка закончилась", self.settings.equipment_depleted_action, False),
+            ("reel", "Катушка закончилась", self.settings.equipment_depleted_action, False),
+            ("line", "Кончилась леска", self.settings.equipment_depleted_action, False),
+            ("hook", "Закончились крючки/поводки", self.settings.leader_depleted_action, self.settings.fish_without_leader),
+            ("bait", "Закончилась наживка/блёсна", self.settings.equipment_depleted_action, False),
+            ("net", "Подсак закончился", self.settings.net_depleted_action, self.settings.fish_without_net),
+        )
+        for key, reason, action, allowed_without_item in checks:
+            if scan.count_for(key) > 0:
+                continue
+            if allowed_without_item:
+                continue
+            return key, reason, action, allowed_without_item
+        return None
+
+    def _confirm_tackle_depletion(self, scan: TackleScanResult, depleted_key: str) -> TackleScanResult | None:
+        latest = scan
+        for _ in range(TACKLE_DEPLETION_CONFIRM_ATTEMPTS):
+            self._sleep(TACKLE_DEPLETION_CONFIRM_DELAY_SECONDS)
+            if self._stop_event.is_set():
+                return None
+            latest = self._read_tackle_until_clear()
+            if latest is None:
+                return None
+            depletion = self._find_tackle_depletion(latest)
+            if depletion is None:
+                self._log("Снаряжение: повторное чтение не подтвердило отсутствие предмета")
+                return latest
+            if depletion[0] != depleted_key:
+                return latest
+        return latest
+
+    def _handle_tackle_depletion(self, scan: TackleScanResult) -> bool:
+        for item in scan.items:
+            if item.count > 0:
+                continue
+            if item.key == "hook" and self.settings.fish_without_leader:
+                self._log("Снаряжение: Закончились крючки/поводки, продолжаю по настройке")
+            if item.key == "net" and self.settings.fish_without_net:
+                self._log("Снаряжение: Подсак закончился, продолжаю по настройке")
+        depletion = self._find_tackle_depletion(scan)
+        if depletion is None:
+            return False
+        _, reason, action, _ = depletion
+        self._perform_tackle_depleted_action(action, reason)
+        return True
+
+    def _perform_tackle_depleted_action(self, action: str, reason: str) -> None:
+        self._log(f"Снаряжение закончилось: {reason}")
+        if action == "exit_game":
+            self._shutdown_game()
+        self._stop_from_brain(reason)
+        if action == "shutdown_pc":
+            self._shutdown_pc()
 
     def _press_fishing_start(self) -> bool:
         self._focus_game()

@@ -49,6 +49,7 @@ from sonar.fishing.statistics import (
     parse_fish_prices_from_markdown,
 )
 from sonar.fishing.statistics_export import default_stats_csv_path, write_stats_csv
+from sonar.fishing.tackle_detection import format_tackle_items
 from sonar.license.client import LicenseStatus
 from sonar.license.manager import LicenseManager
 from sonar.paths import APP_DIR, RESOURCE_DIR
@@ -256,6 +257,22 @@ class MainWindow(QMainWindow):
         self.overweight_action_combo.addItem("Отпускать рыбу", "release")
         self.overweight_action_combo.addItem("Остановить рыбалку", "stop")
         self.overweight_action_combo.addItem("Выключить игру", "exit_game")
+        self.fish_without_leader_check = QCheckBox()
+        self.leader_note_label = QLabel("Если вы рыбачите с удочки, то оставьте выключенным")
+        self.leader_note_label.setWordWrap(True)
+        self.leader_depleted_action_combo = QComboBox()
+        self.leader_depleted_action_combo.addItem("Рыбалка остановится", "stop")
+        self.leader_depleted_action_combo.addItem("Закроется игра", "exit_game")
+        self.fish_without_net_check = QCheckBox()
+        self.net_depleted_action_combo = QComboBox()
+        self.net_depleted_action_combo.addItem("Рыбалка остановится", "stop")
+        self.net_depleted_action_combo.addItem("Закроется игра", "exit_game")
+        self.equipment_depleted_action_combo = QComboBox()
+        self.equipment_depleted_action_combo.addItem("Остановить бота", "stop")
+        self.equipment_depleted_action_combo.addItem("Закрыть игру", "exit_game")
+        self.equipment_depleted_action_combo.addItem("Выключить компьютер", "shutdown_pc")
+        self.fish_without_leader_check.stateChanged.connect(self._refresh_tackle_action_controls)
+        self.fish_without_net_check.stateChanged.connect(self._refresh_tackle_action_controls)
         self.hotkey_input = QLineEdit()
         self.inventory_hotkey_input = QLineEdit()
         self.use_item_hotkey_input = QLineEdit()
@@ -266,6 +283,12 @@ class MainWindow(QMainWindow):
         form.addRow("Складывать в багажник", self.store_trunk_check)
         form.addRow("Звук включения/отключения", self.start_stop_sound_check)
         form.addRow("Что делать при перевесе", self.overweight_action_combo)
+        form.addRow("Рыбалка без поводка", self.fish_without_leader_check)
+        form.addRow("", self.leader_note_label)
+        form.addRow("Если закончились поводки", self.leader_depleted_action_combo)
+        form.addRow("Рыбалка без подсака", self.fish_without_net_check)
+        form.addRow("Если закончился подсак", self.net_depleted_action_combo)
+        form.addRow("Если закончилось снаряжение", self.equipment_depleted_action_combo)
         form.addRow("Горячая клавиша", self.hotkey_input)
         form.addRow("Клавиша инвентаря", self.inventory_hotkey_input)
         form.addRow("Клавиша использования", self.use_item_hotkey_input)
@@ -335,6 +358,13 @@ class MainWindow(QMainWindow):
         totals_grid.addWidget(self.reset_stats_button, 6, 0)
         totals_grid.addWidget(self.export_stats_button, 6, 1)
         layout.addWidget(totals_group)
+
+        tackle_group = QGroupBox("Снаряжение")
+        tackle_layout = QVBoxLayout(tackle_group)
+        self.stats_tackle_label = QLabel("Снаряжение ещё не сканировалось")
+        self.stats_tackle_label.setWordWrap(True)
+        tackle_layout.addWidget(self.stats_tackle_label)
+        layout.addWidget(tackle_group)
 
         self.stats_table = QTableWidget(0, 6)
         self.stats_table.setHorizontalHeaderLabels(
@@ -448,6 +478,15 @@ class MainWindow(QMainWindow):
         self.start_stop_sound_check.setChecked(fishing.start_stop_sound_enabled)
         index = self.overweight_action_combo.findData(fishing.overweight_action)
         self.overweight_action_combo.setCurrentIndex(max(index, 0))
+        self.fish_without_leader_check.setChecked(fishing.fish_without_leader)
+        index = self.leader_depleted_action_combo.findData(fishing.leader_depleted_action)
+        self.leader_depleted_action_combo.setCurrentIndex(max(index, 0))
+        self.fish_without_net_check.setChecked(fishing.fish_without_net)
+        index = self.net_depleted_action_combo.findData(fishing.net_depleted_action)
+        self.net_depleted_action_combo.setCurrentIndex(max(index, 0))
+        index = self.equipment_depleted_action_combo.findData(fishing.equipment_depleted_action)
+        self.equipment_depleted_action_combo.setCurrentIndex(max(index, 0))
+        self._refresh_tackle_action_controls()
         self.hotkey_input.setText(fishing.hotkey)
         self.inventory_hotkey_input.setText(fishing.inventory_hotkey)
         self.use_item_hotkey_input.setText(fishing.use_item_hotkey)
@@ -455,6 +494,13 @@ class MainWindow(QMainWindow):
         for fish_id, checkbox in self.fish_checks.items():
             checkbox.setChecked(fishing.fish_settings.get(fish_id, True))
         self._apply_telegram_settings_to_ui(settings.telegram)
+
+    def _refresh_tackle_action_controls(self, *args) -> None:
+        del args
+        if hasattr(self, "leader_depleted_action_combo"):
+            self.leader_depleted_action_combo.setEnabled(not self.fish_without_leader_check.isChecked())
+        if hasattr(self, "net_depleted_action_combo"):
+            self.net_depleted_action_combo.setEnabled(not self.fish_without_net_check.isChecked())
 
     def _apply_telegram_settings_to_ui(self, telegram) -> None:
         widgets = (
@@ -647,6 +693,11 @@ class MainWindow(QMainWindow):
         fishing.start_stop_sound_enabled = self.start_stop_sound_check.isChecked()
         fishing.overweight_action = str(self.overweight_action_combo.currentData() or "stop")
         fishing.shutdown_on_overweight = fishing.overweight_action == "stop"
+        fishing.fish_without_leader = self.fish_without_leader_check.isChecked()
+        fishing.leader_depleted_action = str(self.leader_depleted_action_combo.currentData() or "stop")
+        fishing.fish_without_net = self.fish_without_net_check.isChecked()
+        fishing.net_depleted_action = str(self.net_depleted_action_combo.currentData() or "stop")
+        fishing.equipment_depleted_action = str(self.equipment_depleted_action_combo.currentData() or "stop")
         fishing.hotkey = self.hotkey_input.text().strip() or "F9"
         fishing.inventory_hotkey = self.inventory_hotkey_input.text().strip() or "i"
         fishing.use_item_hotkey = self.use_item_hotkey_input.text().strip() or "e"
@@ -836,6 +887,8 @@ class MainWindow(QMainWindow):
             self.stats_income_per_hour_label.setText(format_money_range(totals.earned_per_hour_min, totals.earned_per_hour_max))
         else:
             self.stats_income_per_hour_label.setText("0 $")
+        if hasattr(self, "stats_tackle_label"):
+            self.stats_tackle_label.setText(format_tackle_items(self.session_stats.tackle_items()))
         if (
             self.stats_table.state() == QAbstractItemView.State.EditingState
             and self.stats_table.currentColumn() == 4
@@ -946,7 +999,7 @@ class MainWindow(QMainWindow):
         finally:
             self.stream_quality_combo.blockSignals(quality_block)
             self.stream_chat_zoom_check.blockSignals(chat_block)
-        self.stream_stop_button.setEnabled(snapshot.active or snapshot.status == "error")
+        self.stream_stop_button.setEnabled(snapshot.active or snapshot.status in {"starting", "error"})
 
     def reset_session_stats(self) -> None:
         self.session_stats.reset()

@@ -3,12 +3,21 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable
 
 import requests
 
 from sonar.config.models import TelegramSettings
 from sonar.fishing.statistics import FishStatsRow, SessionTotals, format_catch_summary, format_duration, format_money_range, format_weight
+from sonar.fishing.tackle_detection import TackleItemCount, format_tackle_items
+
+
+STREAM_MENU_REFRESH_INTERVAL_SECONDS = 1.0
+STREAM_MENU_REFRESH_MAX_SECONDS = 45.0
+STREAM_MENU_PUBLIC_URL_GRACE_SECONDS = 8.0
+STREAM_LINK_DELIVERY_INTERVAL_SECONDS = 1.0
+STREAM_LINK_DELIVERY_MAX_SECONDS = 60.0
 
 
 @dataclass(slots=True)
@@ -22,6 +31,9 @@ class NotificationManager:
     stats_callback: Callable[[], SessionTotals] | None = None
     stats_rows_callback: Callable[[], list[FishStatsRow]] | None = None
     has_stats_callback: Callable[[], bool] | None = None
+    tackle_callback: Callable[[], tuple[TackleItemCount, ...]] | None = None
+    tackle_image_callback: Callable[[], bytes | None] | None = None
+    tackle_scanned_at_callback: Callable[[], datetime | None] | None = None
     screenshot_callback: Callable[[], bytes] | None = None
     focus_game_callback: Callable[[], bool] | None = None
     shutdown_game_callback: Callable[[], None] | None = None
@@ -35,11 +47,19 @@ class NotificationManager:
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
     _poll_thread: threading.Thread | None = field(default=None, init=False)
     _last_update_id: int | None = field(default=None, init=False)
+    _stream_menu_refresh_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    _stream_menu_refresh_generation: int = field(default=0, init=False)
+    _stream_link_delivery_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    _stream_link_delivery_generation: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         self._stop_event = threading.Event()
         self._poll_thread = None
         self._last_update_id = None
+        self._stream_menu_refresh_lock = threading.Lock()
+        self._stream_menu_refresh_generation = 0
+        self._stream_link_delivery_lock = threading.Lock()
+        self._stream_link_delivery_generation = 0
 
     def configure(
         self,
@@ -51,6 +71,9 @@ class NotificationManager:
         stats_callback: Callable[[], SessionTotals] | None = None,
         stats_rows_callback: Callable[[], list[FishStatsRow]] | None = None,
         has_stats_callback: Callable[[], bool] | None = None,
+        tackle_callback: Callable[[], tuple[TackleItemCount, ...]] | None = None,
+        tackle_image_callback: Callable[[], bytes | None] | None = None,
+        tackle_scanned_at_callback: Callable[[], datetime | None] | None = None,
         screenshot_callback: Callable[[], bytes] | None = None,
         focus_game_callback: Callable[[], bool] | None = None,
         shutdown_game_callback: Callable[[], None] | None = None,
@@ -69,6 +92,9 @@ class NotificationManager:
         self.stats_callback = stats_callback
         self.stats_rows_callback = stats_rows_callback
         self.has_stats_callback = has_stats_callback
+        self.tackle_callback = tackle_callback
+        self.tackle_image_callback = tackle_image_callback
+        self.tackle_scanned_at_callback = tackle_scanned_at_callback
         self.screenshot_callback = screenshot_callback
         self.focus_game_callback = focus_game_callback
         self.shutdown_game_callback = shutdown_game_callback
@@ -233,6 +259,8 @@ class NotificationManager:
                 self._send_notifications(chat_id)
             elif text == "/stats":
                 self._send_stats(chat_id)
+            elif text == "/tackle":
+                self._send_tackle(chat_id)
             elif text == "/screen":
                 self._send_screen(chat_id)
             elif text == "/shutdown_pc":
@@ -256,6 +284,9 @@ class NotificationManager:
                 self._send_notifications(chat_id, message_id=message_id)
             elif data == "menu:stream":
                 self._send_stream_menu(chat_id, message_id=message_id)
+                snapshot = self._stream_snapshot()
+                if getattr(snapshot, "status", "") in {"starting", "preparing"}:
+                    self._schedule_stream_menu_refresh(chat_id, message_id)
             elif data == "menu:stream_quality":
                 self._send_stream_quality(chat_id, message_id=message_id)
             elif data.startswith("toggle:"):
@@ -277,6 +308,8 @@ class NotificationManager:
                 self._focus_game(chat_id)
             elif data == "action:stats":
                 self._send_stats(chat_id)
+            elif data == "action:tackle":
+                self._send_tackle(chat_id)
             elif data == "action:shutdown_pc":
                 self._shutdown_pc(chat_id)
             elif data == "action:shutdown_game":
@@ -292,6 +325,9 @@ class NotificationManager:
             ],
             [
                 {"text": "📺 Стрим", "callback_data": "menu:stream"},
+            ],
+            [
+                {"text": "🎒 Снаряжение", "callback_data": "action:tackle"},
             ],
             [
                 {"text": start_stop_text, "callback_data": "action:start_stop"},
@@ -312,9 +348,14 @@ class NotificationManager:
     def _send_stream_menu(self, chat_id: int, *, message_id: int | None = None) -> None:
         snapshot = self._stream_snapshot()
         active = bool(getattr(snapshot, "active", False))
+        starting = snapshot is not None and getattr(snapshot, "status", "") == "starting"
+        running_or_starting = active or starting
         status = "online" if active else "offline"
-        if snapshot is not None and getattr(snapshot, "status", "") == "starting":
+        preparing = snapshot is not None and getattr(snapshot, "status", "") == "preparing"
+        if starting:
             status = "starting"
+        if preparing:
+            status = "preparing"
         quality = str(getattr(snapshot, "quality", "720p") or "720p")
         area = "Чат" if getattr(snapshot, "area", "full") == "chat" else "Все окно"
         error = str(getattr(snapshot, "error", "") or "")
@@ -333,14 +374,15 @@ class NotificationManager:
         )
         if error:
             text = f"{text}\n\n⚠️ {error}"
-        start_stop_text = "⏹ Остановить стрим" if active else "▶️ Запустить стрим"
+        start_stop_text = "⏹ Остановить запуск" if starting else "⏹ Остановить стрим" if active else "▶️ Запустить стрим"
         switch_area_text = "🔎 Переключить область на окно игры" if area == "Чат" else "🔎 Переключить область на Чат"
         keyboard = [
             [{"text": f"⚙️ Качество: {quality}", "callback_data": "menu:stream_quality"}],
             [{"text": start_stop_text, "callback_data": "stream:start_stop"}],
         ]
-        if active:
+        if running_or_starting and self._public_stream_url(snapshot):
             keyboard.append([{"text": "🔗 Открыть стрим", "callback_data": "stream:open"}])
+        if active:
             keyboard.append([{"text": switch_area_text, "callback_data": "stream:switch_area"}])
         keyboard.append([{"text": "⬅️ Меню", "callback_data": "menu:main"}])
         self._send_or_edit_message(text, chat_id=chat_id, message_id=message_id, reply_markup={"inline_keyboard": keyboard})
@@ -394,6 +436,19 @@ class NotificationManager:
         rows = self.stats_rows_callback() if self.stats_rows_callback else None
         self.send_message(self._format_session_stats_message("📊 Текущая статистика", "🎣 Сессия рыбалки", totals, rows=rows), chat_id=chat_id)
 
+    def _send_tackle(self, chat_id: int) -> None:
+        items = self.tackle_callback() if self.tackle_callback else ()
+        if not items:
+            self.send_message("🎒 Снаряжение\n\nПоследнего сканирования ещё нет.", chat_id=chat_id)
+            return
+        scanned_at = self.tackle_scanned_at_callback() if self.tackle_scanned_at_callback else None
+        scanned_line = f"\n🕒 Сканирование: {scanned_at.strftime('%H:%M:%S')}" if scanned_at is not None else ""
+        text = f"🎒 Снаряжение{scanned_line}\n\n{format_tackle_items(items)}"
+        image_bytes = self.tackle_image_callback() if self.tackle_image_callback else None
+        if image_bytes is not None and self.send_photo(chat_id, image_bytes, caption=text):
+            return
+        self.send_message(text, chat_id=chat_id)
+
     def _toggle_notification(self, field_name: str) -> None:
         if field_name not in {
             "notify_catch",
@@ -418,7 +473,8 @@ class NotificationManager:
 
     def _toggle_stream(self, chat_id: int, *, message_id: int | None = None) -> None:
         snapshot = self._stream_snapshot()
-        if bool(getattr(snapshot, "active", False)):
+        if bool(getattr(snapshot, "active", False)) or getattr(snapshot, "status", "") == "starting":
+            self._cancel_stream_link_delivery()
             if self.stream_stop_callback is not None:
                 self.stream_stop_callback()
             self._send_stream_menu(chat_id, message_id=message_id)
@@ -427,15 +483,24 @@ class NotificationManager:
         if not ok:
             self.send_message("⚠️ Не удалось запустить стрим. Проверьте вкладку стрима в программе.", chat_id=chat_id)
         self._send_stream_menu(chat_id, message_id=message_id)
+        if ok:
+            self._schedule_stream_menu_refresh(chat_id, message_id)
+            self._schedule_stream_link_delivery(chat_id)
 
     def _send_stream_link(self, chat_id: int) -> None:
         snapshot = self._stream_snapshot()
+        status = str(getattr(snapshot, "status", "") or "")
         if not bool(getattr(snapshot, "active", False)):
+            if status in {"starting", "preparing"}:
+                self._schedule_stream_link_delivery(chat_id)
+                self.send_message("⏳ Стрим запускается. Отправлю публичную ссылку, когда она будет готова.", chat_id=chat_id)
+                return
             self.send_message("📴 Стрим сейчас выключен.", chat_id=chat_id)
             return
-        url = str(getattr(snapshot, "stream_url", "") or "")
+        url = self._public_stream_url(snapshot)
         if not url:
-            self.send_message("⚠️ Ссылка на стрим ещё не готова.", chat_id=chat_id)
+            self._schedule_stream_link_delivery(chat_id)
+            self.send_message("⏳ Публичная ссылка ещё готовится. Отправлю её автоматически.", chat_id=chat_id)
             return
         self.send_message(f"🖥 Трансляция:\n{url}", chat_id=chat_id)
 
@@ -462,6 +527,97 @@ class NotificationManager:
             if self.sink:
                 self.sink(f"Stream status error: {exc}")
             return None
+
+    def _schedule_stream_menu_refresh(self, chat_id: int, message_id: int | None) -> None:
+        if message_id is None:
+            return
+        with self._stream_menu_refresh_lock:
+            self._stream_menu_refresh_generation += 1
+            generation = self._stream_menu_refresh_generation
+        threading.Thread(
+            target=self._stream_menu_refresh_loop,
+            args=(chat_id, message_id, generation),
+            name="sonar-telegram-stream-menu",
+            daemon=True,
+        ).start()
+
+    def _stream_menu_refresh_loop(self, chat_id: int, message_id: int, generation: int) -> None:
+        deadline = time.monotonic() + STREAM_MENU_REFRESH_MAX_SECONDS
+        public_url_deadline: float | None = None
+        while time.monotonic() < deadline and not self._stop_event.wait(STREAM_MENU_REFRESH_INTERVAL_SECONDS):
+            with self._stream_menu_refresh_lock:
+                if generation != self._stream_menu_refresh_generation:
+                    return
+            snapshot = self._stream_snapshot()
+            self._send_stream_menu(chat_id, message_id=message_id)
+            status = str(getattr(snapshot, "status", "") or "")
+            active = bool(getattr(snapshot, "active", False))
+            url = str(getattr(snapshot, "stream_url", "") or "")
+            if status in {"starting", "preparing"}:
+                continue
+            if not active:
+                return
+            if "trycloudflare.com" in url:
+                return
+            if public_url_deadline is None:
+                public_url_deadline = time.monotonic() + STREAM_MENU_PUBLIC_URL_GRACE_SECONDS
+            if time.monotonic() >= public_url_deadline:
+                return
+
+    def _schedule_stream_link_delivery(self, chat_id: int) -> None:
+        with self._stream_link_delivery_lock:
+            self._stream_link_delivery_generation += 1
+            generation = self._stream_link_delivery_generation
+        threading.Thread(
+            target=self._stream_link_delivery_loop,
+            args=(chat_id, generation),
+            name="sonar-telegram-stream-link",
+            daemon=True,
+        ).start()
+
+    def _cancel_stream_link_delivery(self) -> None:
+        with self._stream_link_delivery_lock:
+            self._stream_link_delivery_generation += 1
+
+    def _stream_link_delivery_loop(self, chat_id: int, generation: int) -> None:
+        deadline = time.monotonic() + STREAM_LINK_DELIVERY_MAX_SECONDS
+        while time.monotonic() < deadline and not self._stop_event.wait(STREAM_LINK_DELIVERY_INTERVAL_SECONDS):
+            with self._stream_link_delivery_lock:
+                if generation != self._stream_link_delivery_generation:
+                    return
+            snapshot = self._stream_snapshot()
+            status = str(getattr(snapshot, "status", "") or "")
+            if status == "error":
+                error = str(getattr(snapshot, "error", "") or "")
+                suffix = f" {error}" if error else ""
+                self.send_message(f"⚠️ Не удалось подготовить ссылку на стрим.{suffix}", chat_id=chat_id)
+                return
+            if status not in {"starting", "preparing"} and not bool(getattr(snapshot, "active", False)):
+                return
+            url = self._public_stream_url(snapshot)
+            if url:
+                self.send_message(f"🖥 Трансляция:\n{url}", chat_id=chat_id)
+                return
+        with self._stream_link_delivery_lock:
+            if generation != self._stream_link_delivery_generation:
+                return
+        self.send_message("⚠️ Публичная ссылка на стрим не появилась. Проверьте вкладку стрима в программе.", chat_id=chat_id)
+
+    @staticmethod
+    def _public_stream_url(snapshot: Any | None) -> str:
+        for field_name in ("public_url", "stream_url"):
+            url = str(getattr(snapshot, field_name, "") or "")
+            if NotificationManager._is_public_stream_url(url):
+                return url.rstrip("/") + "/live/" if not url.rstrip("/").endswith("/live") else url.rstrip("/") + "/"
+        return ""
+
+    @staticmethod
+    def _is_public_stream_url(url: str) -> bool:
+        normalized = url.strip().lower()
+        if not normalized.startswith(("http://", "https://")):
+            return False
+        parsed_host = normalized.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
+        return parsed_host not in {"127.0.0.1", "localhost", "::1"}
 
     def _send_screen(self, chat_id: int) -> None:
         if self.screenshot_callback is None:

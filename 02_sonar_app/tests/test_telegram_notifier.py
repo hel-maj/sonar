@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 
 from sonar.config.models import TelegramSettings
 from sonar.fishing.statistics import FishPrice, FishingSessionStats, SessionTotals
+from sonar.fishing.tackle_detection import TackleItemCount
+import sonar.telegram.notifier as notifier_module
 from sonar.telegram.notifier import NotificationManager
 
 
@@ -43,6 +47,7 @@ def test_main_menu_contains_stream_entry(monkeypatch):
 
     keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
     assert any(button["callback_data"] == "menu:stream" for row in keyboard for button in row)
+    assert any(button["callback_data"] == "action:tackle" for row in keyboard for button in row)
 
 
 def test_stream_menu_shows_active_link_and_area_switch(monkeypatch):
@@ -75,6 +80,242 @@ def test_stream_menu_shows_active_link_and_area_switch(monkeypatch):
     assert "Область: Чат" in payload["text"]
     assert any(button["callback_data"] == "stream:open" for row in keyboard for button in row)
     assert any(button["callback_data"] == "stream:switch_area" for row in keyboard for button in row)
+
+
+def test_stream_menu_hides_open_button_until_public_link(monkeypatch):
+    snapshot = SimpleNamespace(
+        active=True,
+        status="online",
+        quality="720p",
+        area="full",
+        error="",
+        seconds_until_auto_stop=120,
+        public_url="http://127.0.0.1:1000",
+        stream_url="http://127.0.0.1:1000/live/",
+    )
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_status_callback=lambda: snapshot,
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._send_stream_menu(1, message_id=42)
+
+    keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
+    assert not any(button["callback_data"] == "stream:open" for row in keyboard for button in row)
+
+
+def test_stream_menu_allows_cancelling_starting_stream(monkeypatch):
+    snapshot = SimpleNamespace(
+        active=False,
+        status="starting",
+        quality="720p",
+        area="full",
+        error="",
+        seconds_until_auto_stop=None,
+        stream_url=None,
+    )
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_status_callback=lambda: snapshot,
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._send_stream_menu(1, message_id=42)
+
+    payload = calls[0][1]["json"]
+    keyboard = payload["reply_markup"]["inline_keyboard"]
+    assert "Статус starting" in payload["text"]
+    assert any(button["text"] == "⏹ Остановить запуск" for row in keyboard for button in row)
+
+
+def test_stream_start_refreshes_menu_until_online(monkeypatch):
+    monkeypatch.setattr(notifier_module, "STREAM_MENU_REFRESH_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(notifier_module, "STREAM_MENU_REFRESH_MAX_SECONDS", 0.5)
+    monkeypatch.setattr(notifier_module, "STREAM_MENU_PUBLIC_URL_GRACE_SECONDS", 0.01)
+    monkeypatch.setattr(notifier_module, "STREAM_LINK_DELIVERY_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(notifier_module, "STREAM_LINK_DELIVERY_MAX_SECONDS", 0.5)
+    state = {
+        "snapshot": SimpleNamespace(
+            active=False,
+            status="offline",
+            quality="720p",
+            area="full",
+            error="",
+            seconds_until_auto_stop=None,
+            stream_url=None,
+        )
+    }
+    calls = []
+
+    def start_stream():
+        state["snapshot"] = SimpleNamespace(
+            active=False,
+            status="starting",
+            quality="720p",
+            area="full",
+            error="",
+            seconds_until_auto_stop=None,
+            stream_url=None,
+        )
+
+        def mark_online():
+            state["snapshot"] = SimpleNamespace(
+                active=True,
+                status="online",
+                quality="720p",
+                area="full",
+                error="",
+                seconds_until_auto_stop=180,
+                stream_url="https://example.trycloudflare.com/live/",
+            )
+
+        threading.Timer(0.03, mark_online).start()
+        return True
+
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_status_callback=lambda: state["snapshot"],
+        stream_start_callback=start_stream,
+    )
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._toggle_stream(1, message_id=42)
+
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        if any("Статус online" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText"):
+            break
+        time.sleep(0.01)
+
+    assert any("Статус starting" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText")
+    assert any("Статус online" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText")
+
+
+def test_send_stream_link_waits_for_public_url_instead_of_sending_local(monkeypatch):
+    snapshot = SimpleNamespace(
+        active=True,
+        status="online",
+        quality="720p",
+        area="full",
+        error="",
+        seconds_until_auto_stop=120,
+        public_url="http://127.0.0.1:1000",
+        stream_url="http://127.0.0.1:1000/live/",
+    )
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_status_callback=lambda: snapshot,
+    )
+    calls = []
+    scheduled = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    def fake_schedule(self, chat_id):
+        scheduled.append(chat_id)
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+    monkeypatch.setattr(NotificationManager, "_schedule_stream_link_delivery", fake_schedule)
+
+    manager._send_stream_link(1)
+
+    assert scheduled == [1]
+    assert calls[0][0] == "sendMessage"
+    text = calls[0][1]["json"]["text"]
+    assert "готовится" in text
+    assert "127.0.0.1" not in text
+
+
+def test_stream_start_sends_public_link_automatically(monkeypatch):
+    monkeypatch.setattr(notifier_module, "STREAM_MENU_REFRESH_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(notifier_module, "STREAM_MENU_REFRESH_MAX_SECONDS", 0.5)
+    monkeypatch.setattr(notifier_module, "STREAM_MENU_PUBLIC_URL_GRACE_SECONDS", 0.01)
+    monkeypatch.setattr(notifier_module, "STREAM_LINK_DELIVERY_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(notifier_module, "STREAM_LINK_DELIVERY_MAX_SECONDS", 0.5)
+    state = {
+        "snapshot": SimpleNamespace(
+            active=False,
+            status="offline",
+            quality="720p",
+            area="full",
+            error="",
+            seconds_until_auto_stop=None,
+            public_url=None,
+            stream_url=None,
+        )
+    }
+    calls = []
+
+    def start_stream():
+        state["snapshot"] = SimpleNamespace(
+            active=True,
+            status="online",
+            quality="720p",
+            area="full",
+            error="",
+            seconds_until_auto_stop=180,
+            public_url="http://127.0.0.1:1000",
+            stream_url="http://127.0.0.1:1000/live/",
+        )
+
+        def publish_url():
+            state["snapshot"] = SimpleNamespace(
+                active=True,
+                status="online",
+                quality="720p",
+                area="full",
+                error="",
+                seconds_until_auto_stop=180,
+                public_url="https://example.trycloudflare.com",
+                stream_url="https://example.trycloudflare.com/live/",
+            )
+
+        threading.Timer(0.03, publish_url).start()
+        return True
+
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_status_callback=lambda: state["snapshot"],
+        stream_start_callback=start_stream,
+    )
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._toggle_stream(1, message_id=42)
+
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        if any("https://example.trycloudflare.com/live/" in call[1]["json"]["text"] for call in calls if call[0] == "sendMessage"):
+            break
+        time.sleep(0.01)
+
+    sent_messages = [call[1]["json"]["text"] for call in calls if call[0] == "sendMessage"]
+    assert any("https://example.trycloudflare.com/live/" in text for text in sent_messages)
+    assert not any("127.0.0.1" in text for text in sent_messages)
 
 
 def test_stats_menu_message_uses_income_range():
@@ -137,3 +378,28 @@ def test_caught_fish_notification_sends_photo_with_caption(monkeypatch):
     assert calls[0][0] == "sendPhoto"
     assert calls[0][1]["files"]["photo"][1] == b"png"
     assert "Рустер" in calls[0][1]["data"]["caption"]
+
+
+def test_tackle_menu_sends_last_scan_photo_with_counts(monkeypatch):
+    calls = []
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        tackle_callback=lambda: (
+            TackleItemCount("rod", "Удочка", 1),
+            TackleItemCount("hook", "Крючки/поводки", 3),
+        ),
+        tackle_image_callback=lambda: b"png",
+    )
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._send_tackle(1)
+
+    assert calls[0][0] == "sendPhoto"
+    assert calls[0][1]["files"]["photo"][1] == b"png"
+    assert "Снаряжение" in calls[0][1]["data"]["caption"]
+    assert "Крючки/поводки: 3шт." in calls[0][1]["data"]["caption"]

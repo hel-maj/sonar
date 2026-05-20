@@ -106,6 +106,14 @@ def _collect_candidates(tracker: MemoryReelingTracker, limit: int) -> list[dict[
             ent_addr = tracker._u64(p_ped_list + i * 0x10)
             if not tracker._is_ptr(ent_addr) or ent_addr == tracker.player_addr:
                 continue
+            signal = tracker._read_fish_candidate_signal(ent_addr, player_pos)
+            if signal is not None:
+                d2, entity_hash, _pos, _source = signal
+                dist = float(d2**0.5)
+                old = candidates.get(ent_addr)
+                if old is None or dist < old["dist"]:
+                    candidates[ent_addr] = {"addr": ent_addr, "dist": dist, "hash": int(entity_hash or 0)}
+                continue
             entity_hash = tracker._read_entity_hash(ent_addr) or 0
             pos_item = tracker._read_fish_pos_relative(ent_addr, player_pos) if entity_hash == FISH_MODEL_HASH else tracker._read_pos_at_offsets(ent_addr, POS_OFFSETS)
             if pos_item is None:

@@ -45,6 +45,7 @@ DIRECTION_MOVE = 1.0
 DIRECTION_EPS = 0.5
 FISH_FAST_RETRY_SECONDS = 0.12
 FISH_DEEP_RETRY_SECONDS = 0.8
+REPLAY_BROAD_SCAN_LIMIT = 512
 STATIONARY_TARGET_EPS = 0.02
 STATIONARY_TARGET_SECONDS = 0.45
 STATIONARY_TARGET_MIN_DISTANCE = 5.0
@@ -52,6 +53,15 @@ UNREADABLE_REJECT_SECONDS = 0.08
 UNREADABLE_REJECT_COUNT = 3
 POS_OFFSETS = (0x50, 0x40, 0x60, 0x30)
 FISH_POS_OFFSETS = (0x130, 0x120, 0x90, 0x110, 0x160)
+FISH_LOCAL_X_RANGE = (1.5, 45.0)
+FISH_LOCAL_Y_RANGE = (1.0, 12.0)
+FISH_LOCAL_Z_RANGE = (-0.75, 0.75)
+FISH_DIRECTION_MAX_ABS = 4.0
+FISH_PRIMARY_DIRECTION_OFFSETS = frozenset({0x300, 0x68, 0x70})
+FISH_DIRECTION_SOURCE_RANK = {0x300: 0, 0x68: 1, 0x70: 2}
+ALLOW_UNKNOWN_FISH_CANDIDATES = False
+DIRECTION_STALE_EPS = 0.01
+DIRECTION_STALE_SECONDS = 1.6
 FISH_DIRECTION_FIELDS = (
     (0x300, 0.08, 1.0),
     (0x68, 0.0012, 1.0),
@@ -206,6 +216,11 @@ class MemoryReelingTracker:
         self._unreadable_since = 0.0
         self._unreadable_count = 0
         self._replay_broad_paths: list[tuple[int, int, int, int]] = []
+        self._fish_direction_offsets: frozenset[int] | None = FISH_PRIMARY_DIRECTION_OFFSETS
+        self._fish_confirmed_hash = False
+        self._direction_watch_addr: int | None = None
+        self._direction_watch: dict[int, tuple[float, float]] = {}
+        self._blocked_direction_offsets: set[int] = set()
         self._last_lateral: float | None = None
         self._last_lateral_at: float | None = None
         self._last_lateral_fish_addr: int | None = None
@@ -241,6 +256,9 @@ class MemoryReelingTracker:
         self._motion_last_pos = None
         self._motion_stationary_since = 0.0
         self._rejected_fish_addrs.clear()
+        self._fish_direction_offsets = FISH_PRIMARY_DIRECTION_OFFSETS
+        self._fish_confirmed_hash = False
+        self._reset_direction_tracking()
         self._unreadable_addr = None
         self._unreadable_since = 0.0
         self._unreadable_count = 0
@@ -347,10 +365,40 @@ class MemoryReelingTracker:
         if self.player_addr is None or self.fish_addr is None:
             return ReelingState(active=True, action="target_search")
 
-        direction_item = self._read_fish_direction(self.fish_addr)
+        self._ensure_direction_tracking_target()
+        direction_item = self._read_fish_direction(
+            self.fish_addr,
+            self._fish_direction_offsets,
+            self._blocked_direction_offsets,
+        )
         now = time.time()
         if direction_item is not None:
             move_val, direction_offset, raw_value = direction_item
+            if not self._fish_confirmed_hash and self._is_stale_direction_signal(now, direction_offset, raw_value):
+                self._blocked_direction_offsets.add(direction_offset)
+                debug_log(
+                    "REEL_DIRECTION_STALE "
+                    f"player={self._fmt_addr(self.player_addr)} fish={self._fmt_addr(self.fish_addr)} "
+                    f"direction_offset=0x{direction_offset:X} raw={raw_value:.5f} "
+                    f"candidates={self._format_direction_candidates(self.fish_addr)}"
+                )
+                if self.held_key:
+                    self._release_key(self.held_key)
+                next_direction = self._read_fish_direction(
+                    self.fish_addr,
+                    self._fish_direction_offsets,
+                    self._blocked_direction_offsets,
+                )
+                if next_direction is None and self._fish_direction_offsets is not None:
+                    self._reject_current_fish(f"stale direction field 0x{direction_offset:X}")
+                    return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
+                return ReelingState(
+                    active=True,
+                    action="direction_recalibrate",
+                    fish_addr=self.fish_addr,
+                    player_addr=self.player_addr,
+                    fish_pos_offset=direction_offset,
+                )
             action = self._apply_move(move_val, DIRECTION_EPS)
             if now - self._last_step_debug_at >= REEL_DEBUG_INTERVAL_SECONDS:
                 self._last_step_debug_at = now
@@ -391,15 +439,20 @@ class MemoryReelingTracker:
 
         player_pos, player_pos_offset = player_item
         fish_pos, fish_pos_offset = fish_item
+        using_local_fish_frame = self._is_fishing_local_pos(fish_pos) and not self._is_fishing_local_pos(player_pos)
+        if using_local_fish_frame and not self._fish_confirmed_hash:
+            self._reject_current_fish("local fish position without live direction", fish_pos)
+            return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
         if not using_stale_fish_pos:
             self._reset_unreadable_tracking()
             self.last_fish_pos = fish_pos
             self.last_fish_pos_offset = fish_pos_offset
             self.last_good_fish_at = now
-        px, py, pz = player_pos
+        control_player_pos = (0.0, 0.0, 0.0) if using_local_fish_frame else player_pos
+        px, py, pz = control_player_pos
         x, y, z = fish_pos
         distance = math.sqrt((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2)
-        if self._is_stationary_wrong_target(now, fish_pos, distance, using_stale_fish_pos):
+        if self._is_stationary_wrong_target(now, fish_pos, distance, using_stale_fish_pos or using_local_fish_frame):
             self._reject_current_fish("stationary target", fish_pos, distance)
             return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
         if self.last_fish_xy and self.last_time and not using_stale_fish_pos:
@@ -411,11 +464,15 @@ class MemoryReelingTracker:
             self.last_time = now
             self.last_fish_xy = (x, y)
 
-        right = self._read_player_right_vec(self.player_addr)
-        right_source = "player_matrix"
-        if right is None:
+        if using_local_fish_frame:
             right = (1.0, 0.0)
-            right_source = "velocity_x_fallback"
+            right_source = "fish_local_frame"
+        else:
+            right = self._read_player_right_vec(self.player_addr)
+            right_source = "player_matrix"
+            if right is None:
+                right = (1.0, 0.0)
+                right_source = "velocity_x_fallback"
 
         lateral = (x - px) * right[0] + (y - py) * right[1]
         velocity_along = self.velocity_xy[0] * right[0] + self.velocity_xy[1] * right[1]
@@ -425,7 +482,7 @@ class MemoryReelingTracker:
             now=now,
             fish_addr=self.fish_addr,
             using_stale_fish_pos=using_stale_fish_pos,
-            player_pos=player_pos,
+            player_pos=control_player_pos,
             fish_pos=fish_pos,
         )
         fish_heading_x: float | None = None
@@ -436,6 +493,7 @@ class MemoryReelingTracker:
                 f"player={self._fmt_addr(self.player_addr)} fish={self._fmt_addr(self.fish_addr)} "
                 f"pp=({px:.3f},{py:.3f},{pz:.3f}) fp=({x:.3f},{y:.3f},{z:.3f}) "
                 f"offsets=0x{player_pos_offset:X}/0x{fish_pos_offset:X} "
+                f"frame={'fish_local' if using_local_fish_frame else 'world'} "
                 f"right=({right[0]:.4f},{right[1]:.4f},{right_source}) "
                 f"vel=({self.velocity_xy[0]:.4f},{self.velocity_xy[1]:.4f}) dist={distance:.3f} "
                 f"heading={fish_heading_x} "
@@ -474,15 +532,60 @@ class MemoryReelingTracker:
             self._motion_stationary_since = now
         return now - self._motion_stationary_since >= STATIONARY_TARGET_SECONDS
 
-    def _read_fish_direction(self, fish_addr: int) -> tuple[float, int, float] | None:
+    def _read_fish_direction(
+        self,
+        fish_addr: int,
+        allowed_offsets: frozenset[int] | None = None,
+        blocked_offsets: set[int] | None = None,
+    ) -> tuple[float, int, float] | None:
         for offset, eps, polarity in FISH_DIRECTION_FIELDS:
+            if allowed_offsets is not None and offset not in allowed_offsets:
+                continue
+            if blocked_offsets is not None and offset in blocked_offsets:
+                continue
             value = self._f32(fish_addr + offset)
             if value is None or not math.isfinite(value):
+                continue
+            if abs(value) > FISH_DIRECTION_MAX_ABS:
                 continue
             move_val = value * polarity
             if abs(move_val) >= eps:
                 return (DIRECTION_MOVE if move_val > 0 else -DIRECTION_MOVE), offset, value
         return None
+
+    def _ensure_direction_tracking_target(self) -> None:
+        if self._direction_watch_addr != self.fish_addr:
+            self._reset_direction_tracking(self.fish_addr)
+
+    def _reset_direction_tracking(self, fish_addr: int | None = None) -> None:
+        self._direction_watch_addr = fish_addr
+        self._direction_watch = {}
+        self._blocked_direction_offsets = set()
+
+    def _is_stale_direction_signal(self, now: float, offset: int, raw_value: float) -> bool:
+        previous = self._direction_watch.get(offset)
+        if previous is None:
+            self._direction_watch[offset] = (raw_value, now)
+            return False
+        last_value, changed_at = previous
+        if abs(raw_value - last_value) > DIRECTION_STALE_EPS:
+            self._direction_watch[offset] = (raw_value, now)
+            return False
+        return now - changed_at >= DIRECTION_STALE_SECONDS
+
+    def _format_direction_candidates(self, fish_addr: int | None) -> str:
+        if fish_addr is None:
+            return ""
+        parts: list[str] = []
+        for offset, _eps, polarity in FISH_DIRECTION_FIELDS:
+            value = self._f32(fish_addr + offset)
+            if value is None or not math.isfinite(value):
+                continue
+            if abs(value) > FISH_DIRECTION_MAX_ABS:
+                continue
+            blocked = "*" if offset in self._blocked_direction_offsets else ""
+            parts.append(f"0x{offset:X}{blocked}={value:.5f}/{value * polarity:.5f}")
+        return ",".join(parts)
 
     def _apply_move(self, move_val: float, action_eps: float) -> str:
         if move_val > action_eps:
@@ -601,7 +704,12 @@ class MemoryReelingTracker:
                 f"{reason} addr={self._fmt_addr(self.fish_addr)} "
                 f"pos={position} distance={distance_text}"
             )
+        if self.held_key:
+            self._release_key(self.held_key)
         self.fish_addr = None
+        self._fish_direction_offsets = FISH_PRIMARY_DIRECTION_OFFSETS
+        self._fish_confirmed_hash = False
+        self._reset_direction_tracking()
         self.last_fish_xy = None
         self.last_fish_pos = None
         self.last_fish_pos_offset = None
@@ -798,10 +906,10 @@ class MemoryReelingTracker:
     def _read_fish_pos_relative(
         self,
         addr: int,
-        player_pos: tuple[float, float, float],
+        player_pos: tuple[float, float, float] | None,
         max_dist: float = TRACK_MAX_DIST,
     ) -> tuple[tuple[float, float, float], int] | None:
-        px, py, pz = player_pos
+        px, py, pz = player_pos if player_pos is not None else (0.0, 0.0, 0.0)
         offsets = FISH_POS_OFFSETS
         if self.last_fish_pos_offset in FISH_POS_OFFSETS:
             offsets = (self.last_fish_pos_offset,) + tuple(offset for offset in FISH_POS_OFFSETS if offset != self.last_fish_pos_offset)
@@ -815,10 +923,30 @@ class MemoryReelingTracker:
                 continue
             if abs(x) + abs(y) < 0.5:
                 continue
+            if self._is_invalid_fish_pos(pos):
+                continue
+            if self._is_fishing_local_pos(pos):
+                return pos, offset
+            if player_pos is None:
+                continue
             dist = math.sqrt((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2)
             if 1.0 < dist < max_dist:
                 return pos, offset
         return None
+
+    @staticmethod
+    def _is_fishing_local_pos(pos: tuple[float, float, float]) -> bool:
+        x, y, z = pos
+        return (
+            FISH_LOCAL_X_RANGE[0] <= x <= FISH_LOCAL_X_RANGE[1]
+            and FISH_LOCAL_Y_RANGE[0] <= y <= FISH_LOCAL_Y_RANGE[1]
+            and FISH_LOCAL_Z_RANGE[0] <= z <= FISH_LOCAL_Z_RANGE[1]
+            and abs(x) + abs(y) >= 0.5
+        )
+
+    @staticmethod
+    def _is_invalid_fish_pos(pos: tuple[float, float, float]) -> bool:
+        return all(-1.05 <= value <= -0.95 for value in pos)
 
     def _is_ptr(self, addr: int | None) -> bool:
         return bool(addr and PTR_MIN <= addr <= PTR_MAX)
@@ -927,7 +1055,7 @@ class MemoryReelingTracker:
             debug_log(f"REPLAY_SEARCH skipped p_iface={self._fmt_addr(p_iface)} player_pos={player_pos}")
             return None
         if player_pos is None:
-            return self._find_fish_addr_replay_hash_only(p_iface)
+            return self._find_fish_addr_replay_hash_only(p_iface) or self._find_fish_addr_replay_broad(p_iface, None)
         ped_candidates: list[tuple[int, int, int, int, int | None, int | None]] = []
         for ri_off in (0x8, 0x20, 0x18, 0x10, 0x28):
             p_ped_iface = self._u64(p_iface + ri_off)
@@ -988,12 +1116,21 @@ class MemoryReelingTracker:
             )
             return None
         px, py, pz = player_pos
-        best_hash: tuple[float, int] | None = None
-        debug_candidates: list[tuple[float, int, int | None, tuple[float, float, float], int]] = []
+        best_signal: tuple[float, int, int | None, tuple[float, float, float], str] | None = None
+        debug_candidates: list[tuple[float, int, int | None, tuple[float, float, float], int, str]] = []
         limit = min(max_peds or 256, 2048)
         for i in range(limit):
             ent_addr = self._u64(p_ped_list + i * 0x10)
             if not self._is_ptr(ent_addr) or ent_addr == self.player_addr or self._is_rejected_fish(ent_addr):
+                continue
+            signal = self._read_fish_candidate_signal(ent_addr, player_pos)
+            if signal is not None:
+                signal_d2, signal_hash, signal_pos, signal_source = signal
+                debug_candidates.append((signal_d2, ent_addr, signal_hash, signal_pos, i, signal_source))
+                if best_signal is None or self._fish_signal_key(signal) < self._fish_signal_key(
+                    (best_signal[0], best_signal[2], best_signal[3], best_signal[4])
+                ):
+                    best_signal = (signal_d2, ent_addr, signal_hash, signal_pos, signal_source)
                 continue
             pos = self._read_pos(ent_addr)
             if pos is None:
@@ -1003,14 +1140,8 @@ class MemoryReelingTracker:
             if not (1.0 < d2 < TRACK_MAX_DIST * TRACK_MAX_DIST):
                 continue
             entity_hash = self._read_entity_hash(ent_addr)
-            fish_item = self._read_fish_pos_relative(ent_addr, player_pos) if entity_hash == FISH_MODEL_HASH else None
-            fish_pos = fish_item[0] if fish_item else pos
-            fish_dx, fish_dy, fish_dz = fish_pos[0] - px, fish_pos[1] - py, fish_pos[2] - pz
-            fish_d2 = fish_dx * fish_dx + fish_dy * fish_dy + fish_dz * fish_dz
-            debug_candidates.append((fish_d2, ent_addr, entity_hash, fish_pos, i))
-            if entity_hash == FISH_MODEL_HASH and fish_item is not None and (best_hash is None or fish_d2 < best_hash[0]):
-                best_hash = (fish_d2, ent_addr)
-        chosen = best_hash
+            debug_candidates.append((d2, ent_addr, entity_hash, pos, i, "nearby"))
+        chosen = best_signal
         closest = sorted(debug_candidates, key=lambda item: item[0])[:12]
         debug_log(
             "REPLAY_SEARCH "
@@ -1020,13 +1151,15 @@ class MemoryReelingTracker:
             f"chosen={self._fmt_addr(None if chosen is None else chosen[1])} "
             f"candidates="
             + " | ".join(
-                f"i={i} addr={self._fmt_addr(addr)} hash={h} d={math.sqrt(d2):.2f} pos=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f})"
-                for d2, addr, h, pos, i in closest
+                f"i={i} addr={self._fmt_addr(addr)} hash={h} d={math.sqrt(d2):.2f} "
+                f"source={source} pos=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f})"
+                for d2, addr, h, pos, i, source in closest
             )
         )
         if chosen is not None:
+            self._set_fish_signal_profile(chosen[2])
             return chosen[1]
-        return self._find_fish_addr_replay_broad(p_iface, player_pos)
+        return self._find_fish_addr_replay_hash_only(p_iface) or self._find_fish_addr_replay_broad(p_iface, player_pos)
 
     def _find_fish_addr_replay_hash_only(self, p_iface: int) -> int | None:
         for iface_off, list_off, stride, index in list(self._replay_broad_paths):
@@ -1044,6 +1177,7 @@ class MemoryReelingTracker:
                 if not self._is_ptr(ent_addr) or ent_addr == self.player_addr or self._is_rejected_fish(ent_addr):
                     continue
                 if self._read_entity_hash(ent_addr) == FISH_MODEL_HASH:
+                    self._set_fish_signal_profile(FISH_MODEL_HASH)
                     self._remember_replay_broad_path(iface_off, list_off, stride, idx)
                     debug_log(
                         "REPLAY_HASH_CACHED "
@@ -1069,6 +1203,7 @@ class MemoryReelingTracker:
                         continue
                     if self._read_entity_hash(ent_addr) != FISH_MODEL_HASH:
                         continue
+                    self._set_fish_signal_profile(FISH_MODEL_HASH)
                     hits.append((ent_addr, iface_off, list_off, index))
                     self._remember_replay_broad_path(iface_off, list_off, 0x10, index)
                     debug_log(
@@ -1080,13 +1215,13 @@ class MemoryReelingTracker:
         debug_log("REPLAY_HASH_ONLY no fish hash found")
         return None
 
-    def _find_fish_addr_replay_broad(self, p_iface: int, player_pos: tuple[float, float, float]) -> int | None:
+    def _find_fish_addr_replay_broad(self, p_iface: int, player_pos: tuple[float, float, float] | None) -> int | None:
         cached = self._find_fish_addr_replay_broad_cached(p_iface, player_pos)
         if cached is not None:
             return cached
-        best: tuple[float, int, int, int, int, int, tuple[float, float, float]] | None = None
+        best: tuple[float, int, int | None, int, int, int, int, tuple[float, float, float], str] | None = None
         checked_lists = 0
-        fish_hits: list[tuple[float, int, int, int, int, int, tuple[float, float, float]]] = []
+        fish_hits: list[tuple[float, int, int | None, int, int, int, int, tuple[float, float, float], str]] = []
         for iface_off in range(0, 0x50, 0x8):
             iface = self._u64(p_iface + iface_off)
             if not self._is_ptr(iface):
@@ -1097,21 +1232,17 @@ class MemoryReelingTracker:
                     continue
                 checked_lists += 1
                 for stride in (0x8, 0x10):
-                    for i in range(256):
+                    for i in range(REPLAY_BROAD_SCAN_LIMIT):
                         ent_addr = self._u64(p_list + i * stride)
                         if not self._is_ptr(ent_addr) or ent_addr == self.player_addr or self._is_rejected_fish(ent_addr):
                             continue
-                        if self._read_entity_hash(ent_addr) != FISH_MODEL_HASH:
+                        signal = self._read_fish_candidate_signal(ent_addr, player_pos)
+                        if signal is None:
                             continue
-                        fish_item = self._read_fish_pos_relative(ent_addr, player_pos)
-                        if fish_item is None:
-                            continue
-                        pos, _ = fish_item
-                        px, py, pz = player_pos
-                        d2 = (pos[0] - px) ** 2 + (pos[1] - py) ** 2 + (pos[2] - pz) ** 2
-                        hit = (d2, ent_addr, iface_off, list_off, stride, i, pos)
+                        d2, entity_hash, pos, source = signal
+                        hit = (d2, ent_addr, entity_hash, iface_off, list_off, stride, i, pos, source)
                         fish_hits.append(hit)
-                        if best is None or d2 < best[0]:
+                        if best is None or self._fish_signal_key(signal) < self._fish_signal_key((best[0], best[2], best[7], best[8])):
                             best = hit
                             self._remember_replay_broad_path(iface_off, list_off, stride, i)
         debug_log(
@@ -1119,18 +1250,23 @@ class MemoryReelingTracker:
             f"checked_lists={checked_lists} chosen={self._fmt_addr(None if best is None else best[1])} "
             f"hits="
             + " | ".join(
-                f"addr={self._fmt_addr(addr)} d={math.sqrt(d2):.2f} iface_off=0x{iface_off:X} "
+                f"addr={self._fmt_addr(addr)} hash={entity_hash} d={math.sqrt(d2):.2f} source={source} "
+                f"iface_off=0x{iface_off:X} "
                 f"list_off=0x{list_off:X} stride=0x{stride:X} i={idx} "
                 f"pos=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f})"
-                for d2, addr, iface_off, list_off, stride, idx, pos in sorted(fish_hits, key=lambda item: item[0])[:8]
+                for d2, addr, entity_hash, iface_off, list_off, stride, idx, pos, source in sorted(
+                    fish_hits, key=lambda item: self._fish_signal_key((item[0], item[2], item[7], item[8]))
+                )[:8]
             )
         )
-        return None if best is None else best[1]
+        if best is None:
+            return None
+        self._set_fish_signal_profile(best[2])
+        return best[1]
 
-    def _find_fish_addr_replay_broad_cached(self, p_iface: int, player_pos: tuple[float, float, float]) -> int | None:
+    def _find_fish_addr_replay_broad_cached(self, p_iface: int, player_pos: tuple[float, float, float] | None) -> int | None:
         if not self._replay_broad_paths:
             return None
-        px, py, pz = player_pos
         for iface_off, list_off, stride, index in list(self._replay_broad_paths):
             iface = self._u64(p_iface + iface_off)
             if not self._is_ptr(iface):
@@ -1140,24 +1276,22 @@ class MemoryReelingTracker:
                 continue
             for delta in (0, -1, 1, -2, 2, -4, 4, -8, 8):
                 idx = index + delta
-                if idx < 0 or idx >= 256:
+                if idx < 0 or idx >= REPLAY_BROAD_SCAN_LIMIT:
                     continue
                 ent_addr = self._u64(p_list + idx * stride)
                 if not self._is_ptr(ent_addr) or ent_addr == self.player_addr or self._is_rejected_fish(ent_addr):
                     continue
-                if self._read_entity_hash(ent_addr) != FISH_MODEL_HASH:
+                signal = self._read_fish_candidate_signal(ent_addr, player_pos)
+                if signal is None:
                     continue
-                fish_item = self._read_fish_pos_relative(ent_addr, player_pos)
-                if fish_item is None:
-                    continue
-                pos, _ = fish_item
-                d2 = (pos[0] - px) ** 2 + (pos[1] - py) ** 2 + (pos[2] - pz) ** 2
+                d2, entity_hash, pos, source = signal
                 debug_log(
                     "REPLAY_BROAD_CACHED "
-                    f"chosen={self._fmt_addr(ent_addr)} d={math.sqrt(d2):.2f} "
+                    f"chosen={self._fmt_addr(ent_addr)} hash={entity_hash} d={math.sqrt(d2):.2f} source={source} "
                     f"iface_off=0x{iface_off:X} list_off=0x{list_off:X} stride=0x{stride:X} i={idx} "
                     f"pos=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f})"
                 )
+                self._set_fish_signal_profile(entity_hash)
                 self._remember_replay_broad_path(iface_off, list_off, stride, idx)
                 return ent_addr
         return None
@@ -1168,6 +1302,55 @@ class MemoryReelingTracker:
             self._replay_broad_paths.remove(item)
         self._replay_broad_paths.insert(0, item)
         del self._replay_broad_paths[16:]
+
+    def _read_fish_candidate_signal(
+        self,
+        ent_addr: int,
+        player_pos: tuple[float, float, float] | None,
+    ) -> tuple[float, int | None, tuple[float, float, float], str] | None:
+        fish_item = self._read_fish_pos_relative(ent_addr, player_pos)
+        if fish_item is None:
+            return None
+        pos, _ = fish_item
+        if player_pos is None or self._is_fishing_local_pos(pos):
+            d2 = pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]
+        else:
+            px, py, pz = player_pos
+            d2 = (pos[0] - px) ** 2 + (pos[1] - py) ** 2 + (pos[2] - pz) ** 2
+        entity_hash = self._read_entity_hash(ent_addr)
+        if entity_hash == FISH_MODEL_HASH:
+            return d2, entity_hash, pos, "hash"
+        if not ALLOW_UNKNOWN_FISH_CANDIDATES:
+            return None
+        if not self._is_fishing_local_pos(pos):
+            return None
+        direction = self._read_fish_direction(ent_addr, FISH_PRIMARY_DIRECTION_OFFSETS)
+        if direction is not None:
+            _, direction_offset, _ = direction
+            return d2, entity_hash, pos, f"direction_0x{direction_offset:X}"
+        return None
+
+    @staticmethod
+    def _fish_signal_key(signal: tuple[float, int | None, tuple[float, float, float], str]) -> tuple[int, float]:
+        d2, entity_hash, _pos, source = signal
+        if entity_hash == FISH_MODEL_HASH:
+            return 0, d2
+        rank = 99
+        if source.startswith("direction_0x"):
+            try:
+                offset = int(source.removeprefix("direction_0x"), 16)
+            except ValueError:
+                offset = -1
+            rank = 1 + FISH_DIRECTION_SOURCE_RANK.get(offset, 90)
+        return rank, d2
+
+    def _set_fish_signal_profile(self, entity_hash: int | None) -> None:
+        self._fish_confirmed_hash = entity_hash == FISH_MODEL_HASH
+        self._fish_direction_offsets = self._direction_offsets_for_signal(entity_hash)
+
+    @staticmethod
+    def _direction_offsets_for_signal(entity_hash: int | None) -> frozenset[int]:
+        return FISH_PRIMARY_DIRECTION_OFFSETS
 
     def _cped_hint_range(self, cped_addr: int, half: int = SCAN_HALF_RANGE) -> tuple[int, int]:
         return max(PTR_MIN, cped_addr - half), min(PTR_MAX, cped_addr + half)
@@ -1303,6 +1486,7 @@ class MemoryReelingTracker:
             )
         )
         if chosen:
+            self._set_fish_signal_profile(FISH_MODEL_HASH)
             self._log(f"Memory reeling scan fish candidate: {self._fmt_addr(chosen[1])}")
         return None if chosen is None else chosen[1]
 

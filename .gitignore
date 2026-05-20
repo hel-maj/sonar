@@ -37,6 +37,7 @@ dist/
 /config/*.key
 /config/*.secret
 /config/*.local.*
+/config/streaming/
 !/config/*.example.json
 
 # Runtime logs, captures, and generated data

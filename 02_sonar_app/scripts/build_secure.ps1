@@ -19,6 +19,9 @@ if (-not $SkipInstall) {
     if ($LASTEXITCODE -ne 0) { throw "Failed to install build dependencies" }
 }
 
+python (Join-Path $Root "scripts\prepare_streaming_binaries.py")
+if ($LASTEXITCODE -ne 0) { throw "Failed to prepare streaming binaries" }
+
 if (Test-Path $BuildParent) {
     Remove-Item -LiteralPath $BuildParent -Recurse -Force
 }

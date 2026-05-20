@@ -14,6 +14,11 @@ class FishingSettings:
     store_in_trunk: bool = True
     shutdown_on_overweight: bool = False
     overweight_action: str = "stop"
+    fish_without_leader: bool = False
+    leader_depleted_action: str = "stop"
+    fish_without_net: bool = True
+    net_depleted_action: str = "stop"
+    equipment_depleted_action: str = "stop"
     fish_settings: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_FISH_SETTINGS))
     hotkey: str = "F9"
     inventory_hotkey: str = "i"
@@ -41,6 +46,15 @@ class FishingSettings:
             overweight_action = "stop"
         if overweight_action not in {"release", "stop", "exit_game"}:
             overweight_action = defaults.overweight_action
+        leader_depleted_action = str(data.get("leader_depleted_action", defaults.leader_depleted_action))
+        if leader_depleted_action not in {"stop", "exit_game"}:
+            leader_depleted_action = defaults.leader_depleted_action
+        net_depleted_action = str(data.get("net_depleted_action", defaults.net_depleted_action))
+        if net_depleted_action not in {"stop", "exit_game"}:
+            net_depleted_action = defaults.net_depleted_action
+        equipment_depleted_action = str(data.get("equipment_depleted_action", defaults.equipment_depleted_action))
+        if equipment_depleted_action not in {"stop", "exit_game", "shutdown_pc"}:
+            equipment_depleted_action = defaults.equipment_depleted_action
         return cls(
             auto_meal=bool(data.get("auto_meal", defaults.auto_meal)),
             auto_change_bait=bool(data.get("auto_change_bait", defaults.auto_change_bait)),
@@ -48,6 +62,11 @@ class FishingSettings:
             store_in_trunk=bool(data.get("store_in_trunk", defaults.store_in_trunk)),
             shutdown_on_overweight=bool(data.get("shutdown_on_overweight", overweight_action == "stop")),
             overweight_action=overweight_action,
+            fish_without_leader=bool(data.get("fish_without_leader", defaults.fish_without_leader)),
+            leader_depleted_action=leader_depleted_action,
+            fish_without_net=bool(data.get("fish_without_net", defaults.fish_without_net)),
+            net_depleted_action=net_depleted_action,
+            equipment_depleted_action=equipment_depleted_action,
             fish_settings=fish_settings,
             hotkey=str(data.get("hotkey", defaults.hotkey)),
             inventory_hotkey=str(data.get("inventory_hotkey", defaults.inventory_hotkey)),

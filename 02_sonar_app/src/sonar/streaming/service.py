@@ -10,6 +10,9 @@ import tempfile
 import threading
 import time
 import uuid
+import urllib.error
+import urllib.request
+import zipfile
 from dataclasses import asdict, dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,12 +20,20 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from sonar.paths import RESOURCE_DIR
+from sonar.paths import CONFIG_DIR, PROJECT_DIR, RESOURCE_DIR
 
 
 VIEWER_TIMEOUT_SECONDS = 180.0
 STREAM_TEMP_PREFIX = "sonar-stream-"
 CLOUDFLARED_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
+STREAMING_RESOURCE_DIR = RESOURCE_DIR / "streaming"
+STREAMING_CACHE_DIR = CONFIG_DIR / "streaming"
+LEGACY_STREAMING_CACHE_DIR = PROJECT_DIR / "02_sonar_app" / "config" / "streaming"
+FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+CLOUDFLARED_DOWNLOAD_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+DOWNLOAD_TIMEOUT_SECONDS = 180.0
+HLS_READY_TIMEOUT_SECONDS = 15.0
+HLS_READY_POLL_SECONDS = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +189,7 @@ STREAM_PAGE_HTML = r"""<!doctype html>
     function App() {
       const videoRef = useRef(null);
       const playerRef = useRef(null);
+      const sourceKeyRef = useRef("");
       const [status, setStatus] = useState(null);
       const [busy, setBusy] = useState(false);
 
@@ -207,8 +219,40 @@ STREAM_PAGE_HTML = r"""<!doctype html>
           liveui: true,
           fluid: false,
           sources: [{ src: "/hls/live.m3u8", type: "application/x-mpegURL" }],
+          html5: {
+            vhs: {
+              liveRangeSafeTimeDelta: 12,
+              smoothQualityChange: true,
+            },
+          },
+          liveTracker: {
+            trackingThreshold: 12,
+            liveTolerance: 12,
+          },
         });
       }, [videoRef.current]);
+
+      useEffect(() => {
+        const player = playerRef.current;
+        if (!player || status?.status !== "online" || !status?.active || !status?.hls_url) return;
+        const sourceKey = [
+          status.started_at || "",
+          status.quality || "",
+          status.area || "",
+          status.chat_zoom_enabled ? "chat" : "full",
+        ].join(":");
+        if (sourceKeyRef.current === sourceKey) return;
+        sourceKeyRef.current = sourceKey;
+        player.src({
+          src: `/hls/live.m3u8?stream=${encodeURIComponent(sourceKey)}&t=${Date.now()}`,
+          type: "application/x-mpegURL",
+        });
+        player.load();
+        const playResult = player.play();
+        if (playResult && typeof playResult.catch === "function") {
+          playResult.catch(() => {});
+        }
+      }, [status?.status, status?.active, status?.started_at, status?.quality, status?.area, status?.chat_zoom_enabled, status?.hls_url]);
 
       const areaText = status?.area === "chat" ? "Чат" : "Все окно";
       const autoStopText = useMemo(() => {
@@ -327,6 +371,7 @@ class StreamingService:
         popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
         temp_root: Path | None = None,
         viewer_timeout_seconds: float = VIEWER_TIMEOUT_SECONDS,
+        prewarm_binaries: bool = True,
     ) -> None:
         self.log_callback = log_callback
         self.chat_mode_callback = chat_mode_callback
@@ -343,6 +388,15 @@ class StreamingService:
         self._chat_mode_enabled = False
         self._started_at: float | None = None
         self._last_viewer_activity_at: float | None = None
+        self._runtime_dir = self.temp_root / f"{STREAM_TEMP_PREFIX}runtime-{uuid.uuid4().hex}"
+        self._ffmpeg_binary: Path | None = None
+        self._cloudflared_binary: Path | None = None
+        self._binary_prepare_error = ""
+        self._binary_ready = threading.Event()
+        self._ffmpeg_ready = threading.Event()
+        self._cloudflared_ready = threading.Event()
+        self._binary_prepare_lock = threading.Lock()
+        self._binary_prepare_thread: threading.Thread | None = None
         self._temp_dir: Path | None = None
         self._hls_dir: Path | None = None
         self._local_url: str | None = None
@@ -352,33 +406,33 @@ class StreamingService:
         self._ffmpeg_process: subprocess.Popen | None = None
         self._cloudflared_process: subprocess.Popen | None = None
         self._monitor_thread: threading.Thread | None = None
+        self._start_thread: threading.Thread | None = None
+        self._tunnel_thread: threading.Thread | None = None
+        self._runtime_token: str | None = None
         self._stop_monitor = threading.Event()
         self._log_files: list[object] = []
         self.cleanup_orphaned_runtime_dirs()
-        atexit.register(self.stop_stream)
+        if prewarm_binaries:
+            self.prepare_binaries_async()
+        atexit.register(self.shutdown)
 
     def start_stream(self) -> bool:
         with self._lock:
             if self._active:
                 return True
-            self._prepare_new_runtime_locked()
-            try:
-                self._start_http_server_locked()
-                self._start_ffmpeg_locked()
-                self._start_cloudflared_locked()
-                self._active = True
-                self._status = "online"
-                self._started_at = self.clock()
-                self._last_viewer_activity_at = self._started_at
-                self._ensure_monitor_locked()
-                self._log("Стрим запущен")
+            if self._status == "starting" and self._start_thread and self._start_thread.is_alive():
                 return True
-            except Exception as exc:
-                self._error = str(exc)
-                self._status = "error"
-                self._log(f"Не удалось запустить стрим: {exc}")
-                self._stop_runtime_locked(clean_temp=True)
-                return False
+            self._prepare_new_runtime_locked()
+            token = uuid.uuid4().hex
+            self._runtime_token = token
+            self._start_thread = threading.Thread(
+                target=self._start_runtime_worker,
+                args=(token,),
+                name="sonar-stream-start",
+                daemon=True,
+            )
+            self._start_thread.start()
+            return True
 
     def stop_stream(self, reason: str = "manual") -> None:
         with self._lock:
@@ -387,6 +441,24 @@ class StreamingService:
             self._log(f"Стрим остановлен: {reason}")
             self._stop_runtime_locked(clean_temp=True)
 
+    def shutdown(self) -> None:
+        with self._lock:
+            self._stop_runtime_locked(clean_temp=True)
+        shutil.rmtree(self._runtime_dir, ignore_errors=True)
+
+    def prepare_binaries_async(self) -> None:
+        if self._binary_prepare_thread and self._binary_prepare_thread.is_alive():
+            return
+        self._binary_ready.clear()
+        self._ffmpeg_ready.clear()
+        self._cloudflared_ready.clear()
+        self._binary_prepare_thread = threading.Thread(
+            target=self._prepare_binaries_worker,
+            name="sonar-stream-binaries",
+            daemon=True,
+        )
+        self._binary_prepare_thread.start()
+
     def snapshot(self) -> StreamSnapshot:
         with self._lock:
             return self._snapshot_locked()
@@ -394,23 +466,29 @@ class StreamingService:
     def set_quality(self, quality: str) -> bool:
         if quality not in STREAM_QUALITIES:
             return False
+        should_restart = False
         with self._lock:
             if self._quality == quality:
                 return True
             self._quality = quality
             if self._active:
-                self._restart_ffmpeg_locked()
-            return True
+                should_restart = True
+        if should_restart:
+            self._restart_ffmpeg()
+        return True
 
     def set_chat_zoom_enabled(self, enabled: bool) -> bool:
+        should_restart = False
         with self._lock:
             enabled = bool(enabled)
             if self._chat_zoom_enabled == enabled:
                 return True
             self._chat_zoom_enabled = enabled
             if self._active:
-                self._restart_ffmpeg_locked()
-            return True
+                should_restart = True
+        if should_restart:
+            self._restart_ffmpeg()
+        return True
 
     def enable_chat_mode(self) -> StreamSnapshot:
         if self.chat_mode_callback is not None:
@@ -451,6 +529,131 @@ class StreamingService:
         self._hls_dir = self._temp_dir / "hls"
         self._hls_dir.mkdir(parents=True, exist_ok=True)
 
+    def _prepare_binaries_worker(self) -> None:
+        with self._binary_prepare_lock:
+            try:
+                self._log("Streaming runtime: подготавливаю portable FFmpeg/cloudflared")
+                ffmpeg = self._resolve_binary(
+                    "ffmpeg.exe",
+                    "ffmpeg",
+                    display_name="FFmpeg",
+                    archive_patterns=("ffmpeg*.zip",),
+                    download_url=os.environ.get("SONAR_STREAM_FFMPEG_URL", FFMPEG_DOWNLOAD_URL),
+                )
+                with self._lock:
+                    self._ffmpeg_binary = ffmpeg
+                    self._binary_prepare_error = "" if ffmpeg is not None else "FFmpeg не подготовлен"
+                self._ffmpeg_ready.set()
+                if ffmpeg is not None:
+                    self._log("Streaming runtime: FFmpeg готов")
+
+                cloudflared = self._resolve_binary(
+                    "cloudflared.exe",
+                    "cloudflared",
+                    display_name="cloudflared",
+                    archive_patterns=("cloudflared*.zip",),
+                    download_url=os.environ.get("SONAR_STREAM_CLOUDFLARED_URL", CLOUDFLARED_DOWNLOAD_URL),
+                )
+                with self._lock:
+                    self._cloudflared_binary = cloudflared
+                self._cloudflared_ready.set()
+                if cloudflared is not None:
+                    self._log("Streaming runtime: cloudflared готов")
+            except Exception as exc:
+                with self._lock:
+                    self._binary_prepare_error = str(exc)
+                self._log(f"Streaming runtime: подготовка не удалась: {exc}")
+            finally:
+                self._ffmpeg_ready.set()
+                self._cloudflared_ready.set()
+                self._binary_ready.set()
+
+    def _start_runtime_worker(self, token: str) -> None:
+        try:
+            ffmpeg = self._resolve_ffmpeg_binary(wait_timeout=None)
+            if ffmpeg is None:
+                raise RuntimeError(
+                    "FFmpeg не удалось подготовить автоматически. "
+                    "В portable-сборке должен быть resources/streaming/ffmpeg*.zip или ffmpeg.exe."
+                )
+            with self._lock:
+                if token != self._runtime_token or self._status != "starting":
+                    return
+                self._start_http_server_locked()
+                self._start_ffmpeg_process_locked(ffmpeg)
+                self._log("Стрим: ожидаю первые HLS-сегменты")
+            self._wait_for_hls_ready(token)
+            with self._lock:
+                if token != self._runtime_token or self._status != "starting":
+                    return
+                self._active = True
+                self._status = "online"
+                self._started_at = self.clock()
+                self._last_viewer_activity_at = self._started_at
+                self._ensure_monitor_locked()
+                self._log("Стрим запущен")
+                self._tunnel_thread = threading.Thread(
+                    target=self._start_tunnel_worker,
+                    args=(token,),
+                    name="sonar-stream-tunnel",
+                    daemon=True,
+                )
+                self._tunnel_thread.start()
+        except Exception as exc:
+            with self._lock:
+                if token != self._runtime_token:
+                    return
+                error = str(exc)
+                self._log(f"Не удалось запустить стрим: {exc}")
+                self._stop_runtime_locked(clean_temp=True)
+                self._error = error
+                self._status = "error"
+
+    def _start_tunnel_worker(self, token: str) -> None:
+        cloudflared = self._resolve_cloudflared_binary(wait_timeout=None)
+        if cloudflared is None:
+            self._log("cloudflared не удалось подготовить автоматически, ссылка будет локальной")
+            return
+        with self._lock:
+            if token != self._runtime_token or not self._active:
+                return
+            try:
+                self._start_cloudflared_process_locked(cloudflared)
+            except Exception as exc:
+                self._log(f"cloudflared не запустился: {exc}")
+
+    def _wait_for_hls_ready(self, token: str) -> None:
+        deadline = time.monotonic() + HLS_READY_TIMEOUT_SECONDS
+        while True:
+            with self._lock:
+                if token != self._runtime_token or self._status != "starting":
+                    return
+                process = self._ffmpeg_process
+                hls_dir = self._hls_dir
+            if process is not None and process.poll() is not None:
+                raise RuntimeError("FFmpeg завершился до готовности HLS")
+            if self._hls_playlist_ready(hls_dir):
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("FFmpeg не создал HLS-плейлист за 15 секунд")
+            time.sleep(HLS_READY_POLL_SECONDS)
+
+    @staticmethod
+    def _hls_playlist_ready(hls_dir: Path | None) -> bool:
+        if hls_dir is None:
+            return False
+        playlist = hls_dir / "live.m3u8"
+        if not playlist.exists() or playlist.stat().st_size <= 0:
+            return False
+        try:
+            text = playlist.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return False
+        segment_names = [line.strip() for line in text.splitlines() if line.strip() and not line.startswith("#")]
+        if not segment_names or "#EXTINF" not in text:
+            return False
+        return any((hls_dir / name).exists() and (hls_dir / name).stat().st_size > 0 for name in segment_names)
+
     def _start_http_server_locked(self) -> None:
         service = self
 
@@ -465,9 +668,31 @@ class StreamingService:
         self._server_thread.start()
 
     def _start_ffmpeg_locked(self) -> None:
-        ffmpeg = self._find_binary("ffmpeg.exe", "ffmpeg")
+        ffmpeg = self._resolve_ffmpeg_binary()
         if ffmpeg is None:
-            raise RuntimeError("ffmpeg не найден: положите ffmpeg.exe в resources/streaming или добавьте в PATH")
+            raise RuntimeError(
+                "FFmpeg не удалось подготовить автоматически. "
+                "В portable-сборке должен быть resources/streaming/ffmpeg*.zip или ffmpeg.exe."
+            )
+        self._start_ffmpeg_process_locked(ffmpeg)
+
+    def _resolve_ffmpeg_binary(self, *, wait_timeout: float | None = 0.05) -> Path | None:
+        if self._ffmpeg_binary is not None and self._ffmpeg_binary.exists():
+            return self._ffmpeg_binary
+        if self._binary_prepare_thread and self._binary_prepare_thread.is_alive():
+            self._ffmpeg_ready.wait(timeout=wait_timeout)
+            if self._ffmpeg_binary is not None and self._ffmpeg_binary.exists():
+                return self._ffmpeg_binary
+            return None
+        return self._resolve_binary(
+            "ffmpeg.exe",
+            "ffmpeg",
+            display_name="FFmpeg",
+            archive_patterns=("ffmpeg*.zip",),
+            download_url=os.environ.get("SONAR_STREAM_FFMPEG_URL", FFMPEG_DOWNLOAD_URL),
+        )
+
+    def _start_ffmpeg_process_locked(self, ffmpeg: Path) -> None:
         if self._hls_dir is None:
             raise RuntimeError("HLS папка не подготовлена")
         log_file = self._open_log_file_locked("ffmpeg.log")
@@ -475,9 +700,30 @@ class StreamingService:
         self._ffmpeg_process = self._popen(command, stdout=log_file, stderr=subprocess.STDOUT)
 
     def _start_cloudflared_locked(self) -> None:
-        cloudflared = self._find_binary("cloudflared.exe", "cloudflared")
+        cloudflared = self._resolve_cloudflared_binary()
         if cloudflared is None or self._local_url is None:
-            self._log("cloudflared не найден, ссылка будет локальной")
+            self._log("cloudflared не удалось подготовить автоматически, ссылка будет локальной")
+            return
+        self._start_cloudflared_process_locked(cloudflared)
+
+    def _resolve_cloudflared_binary(self, *, wait_timeout: float | None = 0.05) -> Path | None:
+        if self._cloudflared_binary is not None and self._cloudflared_binary.exists():
+            return self._cloudflared_binary
+        if self._binary_prepare_thread and self._binary_prepare_thread.is_alive():
+            self._cloudflared_ready.wait(timeout=wait_timeout)
+            if self._cloudflared_binary is not None and self._cloudflared_binary.exists():
+                return self._cloudflared_binary
+            return None
+        return self._resolve_binary(
+            "cloudflared.exe",
+            "cloudflared",
+            display_name="cloudflared",
+            archive_patterns=("cloudflared*.zip",),
+            download_url=os.environ.get("SONAR_STREAM_CLOUDFLARED_URL", CLOUDFLARED_DOWNLOAD_URL),
+        )
+
+    def _start_cloudflared_process_locked(self, cloudflared: Path) -> None:
+        if self._local_url is None:
             return
         log_file = self._open_log_file_locked("cloudflared.log")
         command = [str(cloudflared), "tunnel", "--url", self._local_url]
@@ -509,21 +755,46 @@ class StreamingService:
             self._log(f"cloudflared output error: {exc}")
 
     def _restart_ffmpeg_locked(self) -> None:
-        if not self._active:
-            return
-        self._terminate_process(self._ffmpeg_process)
-        self._ffmpeg_process = None
-        if self._hls_dir is not None:
-            shutil.rmtree(self._hls_dir, ignore_errors=True)
-            self._hls_dir.mkdir(parents=True, exist_ok=True)
-        self._status = "starting"
+        token = self._runtime_token
         try:
-            self._start_ffmpeg_locked()
-            self._status = "online"
+            self._restart_ffmpeg()
         except Exception as exc:
-            self._error = str(exc)
-            self._status = "error"
-            self._log(f"Не удалось переключить стрим: {exc}")
+            with self._lock:
+                if token != self._runtime_token:
+                    return
+                self._error = str(exc)
+                self._status = "error"
+                self._log(f"Не удалось переключить стрим: {exc}")
+
+    def _restart_ffmpeg(self) -> None:
+        token: str | None = None
+        try:
+            with self._lock:
+                if not self._active:
+                    return
+                token = self._runtime_token
+                self._terminate_process(self._ffmpeg_process)
+                self._ffmpeg_process = None
+                if self._hls_dir is not None:
+                    shutil.rmtree(self._hls_dir, ignore_errors=True)
+                    self._hls_dir.mkdir(parents=True, exist_ok=True)
+                self._status = "starting"
+                self._start_ffmpeg_locked()
+                self._log("Стрим: ожидаю HLS после переключения области")
+            if token is not None:
+                self._wait_for_hls_ready(token)
+            with self._lock:
+                if token != self._runtime_token or not self._active:
+                    return
+                self._error = ""
+                self._status = "online"
+        except Exception as exc:
+            with self._lock:
+                if token != self._runtime_token:
+                    return
+                self._error = str(exc)
+                self._status = "error"
+                self._log(f"Не удалось переключить стрим: {exc}")
 
     def _ensure_monitor_locked(self) -> None:
         if self._monitor_thread and self._monitor_thread.is_alive():
@@ -535,12 +806,15 @@ class StreamingService:
     def _monitor_loop(self) -> None:
         while not self._stop_monitor.wait(2.0):
             should_stop = False
+            restart_needed = False
             with self._lock:
                 if self._active and self._should_auto_stop_locked():
                     should_stop = True
                 if self._active and self._ffmpeg_process and self._ffmpeg_process.poll() is not None:
                     self._log("FFmpeg завершился, перезапускаю стрим")
-                    self._restart_ffmpeg_locked()
+                    restart_needed = True
+            if restart_needed:
+                self._restart_ffmpeg()
             if should_stop:
                 self.stop_stream("нет зрителей 3 минуты")
 
@@ -580,6 +854,7 @@ class StreamingService:
         self._public_url = None
         self._started_at = None
         self._last_viewer_activity_at = None
+        self._runtime_token = None
 
     def _snapshot_locked(self) -> StreamSnapshot:
         seconds_until_auto_stop: int | None = None
@@ -589,7 +864,7 @@ class StreamingService:
                 seconds_until_auto_stop = max(0, int(self.viewer_timeout_seconds - (self.clock() - reference)))
         return StreamSnapshot(
             active=self._active,
-            status=self._status,
+            status="preparing" if self._status == "offline" and self._binary_prepare_thread and self._binary_prepare_thread.is_alive() else self._status,
             quality=self._quality,
             area="chat" if self._chat_zoom_enabled else "full",
             chat_zoom_enabled=self._chat_zoom_enabled,
@@ -601,7 +876,7 @@ class StreamingService:
             started_at=self._started_at,
             last_viewer_activity_at=self._last_viewer_activity_at,
             seconds_until_auto_stop=seconds_until_auto_stop,
-            error=self._error,
+            error=self._error or self._binary_prepare_error,
         )
 
     def _stream_url_locked(self) -> str | None:
@@ -653,11 +928,13 @@ class StreamingService:
             "-f",
             "hls",
             "-hls_time",
-            "1",
+            "2",
             "-hls_list_size",
-            "6",
+            "12",
+            "-hls_delete_threshold",
+            "12",
             "-hls_flags",
-            "delete_segments+append_list+omit_endlist",
+            "delete_segments+independent_segments+omit_endlist",
             "-hls_segment_filename",
             str(hls_segment),
             str(hls_playlist),
@@ -689,15 +966,140 @@ class StreamingService:
             return f"{int(value[:-1]) * 2}k"
         return value
 
-    def _find_binary(self, windows_name: str, command_name: str) -> Path | None:
-        candidates = [RESOURCE_DIR / "streaming" / windows_name]
-        found = shutil.which(windows_name) or shutil.which(command_name)
+    def _resolve_binary(
+        self,
+        binary_name: str,
+        command_name: str,
+        *,
+        display_name: str,
+        archive_patterns: tuple[str, ...],
+        download_url: str | None,
+    ) -> Path | None:
+        runtime_binary = self._runtime_bin_dir_locked() / binary_name
+        if runtime_binary.exists():
+            return runtime_binary
+
+        env_path = os.environ.get(f"SONAR_STREAM_{command_name.upper()}_PATH", "").strip()
+        source = Path(env_path) if env_path else None
+        if source and source.exists():
+            return self._cache_and_copy_binary(source, binary_name)
+
+        bundled_binary = STREAMING_RESOURCE_DIR / binary_name
+        if bundled_binary.exists():
+            return self._cache_and_copy_binary(bundled_binary, binary_name)
+
+        for cached_binary in self._cached_binary_paths(binary_name):
+            if cached_binary.exists():
+                return self._copy_binary_to_runtime(cached_binary, binary_name)
+
+        for pattern in archive_patterns:
+            for archive_path in sorted(STREAMING_RESOURCE_DIR.glob(pattern)):
+                resolved = self._extract_binary_from_zip(archive_path, binary_name)
+                if resolved is not None:
+                    self._log(f"{display_name}: используется встроенный portable-архив {archive_path.name}")
+                    return resolved
+
+        found = shutil.which(binary_name) or shutil.which(command_name)
         if found:
-            candidates.append(Path(found))
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-        return None
+            return self._cache_and_copy_binary(Path(found), binary_name)
+
+        if not download_url or os.environ.get("SONAR_STREAM_DISABLE_DOWNLOAD") == "1":
+            return None
+
+        try:
+            downloaded = self._download_portable_binary(display_name, binary_name, download_url)
+            if downloaded.suffix.lower() == ".zip":
+                return self._extract_binary_from_zip(downloaded, binary_name)
+            return self._cache_and_copy_binary(downloaded, binary_name)
+        except (OSError, urllib.error.URLError, zipfile.BadZipFile, RuntimeError) as exc:
+            self._log(f"{display_name}: portable-загрузка не удалась: {exc}")
+            return None
+
+    def _runtime_bin_dir_locked(self) -> Path:
+        bin_dir = self._runtime_dir / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        return bin_dir
+
+    @staticmethod
+    def _cached_binary_path(binary_name: str) -> Path:
+        return STREAMING_CACHE_DIR / "bin" / binary_name
+
+    @staticmethod
+    def _cached_binary_paths(binary_name: str) -> tuple[Path, ...]:
+        primary = STREAMING_CACHE_DIR / "bin" / binary_name
+        legacy = LEGACY_STREAMING_CACHE_DIR / "bin" / binary_name
+        if primary == legacy:
+            return (primary,)
+        return (primary, legacy)
+
+    def _cache_and_copy_binary(self, source: Path, binary_name: str) -> Path:
+        cached = self._cached_binary_path(binary_name)
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        if source.resolve() != cached.resolve():
+            shutil.copy2(source, cached)
+        try:
+            cached.chmod(0o755)
+        except OSError:
+            pass
+        return self._copy_binary_to_runtime(cached, binary_name)
+
+    def _copy_binary_to_runtime(self, source: Path, binary_name: str) -> Path:
+        target = self._runtime_bin_dir_locked() / binary_name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.resolve() != target.resolve():
+            shutil.copy2(source, target)
+        try:
+            target.chmod(0o755)
+        except OSError:
+            pass
+        return target
+
+    def _extract_binary_from_zip(self, archive_path: Path, binary_name: str) -> Path | None:
+        target = self._cached_binary_path(binary_name)
+        binary_name_lower = binary_name.lower()
+        with zipfile.ZipFile(archive_path) as archive:
+            members = [
+                member
+                for member in archive.infolist()
+                if not member.is_dir() and Path(member.filename).name.lower() == binary_name_lower
+            ]
+            if not members:
+                return None
+            preferred = sorted(
+                members,
+                key=lambda member: (
+                    "/bin/" not in member.filename.replace("\\", "/").lower(),
+                    len(member.filename),
+                ),
+            )[0]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(preferred) as source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
+        try:
+            target.chmod(0o755)
+        except OSError:
+            pass
+        return self._copy_binary_to_runtime(target, binary_name)
+
+    def _download_portable_binary(self, display_name: str, binary_name: str, url: str) -> Path:
+        suffix = Path(urlparse(url).path).suffix.lower()
+        filename = f"{display_name.lower()}-portable{suffix or Path(binary_name).suffix}"
+        target = STREAMING_CACHE_DIR / "downloads" / filename
+        partial_target = target.with_name(f"{target.name}.part")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and target.stat().st_size > 0:
+            return target
+        self._log(f"{display_name}: скачиваю portable runtime в кэш приложения")
+        partial_target.unlink(missing_ok=True)
+        self._download_file(url, partial_target)
+        partial_target.replace(target)
+        return target
+
+    @staticmethod
+    def _download_file(url: str, target: Path) -> None:
+        request = urllib.request.Request(url, headers={"User-Agent": "Sonar-streaming/1.0"})
+        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, target.open("wb") as file:
+            shutil.copyfileobj(response, file)
 
     def _open_log_file_locked(self, filename: str):
         if self._temp_dir is None:

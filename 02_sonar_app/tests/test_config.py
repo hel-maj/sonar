@@ -17,6 +17,24 @@ def test_fishing_settings_accepts_start_stop_sound_toggle():
     assert settings.start_stop_sound_enabled is False
 
 
+def test_fishing_settings_accepts_tackle_depletion_options():
+    settings = FishingSettings.from_dict(
+        {
+            "fish_without_leader": True,
+            "leader_depleted_action": "exit_game",
+            "fish_without_net": False,
+            "net_depleted_action": "exit_game",
+            "equipment_depleted_action": "shutdown_pc",
+        }
+    )
+
+    assert settings.fish_without_leader is True
+    assert settings.leader_depleted_action == "exit_game"
+    assert settings.fish_without_net is False
+    assert settings.net_depleted_action == "exit_game"
+    assert settings.equipment_depleted_action == "shutdown_pc"
+
+
 def test_telegram_settings_accepts_comma_separated_ids():
     settings = TelegramSettings.from_dict({"enabled": True, "admin_ids": "1, 2, bad"})
 

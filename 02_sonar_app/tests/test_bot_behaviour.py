@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime
 
 import numpy as np
 
@@ -10,6 +11,8 @@ from sonar.config.models import FishingSettings
 from sonar.core.state import BotState
 from sonar.fishing.bot import FishingBot
 from sonar.fishing.catch_screen import CatchScreenResult
+from sonar.fishing.tackle_detection import TACKLE_SLOTS, TackleItemCount, TackleScanResult
+from sonar.vision.geometry import Rect
 
 
 class DummyInput:
@@ -41,8 +44,29 @@ class SequenceTriggerMonitor:
 
 
 class DummyCatchDetector:
+    def detect(self, frame):
+        return CatchScreenResult(False)
+
     def crop_panel(self, frame, result):
         return frame
+
+
+class ClosedDetector:
+    def is_open(self, frame) -> bool:
+        return False
+
+
+def make_tackle_scan(counts: dict[str, int]) -> TackleScanResult:
+    return TackleScanResult(
+        items=tuple(TackleItemCount(slot.key, slot.name, counts.get(slot.key, 1)) for slot in TACKLE_SLOTS),
+        obscured=False,
+        row_rect=Rect(0, 0, 1, 1),
+        scanned_at=datetime.now(),
+    )
+
+
+def make_empty_tackle_scan() -> TackleScanResult:
+    return make_tackle_scan({slot.key: 0 for slot in TACKLE_SLOTS})
 
 
 def make_change_bait_bot(trigger_steps: list[dict[str, float]], *, auto_change_bait: bool = True):
@@ -100,6 +124,7 @@ def test_prepare_start_does_not_treat_bait_notice_as_active_stage():
     bot._sleep = lambda seconds: None
     bot._sleep_random = lambda minimum, extra: None
     bot._log = lambda message: None
+    bot._check_tackle_before_start = lambda frame: True
     bot._ensure_storage_selection = lambda matches, **kwargs: ("done", None)
 
     assert bot._prepare_fishing_start(timeout=1.0) == "casting"
@@ -141,6 +166,194 @@ def test_auto_stop_when_start_cannot_find_fishing_stage():
 
     assert reasons == [bot_module.STOP_REASON_START_FAILED]
     assert any(bot_module.STOP_REASON_START_FAILED in message for message in logs)
+
+
+def test_reeling_walking_guard_stops_when_fish_state_is_problematic_and_stage_is_gone():
+    bot = FishingBot.__new__(FishingBot)
+    bot._last_triggers = {}
+    bot._last_catch_result = None
+    bot._has_pending_catch = lambda: False
+
+    assert bot._should_stop_for_reeling_walking_guard("target_search") is True
+
+
+def test_reeling_walking_guard_keeps_running_while_reeling_stage_is_visible():
+    bot = FishingBot.__new__(FishingBot)
+    bot._last_triggers = {"ad": 1.0}
+    bot._last_catch_result = None
+    bot._has_pending_catch = lambda: False
+
+    assert bot._should_stop_for_reeling_walking_guard("target_search") is False
+
+
+def test_reeling_walking_guard_does_not_stop_on_known_interruption_state():
+    bot = FishingBot.__new__(FishingBot)
+    reasons: list[str] = []
+    bot._last_triggers = {}
+    bot._has_pending_catch = lambda: False
+    bot._detect_reeling_interruption_state = lambda: "Выбор снастей"
+    bot._try_return_to_fishing_from_idle = lambda: False
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    assert bot._check_reeling_walking_guard("target_search") is False
+    assert reasons == []
+
+
+def test_reeling_walking_guard_does_not_stop_when_idle_returns_to_fishing():
+    bot = FishingBot.__new__(FishingBot)
+    reasons: list[str] = []
+    bot._last_triggers = {}
+    bot._has_pending_catch = lambda: False
+    bot._detect_reeling_interruption_state = lambda: None
+    bot._try_return_to_fishing_from_idle = lambda: True
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    assert bot._check_reeling_walking_guard("target_search") is False
+    assert reasons == []
+
+
+def test_reeling_walking_guard_stops_when_no_state_and_idle_cannot_return():
+    bot = FishingBot.__new__(FishingBot)
+    reasons: list[str] = []
+    bot._last_triggers = {}
+    bot._has_pending_catch = lambda: False
+    bot._detect_reeling_interruption_state = lambda: None
+    bot._try_return_to_fishing_from_idle = lambda: False
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    assert bot._check_reeling_walking_guard("target_search") is True
+    assert reasons == [bot_module.STOP_REASON_WALKING_GUARD]
+
+
+def test_reeling_idle_return_presses_e_and_accepts_new_fishing_stage():
+    bot = FishingBot.__new__(FishingBot)
+    bot.capture = DummyCapture()
+    bot.game_menu_detector = ClosedDetector()
+    bot.inventory_detector = ClosedDetector()
+    bot.catch_detector = DummyCatchDetector()
+    bot.trigger_monitor = SequenceTriggerMonitor([{}, {"start": DummyMatch()}])
+    bot.input_controller = DummyInput()
+    bot._stop_event = threading.Event()
+    bot._last_triggers = {}
+    bot._last_trigger_matches = {}
+    bot._last_catch_result = None
+    bot._save_catch_panel_snapshot = lambda frame, result: None
+    bot._publish_stage = lambda label: None
+    bot._focus_game = lambda: True
+    bot._sleep = lambda seconds: None
+    bot._log = lambda message: None
+
+    assert bot._try_return_to_fishing_from_idle(timeout=0.1) is True
+    assert bot.input_controller.keys == ["e"]
+
+
+def test_missing_hook_stops_by_default_with_tackle_reason():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings()
+    reasons: list[str] = []
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    handled = bot._handle_tackle_depletion(make_tackle_scan({"hook": 0}))
+
+    assert handled is True
+    assert reasons == ["Закончились крючки/поводки"]
+
+
+def test_missing_hook_can_be_allowed_by_setting():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(fish_without_leader=True)
+    reasons: list[str] = []
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    handled = bot._handle_tackle_depletion(make_tackle_scan({"hook": 0}))
+
+    assert handled is False
+    assert reasons == []
+
+
+def test_missing_net_is_allowed_by_default():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings()
+    reasons: list[str] = []
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    handled = bot._handle_tackle_depletion(make_tackle_scan({"net": 0}))
+
+    assert handled is False
+    assert reasons == []
+
+
+def test_empty_tackle_scan_is_retried_instead_of_missing_rod_stop():
+    class SequenceTackleDetector:
+        def __init__(self) -> None:
+            self.scans = iter([make_empty_tackle_scan(), make_tackle_scan({})])
+
+        def detect(self, frame):
+            return next(self.scans)
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.capture = DummyCapture()
+    bot.tackle_detector = SequenceTackleDetector()
+    bot._stop_event = threading.Event()
+    bot._sleep = lambda seconds: None
+    bot._log = lambda message: None
+    bot._stop_from_brain = lambda reason: None
+    bot._store_tackle_scan = lambda scan, frame: None
+
+    scan = bot._read_tackle_until_clear(object())
+
+    assert scan is not None
+    assert scan.count_for("rod") == 1
+
+
+def test_tackle_depletion_is_rechecked_before_stop():
+    bot = FishingBot.__new__(FishingBot)
+    scans = iter([make_tackle_scan({"rod": 0}), make_tackle_scan({})])
+    reasons: list[str] = []
+    bot.settings = FishingSettings()
+    bot._stop_event = threading.Event()
+    bot._read_tackle_until_clear = lambda frame=None: next(scans)
+    bot._sleep = lambda seconds: None
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    assert bot._check_tackle_before_start() is True
+    assert reasons == []
+
+
+def test_tackle_depletion_stops_after_confirmation():
+    bot = FishingBot.__new__(FishingBot)
+    scans = iter([make_tackle_scan({"rod": 0}), make_tackle_scan({"rod": 0}), make_tackle_scan({"rod": 0})])
+    reasons: list[str] = []
+    bot.settings = FishingSettings()
+    bot._stop_event = threading.Event()
+    bot._read_tackle_until_clear = lambda frame=None: next(scans)
+    bot._sleep = lambda seconds: None
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    assert bot._check_tackle_before_start() is False
+    assert reasons == [bot._find_tackle_depletion(make_tackle_scan({"rod": 0}))[1]]
+
+
+def test_generic_equipment_action_can_close_game():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(equipment_depleted_action="exit_game")
+    calls: list[str] = []
+    bot._log = lambda message: None
+    bot._shutdown_game = lambda: calls.append("shutdown_game")
+    bot._stop_from_brain = lambda reason: calls.append(reason)
+
+    handled = bot._handle_tackle_depletion(make_tackle_scan({"line": 0}))
+
+    assert handled is True
+    assert calls == ["shutdown_game", "Кончилась леска"]
 
 
 def test_debug_capture_writes_only_when_debug_enabled(tmp_path, monkeypatch):

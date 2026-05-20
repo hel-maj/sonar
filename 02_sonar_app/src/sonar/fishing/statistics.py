@@ -5,9 +5,11 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
+from sonar.fishing.tackle_detection import TackleItemCount
 
 
 DEFAULT_PRICE_NOTE_PATH = Path(
@@ -112,6 +114,9 @@ class FishingSessionStats:
         self.default_prices = _coerce_price_catalog(default_prices or EMBEDDED_FISH_PRICES)
         self.custom_prices = _clean_custom_prices(custom_prices or {})
         self._fish: dict[str, FishStat] = {}
+        self._tackle_items: tuple[TackleItemCount, ...] = ()
+        self._tackle_image_bytes: bytes | None = None
+        self._tackle_scanned_at: datetime | None = None
         self._lock = threading.RLock()
 
     def reset(self) -> None:
@@ -120,6 +125,7 @@ class FishingSessionStats:
             if self._running_started_at is not None:
                 self._running_started_at = time.time()
             self._fish.clear()
+            self.clear_tackle_scan()
 
     def start_timer(self) -> None:
         with self._lock:
@@ -164,6 +170,40 @@ class FishingSessionStats:
             if released:
                 stat.released_count += 1
                 stat.released_kg += weight
+
+    def set_tackle_scan(
+        self,
+        items: tuple[TackleItemCount, ...] | list[TackleItemCount],
+        *,
+        image_bytes: bytes | None = None,
+        scanned_at: datetime | None = None,
+    ) -> None:
+        with self._lock:
+            self._tackle_items = tuple(items)
+            self._tackle_image_bytes = image_bytes
+            self._tackle_scanned_at = scanned_at or datetime.now()
+
+    def clear_tackle_scan(self) -> None:
+        with self._lock:
+            self._tackle_items = ()
+            self._tackle_image_bytes = None
+            self._tackle_scanned_at = None
+
+    def tackle_items(self) -> tuple[TackleItemCount, ...]:
+        with self._lock:
+            return tuple(self._tackle_items)
+
+    def tackle_image_bytes(self) -> bytes | None:
+        with self._lock:
+            return self._tackle_image_bytes
+
+    def tackle_scanned_at(self) -> datetime | None:
+        with self._lock:
+            return self._tackle_scanned_at
+
+    def has_tackle_scan(self) -> bool:
+        with self._lock:
+            return bool(self._tackle_items)
 
     def base_price_for(self, fish_id: str) -> FishPrice | None:
         with self._lock:
