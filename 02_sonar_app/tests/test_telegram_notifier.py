@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from sonar.config.models import TelegramSettings
 from sonar.fishing.statistics import FishPrice, FishingSessionStats, SessionTotals
 from sonar.telegram.notifier import NotificationManager
@@ -25,6 +27,54 @@ def test_notification_menu_edits_callback_message_and_uses_two_columns(monkeypat
     assert calls[0][0] == "editMessageText"
     keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
     assert [len(row) for row in keyboard] == [2, 2, 1, 1]
+
+
+def test_main_menu_contains_stream_entry(monkeypatch):
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._send_menu(1)
+
+    keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
+    assert any(button["callback_data"] == "menu:stream" for row in keyboard for button in row)
+
+
+def test_stream_menu_shows_active_link_and_area_switch(monkeypatch):
+    snapshot = SimpleNamespace(
+        active=True,
+        status="online",
+        quality="720p",
+        area="chat",
+        error="",
+        seconds_until_auto_stop=120,
+        stream_url="https://example.test/live/",
+    )
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_status_callback=lambda: snapshot,
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._send_stream_menu(1, message_id=42)
+
+    payload = calls[0][1]["json"]
+    keyboard = payload["reply_markup"]["inline_keyboard"]
+    assert "Меню стрима игры" in payload["text"]
+    assert "Область: Чат" in payload["text"]
+    assert any(button["callback_data"] == "stream:open" for row in keyboard for button in row)
+    assert any(button["callback_data"] == "stream:switch_area" for row in keyboard for button in row)
 
 
 def test_stats_menu_message_uses_income_range():

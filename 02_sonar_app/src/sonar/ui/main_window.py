@@ -53,6 +53,7 @@ from sonar.license.client import LicenseStatus
 from sonar.license.manager import LicenseManager
 from sonar.paths import APP_DIR, RESOURCE_DIR
 from sonar.self_uninstall import get_uninstall_availability, schedule_self_uninstall
+from sonar.streaming import StreamingService
 from sonar.version import APP_VERSION
 
 
@@ -133,6 +134,17 @@ class MainWindow(QMainWindow):
             telegram_settings_changed_callback=self.telegram_settings_bridge.changed.emit,
             keep_debug_capture=keep_debug_capture,
         )
+        self.stream_service = StreamingService(
+            log_callback=self.log_bridge.message.emit,
+            chat_mode_callback=self._enable_chat_mode_from_stream,
+        )
+        self.bot.configure_streaming_callbacks(
+            status_callback=self.stream_service.snapshot,
+            start_callback=self._start_stream_from_remote,
+            stop_callback=self._stop_stream_from_remote,
+            set_quality_callback=self.stream_service.set_quality,
+            set_chat_zoom_callback=self.stream_service.set_chat_zoom_enabled,
+        )
         self._stats_refreshing = False
         self.setWindowTitle(APP_NAME)
         icon_path = find_app_icon_path()
@@ -155,6 +167,9 @@ class MainWindow(QMainWindow):
         self.stats_timer = QTimer(self)
         self.stats_timer.timeout.connect(self._refresh_stats_tab)
         self.stats_timer.start(1000)
+        self.stream_timer = QTimer(self)
+        self.stream_timer.timeout.connect(self._refresh_stream_tab)
+        self.stream_timer.start(1000)
         self.license_timer = QTimer(self)
         self.license_timer.timeout.connect(self._license_tick)
         self.license_timer.start(1000)
@@ -167,10 +182,12 @@ class MainWindow(QMainWindow):
         self.settings_tab = self._build_settings_tab()
         self.statistics_tab = self._build_statistics_tab()
         self.telegram_tab = self._build_telegram_tab()
+        self.stream_tab = self._build_stream_tab()
         self._licensed_tabs = [
             (self.fishing_tab, "Рыбалка"),
             (self.settings_tab, "Настройки"),
             (self.statistics_tab, "Статистика"),
+            (self.stream_tab, "Стрим"),
             (self.telegram_tab, "Telegram"),
         ]
         self._apply_license_gate()
@@ -367,6 +384,61 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
         return page
 
+    def _build_stream_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        status_group = QGroupBox("Управление стримом")
+        grid = QGridLayout(status_group)
+        self.stream_status_label = QLabel("offline")
+        self.stream_area_label = QLabel("Все окно")
+        self.stream_quality_label = QLabel("720p")
+        self.stream_auto_stop_label = QLabel("—")
+        self.stream_url_label = QLabel("—")
+        self.stream_url_label.setWordWrap(True)
+        self.stream_url_label.setTextFormat(Qt.TextFormat.RichText)
+        self.stream_url_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.stream_url_label.setOpenExternalLinks(True)
+        grid.addWidget(QLabel("Статус:"), 0, 0)
+        grid.addWidget(self.stream_status_label, 0, 1)
+        grid.addWidget(QLabel("Область:"), 1, 0)
+        grid.addWidget(self.stream_area_label, 1, 1)
+        grid.addWidget(QLabel("Качество:"), 2, 0)
+        grid.addWidget(self.stream_quality_label, 2, 1)
+        grid.addWidget(QLabel("Автостоп:"), 3, 0)
+        grid.addWidget(self.stream_auto_stop_label, 3, 1)
+        grid.addWidget(QLabel("Ссылка:"), 4, 0)
+        grid.addWidget(self.stream_url_label, 4, 1)
+        layout.addWidget(status_group)
+
+        controls_group = QGroupBox("Настройки трансляции")
+        controls = QFormLayout(controls_group)
+        self.stream_quality_combo = QComboBox()
+        self.stream_quality_combo.addItems(["480p", "720p", "1080p"])
+        self.stream_quality_combo.setCurrentText("720p")
+        self.stream_quality_combo.currentTextChanged.connect(self._stream_quality_changed)
+        self.stream_chat_zoom_check = QCheckBox("Увеличить чат")
+        self.stream_chat_zoom_check.stateChanged.connect(self._stream_chat_zoom_changed)
+        controls.addRow("Качество", self.stream_quality_combo)
+        controls.addRow("Область чата", self.stream_chat_zoom_check)
+        layout.addWidget(controls_group)
+
+        buttons = QHBoxLayout()
+        self.stream_stop_button = QPushButton("Остановить стрим")
+        self.stream_stop_button.clicked.connect(self.stop_stream)
+        self.stream_chat_mode_button = QPushButton("Включить режим чата")
+        self.stream_chat_mode_button.clicked.connect(self.enable_chat_mode)
+        buttons.addWidget(self.stream_stop_button)
+        buttons.addWidget(self.stream_chat_mode_button)
+        layout.addLayout(buttons)
+
+        note = QLabel("Запуск стрима доступен из Telegram. Режим чата прервёт рыбалку.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        layout.addStretch(1)
+        self._refresh_stream_tab()
+        return page
+
     def _load_settings_to_ui(self, settings: SonarSettings) -> None:
         fishing = settings.fishing
         self.auto_meal_check.setChecked(fishing.auto_meal)
@@ -501,6 +573,8 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentWidget(self.license_tab)
             if hasattr(self, "bot") and self.bot.state.running:
                 self.bot.stop()
+            if hasattr(self, "stream_service"):
+                self.stream_service.stop_stream("license inactive")
 
     def _refresh_license_ui(self) -> None:
         if not hasattr(self, "license_summary_label"):
@@ -628,6 +702,8 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
+            if hasattr(self, "stream_service"):
+                self.stream_service.stop_stream("self uninstall")
             self.bot.stop()
             self.bot.notification_manager.stop_polling()
             script_path = schedule_self_uninstall()
@@ -808,6 +884,70 @@ class MainWindow(QMainWindow):
         self.bot.reload_settings()
         self._refresh_stats_tab()
 
+    def _start_stream_from_remote(self) -> bool:
+        if not self._has_active_license():
+            self.log_bridge.message.emit("Лицензия не активна: стрим не запущен")
+            return False
+        return self.stream_service.start_stream()
+
+    def _stop_stream_from_remote(self) -> None:
+        self.stream_service.stop_stream("telegram")
+
+    def stop_stream(self) -> None:
+        self.stream_service.stop_stream("ui")
+        self._refresh_stream_tab()
+
+    def enable_chat_mode(self) -> None:
+        self.stream_service.enable_chat_mode()
+        self._refresh_stream_tab()
+
+    def _enable_chat_mode_from_stream(self) -> None:
+        if getattr(self, "bot", None) is not None and self.bot.state.running:
+            self.bot.stop("режим чата")
+        self.log_bridge.message.emit("Режим чата включен")
+
+    def _stream_quality_changed(self, quality: str) -> None:
+        if not hasattr(self, "stream_service"):
+            return
+        self.stream_service.set_quality(quality)
+        self._refresh_stream_tab()
+
+    def _stream_chat_zoom_changed(self, *args) -> None:
+        del args
+        if not hasattr(self, "stream_service"):
+            return
+        self.stream_service.set_chat_zoom_enabled(self.stream_chat_zoom_check.isChecked())
+        self._refresh_stream_tab()
+
+    def _refresh_stream_tab(self) -> None:
+        if not hasattr(self, "stream_status_label"):
+            return
+        snapshot = self.stream_service.snapshot()
+        self.stream_status_label.setText(snapshot.status)
+        self.stream_area_label.setText("Чат" if snapshot.area == "chat" else "Все окно")
+        self.stream_quality_label.setText(snapshot.quality)
+        if snapshot.active and snapshot.seconds_until_auto_stop is not None:
+            minutes, seconds = divmod(max(0, int(snapshot.seconds_until_auto_stop)), 60)
+            self.stream_auto_stop_label.setText(f"{minutes}:{seconds:02d} без зрителей")
+        else:
+            self.stream_auto_stop_label.setText("—")
+        if snapshot.stream_url:
+            url = html.escape(snapshot.stream_url, quote=True)
+            self.stream_url_label.setText(f'<a href="{url}">{html.escape(snapshot.stream_url, quote=False)}</a>')
+        elif snapshot.error:
+            self.stream_url_label.setText(html.escape(snapshot.error, quote=False))
+        else:
+            self.stream_url_label.setText("—")
+        quality_block = self.stream_quality_combo.blockSignals(True)
+        chat_block = self.stream_chat_zoom_check.blockSignals(True)
+        try:
+            self.stream_quality_combo.setCurrentText(snapshot.quality)
+            self.stream_chat_zoom_check.setChecked(snapshot.chat_zoom_enabled)
+        finally:
+            self.stream_quality_combo.blockSignals(quality_block)
+            self.stream_chat_zoom_check.blockSignals(chat_block)
+        self.stream_stop_button.setEnabled(snapshot.active or snapshot.status == "error")
+
     def reset_session_stats(self) -> None:
         self.session_stats.reset()
         self._refresh_stats_tab()
@@ -835,6 +975,8 @@ class MainWindow(QMainWindow):
             self.bot.reload_settings()
         except Exception:
             pass
+        if hasattr(self, "stream_service"):
+            self.stream_service.stop_stream("app close")
         self.bot.stop()
         self.bot.notification_manager.stop_polling()
         event.accept()

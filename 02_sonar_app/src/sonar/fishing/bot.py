@@ -84,6 +84,11 @@ class FishingBot:
     can_start_callback: Callable[[], bool] | None = None
     start_command_callback: Callable[[], bool] | None = None
     telegram_settings_changed_callback: Callable[[TelegramSettings], None] | None = None
+    stream_status_callback: Callable[[], object] | None = None
+    stream_start_callback: Callable[[], bool] | None = None
+    stream_stop_callback: Callable[[], None] | None = None
+    stream_set_quality_callback: Callable[[str], bool] | None = None
+    stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None
     session_stats: FishingSessionStats = field(
         default_factory=lambda: FishingSessionStats(default_prices=parse_fish_prices_from_markdown())
     )
@@ -155,7 +160,28 @@ class FishingBot:
             shutdown_game_callback=self._shutdown_game,
             shutdown_pc_callback=self._shutdown_pc,
             settings_changed_callback=self._save_telegram_settings,
+            stream_status_callback=self.stream_status_callback,
+            stream_start_callback=self.stream_start_callback,
+            stream_stop_callback=self.stream_stop_callback,
+            stream_set_quality_callback=self.stream_set_quality_callback,
+            stream_set_chat_zoom_callback=self.stream_set_chat_zoom_callback,
         )
+
+    def configure_streaming_callbacks(
+        self,
+        *,
+        status_callback: Callable[[], object] | None = None,
+        start_callback: Callable[[], bool] | None = None,
+        stop_callback: Callable[[], None] | None = None,
+        set_quality_callback: Callable[[str], bool] | None = None,
+        set_chat_zoom_callback: Callable[[bool], bool] | None = None,
+    ) -> None:
+        self.stream_status_callback = status_callback
+        self.stream_start_callback = start_callback
+        self.stream_stop_callback = stop_callback
+        self.stream_set_quality_callback = set_quality_callback
+        self.stream_set_chat_zoom_callback = set_chat_zoom_callback
+        self._configure_notifications()
 
     def _save_telegram_settings(self, telegram_settings) -> None:
         settings = self.config_manager.load()

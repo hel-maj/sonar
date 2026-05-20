@@ -27,6 +27,11 @@ class NotificationManager:
     shutdown_game_callback: Callable[[], None] | None = None
     shutdown_pc_callback: Callable[[], None] | None = None
     settings_changed_callback: Callable[[TelegramSettings], None] | None = None
+    stream_status_callback: Callable[[], Any] | None = None
+    stream_start_callback: Callable[[], bool] | None = None
+    stream_stop_callback: Callable[[], None] | None = None
+    stream_set_quality_callback: Callable[[str], bool] | None = None
+    stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
     _poll_thread: threading.Thread | None = field(default=None, init=False)
     _last_update_id: int | None = field(default=None, init=False)
@@ -51,6 +56,11 @@ class NotificationManager:
         shutdown_game_callback: Callable[[], None] | None = None,
         shutdown_pc_callback: Callable[[], None] | None = None,
         settings_changed_callback: Callable[[TelegramSettings], None] | None = None,
+        stream_status_callback: Callable[[], Any] | None = None,
+        stream_start_callback: Callable[[], bool] | None = None,
+        stream_stop_callback: Callable[[], None] | None = None,
+        stream_set_quality_callback: Callable[[str], bool] | None = None,
+        stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None,
     ) -> None:
         self.settings = settings
         self.start_callback = start_callback
@@ -64,6 +74,11 @@ class NotificationManager:
         self.shutdown_game_callback = shutdown_game_callback
         self.shutdown_pc_callback = shutdown_pc_callback
         self.settings_changed_callback = settings_changed_callback
+        self.stream_status_callback = stream_status_callback
+        self.stream_start_callback = stream_start_callback
+        self.stream_stop_callback = stream_stop_callback
+        self.stream_set_quality_callback = stream_set_quality_callback
+        self.stream_set_chat_zoom_callback = stream_set_chat_zoom_callback
         if self.settings.enabled and self.settings.bot_token:
             self.start_polling()
         else:
@@ -239,9 +254,21 @@ class NotificationManager:
                 self._send_menu(chat_id, message_id=message_id)
             elif data == "menu:notifications":
                 self._send_notifications(chat_id, message_id=message_id)
+            elif data == "menu:stream":
+                self._send_stream_menu(chat_id, message_id=message_id)
+            elif data == "menu:stream_quality":
+                self._send_stream_quality(chat_id, message_id=message_id)
             elif data.startswith("toggle:"):
                 self._toggle_notification(data.removeprefix("toggle:"))
                 self._send_notifications(chat_id, message_id=message_id)
+            elif data.startswith("stream:quality:"):
+                self._set_stream_quality(data.removeprefix("stream:quality:"), chat_id, message_id=message_id)
+            elif data == "stream:start_stop":
+                self._toggle_stream(chat_id, message_id=message_id)
+            elif data == "stream:open":
+                self._send_stream_link(chat_id)
+            elif data == "stream:switch_area":
+                self._switch_stream_area(chat_id, message_id=message_id)
             elif data == "action:start_stop":
                 self._toggle_fishing(chat_id)
             elif data == "action:screen":
@@ -264,6 +291,9 @@ class NotificationManager:
                 {"text": "📊 Статистика", "callback_data": "action:stats"},
             ],
             [
+                {"text": "📺 Стрим", "callback_data": "menu:stream"},
+            ],
+            [
                 {"text": start_stop_text, "callback_data": "action:start_stop"},
             ],
             [
@@ -278,6 +308,60 @@ class NotificationManager:
             ],
         ]
         self._send_or_edit_message("🎣 Меню рыболовного бота", chat_id=chat_id, message_id=message_id, reply_markup={"inline_keyboard": keyboard})
+
+    def _send_stream_menu(self, chat_id: int, *, message_id: int | None = None) -> None:
+        snapshot = self._stream_snapshot()
+        active = bool(getattr(snapshot, "active", False))
+        status = "online" if active else "offline"
+        if snapshot is not None and getattr(snapshot, "status", "") == "starting":
+            status = "starting"
+        quality = str(getattr(snapshot, "quality", "720p") or "720p")
+        area = "Чат" if getattr(snapshot, "area", "full") == "chat" else "Все окно"
+        error = str(getattr(snapshot, "error", "") or "")
+        auto_stop = getattr(snapshot, "seconds_until_auto_stop", None)
+        auto_stop_line = ""
+        if active and auto_stop is not None:
+            minutes, seconds = divmod(max(0, int(auto_stop)), 60)
+            auto_stop_line = f"\nАвтостоп без зрителей: {minutes}:{seconds:02d}"
+        text = (
+            "📺 Меню стрима игры.\n"
+            f"Статус {status}\n"
+            f"Область: {area}\n"
+            f"Качество: {quality}"
+            f"{auto_stop_line}\n\n"
+            "Режим чата доступен на странице стрима"
+        )
+        if error:
+            text = f"{text}\n\n⚠️ {error}"
+        start_stop_text = "⏹ Остановить стрим" if active else "▶️ Запустить стрим"
+        switch_area_text = "🔎 Переключить область на окно игры" if area == "Чат" else "🔎 Переключить область на Чат"
+        keyboard = [
+            [{"text": f"⚙️ Качество: {quality}", "callback_data": "menu:stream_quality"}],
+            [{"text": start_stop_text, "callback_data": "stream:start_stop"}],
+        ]
+        if active:
+            keyboard.append([{"text": "🔗 Открыть стрим", "callback_data": "stream:open"}])
+            keyboard.append([{"text": switch_area_text, "callback_data": "stream:switch_area"}])
+        keyboard.append([{"text": "⬅️ Меню", "callback_data": "menu:main"}])
+        self._send_or_edit_message(text, chat_id=chat_id, message_id=message_id, reply_markup={"inline_keyboard": keyboard})
+
+    def _send_stream_quality(self, chat_id: int, *, message_id: int | None = None) -> None:
+        snapshot = self._stream_snapshot()
+        current = str(getattr(snapshot, "quality", "720p") or "720p")
+        keyboard = [
+            [
+                {"text": f"{'✅ ' if current == '480p' else ''}480p", "callback_data": "stream:quality:480p"},
+                {"text": f"{'✅ ' if current == '720p' else ''}720p", "callback_data": "stream:quality:720p"},
+                {"text": f"{'✅ ' if current == '1080p' else ''}1080p", "callback_data": "stream:quality:1080p"},
+            ],
+            [{"text": "⬅️ Назад к стриму", "callback_data": "menu:stream"}],
+        ]
+        self._send_or_edit_message(
+            "⚙️ Качество стрима\n\nВыберите разрешение трансляции.",
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup={"inline_keyboard": keyboard},
+        )
 
     def _send_notifications(self, chat_id: int, *, message_id: int | None = None) -> None:
         items = [
@@ -331,6 +415,53 @@ class NotificationManager:
         else:
             ok = self.start_callback() if self.start_callback else False
             self.send_message("🚤 Рыбалка запущена" if ok else "⚠️ Не удалось запустить рыбалку", chat_id=chat_id)
+
+    def _toggle_stream(self, chat_id: int, *, message_id: int | None = None) -> None:
+        snapshot = self._stream_snapshot()
+        if bool(getattr(snapshot, "active", False)):
+            if self.stream_stop_callback is not None:
+                self.stream_stop_callback()
+            self._send_stream_menu(chat_id, message_id=message_id)
+            return
+        ok = self.stream_start_callback() if self.stream_start_callback is not None else False
+        if not ok:
+            self.send_message("⚠️ Не удалось запустить стрим. Проверьте вкладку стрима в программе.", chat_id=chat_id)
+        self._send_stream_menu(chat_id, message_id=message_id)
+
+    def _send_stream_link(self, chat_id: int) -> None:
+        snapshot = self._stream_snapshot()
+        if not bool(getattr(snapshot, "active", False)):
+            self.send_message("📴 Стрим сейчас выключен.", chat_id=chat_id)
+            return
+        url = str(getattr(snapshot, "stream_url", "") or "")
+        if not url:
+            self.send_message("⚠️ Ссылка на стрим ещё не готова.", chat_id=chat_id)
+            return
+        self.send_message(f"🖥 Трансляция:\n{url}", chat_id=chat_id)
+
+    def _set_stream_quality(self, quality: str, chat_id: int, *, message_id: int | None = None) -> None:
+        ok = self.stream_set_quality_callback(quality) if self.stream_set_quality_callback is not None else False
+        if not ok:
+            self.send_message("⚠️ Не удалось изменить качество стрима.", chat_id=chat_id)
+        self._send_stream_menu(chat_id, message_id=message_id)
+
+    def _switch_stream_area(self, chat_id: int, *, message_id: int | None = None) -> None:
+        snapshot = self._stream_snapshot()
+        next_chat_zoom = getattr(snapshot, "area", "full") != "chat"
+        ok = self.stream_set_chat_zoom_callback(next_chat_zoom) if self.stream_set_chat_zoom_callback is not None else False
+        if not ok:
+            self.send_message("⚠️ Не удалось переключить область стрима.", chat_id=chat_id)
+        self._send_stream_menu(chat_id, message_id=message_id)
+
+    def _stream_snapshot(self) -> Any | None:
+        if self.stream_status_callback is None:
+            return None
+        try:
+            return self.stream_status_callback()
+        except Exception as exc:
+            if self.sink:
+                self.sink(f"Stream status error: {exc}")
+            return None
 
     def _send_screen(self, chat_id: int) -> None:
         if self.screenshot_callback is None:
