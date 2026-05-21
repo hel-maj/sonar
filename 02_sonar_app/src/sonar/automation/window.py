@@ -31,6 +31,8 @@ class WindowActivator:
             if win32gui.IsIconic(target_hwnd):
                 win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
             foreground = win32gui.GetForegroundWindow()
+            if foreground == target_hwnd:
+                return True
             current_thread = win32api.GetCurrentThreadId()
             target_thread, _ = win32process.GetWindowThreadProcessId(target_hwnd)
             foreground_thread, _ = win32process.GetWindowThreadProcessId(foreground)
@@ -47,13 +49,28 @@ class WindowActivator:
                     win32process.AttachThreadInput(current_thread, foreground_thread, False)
                 if attached_target:
                     win32process.AttachThreadInput(current_thread, target_thread, False)
-            return win32gui.GetForegroundWindow() == target_hwnd
+            if win32gui.GetForegroundWindow() == target_hwnd:
+                return True
+            return self._activate_window_with_alt_key(target_hwnd)
         except Exception:
-            try:
-                win32gui.SetForegroundWindow(target_hwnd)
-                return win32gui.GetForegroundWindow() == target_hwnd
-            except Exception:
-                return False
+            return self._activate_window_with_alt_key(target_hwnd)
 
     def force_activate_gta5(self) -> bool:
         return self.activate_window()
+
+    @staticmethod
+    def _activate_window_with_alt_key(hwnd: int) -> bool:
+        import win32com.client
+        import win32con
+        import win32gui
+
+        try:
+            shell = win32com.client.Dispatch("WScript.Shell")
+            shell.SendKeys("%")
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.BringWindowToTop(hwnd)
+            win32gui.SetForegroundWindow(hwnd)
+            return win32gui.GetForegroundWindow() == hwnd
+        except Exception:
+            return False

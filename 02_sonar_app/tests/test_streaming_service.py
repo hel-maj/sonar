@@ -7,7 +7,9 @@ import zipfile
 from pathlib import Path
 
 import sonar.streaming.service as stream_service
+from sonar.streaming.chat import ChatActionResult, ChatDetection, ChatTab
 from sonar.streaming.service import STREAM_PAGE_HTML, StreamingService
+from sonar.vision.geometry import Rect
 
 
 def test_chat_zoom_capture_uses_left_top_two_thirds(tmp_path, monkeypatch):
@@ -35,6 +37,69 @@ def test_chat_zoom_resets_for_every_new_stream(tmp_path):
 
     assert service.snapshot().chat_zoom_enabled is False
     assert service.snapshot().chat_mode_enabled is False
+
+
+def test_chat_mode_can_be_disabled_through_exit_callback(tmp_path):
+    calls: list[str] = []
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_mode_callback=lambda: calls.append("open"),
+        chat_exit_callback=lambda: calls.append("close"),
+    )
+
+    assert service.enable_chat_mode().chat_mode_enabled is True
+    assert service.disable_chat_mode().chat_mode_enabled is False
+    assert calls == ["open", "close"]
+
+
+def test_chat_mode_stays_enabled_when_exit_callback_fails(tmp_path):
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_exit_callback=lambda: ChatActionResult(False, "close failed"),
+    )
+    service._chat_mode_enabled = True
+
+    snapshot = service.disable_chat_mode()
+
+    assert snapshot.chat_mode_enabled is True
+    assert snapshot.error == "close failed"
+
+
+def test_snapshot_hides_chat_tabs_until_input_is_active(tmp_path):
+    tabs = (ChatTab("0", "Все", True, Rect(1, 2, 3, 4)),)
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_status_callback=lambda: ChatDetection(active=False, tabs=tabs, selected_tab_id="0"),
+    )
+
+    snapshot = service.snapshot()
+
+    assert snapshot.chat_active is False
+    assert snapshot.chat_tabs == ()
+    assert snapshot.chat_selected_tab_id is None
+
+
+def test_select_chat_tab_calls_game_callback(tmp_path):
+    selected: list[str | None] = []
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_select_callback=lambda tab_id: selected.append(tab_id) or ChatActionResult(True, "selected"),
+    )
+
+    snapshot = service.select_chat_tab("1")
+
+    assert snapshot.chat_mode_enabled is True
+    assert selected == ["1"]
+
+
+def test_default_viewer_timeout_is_five_minutes(tmp_path):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+
+    assert service.viewer_timeout_seconds == 300.0
 
 
 def test_auto_stop_after_viewer_timeout(tmp_path):
@@ -71,6 +136,10 @@ def test_stream_page_uses_react_ui_kit_and_video_player():
     assert "sourceKeyRef" in STREAM_PAGE_HTML
     assert "/hls/live.m3u8?stream=" in STREAM_PAGE_HTML
     assert "player.load()" in STREAM_PAGE_HTML
+    assert "/api/stream/chat-send" in STREAM_PAGE_HTML
+    assert "/api/stream/chat-select" in STREAM_PAGE_HTML
+    assert "Вкладка чата" in STREAM_PAGE_HTML
+    assert "Выйти из режима чата" in STREAM_PAGE_HTML
 
 
 def test_ffmpeg_hls_window_keeps_enough_segments(tmp_path):

@@ -24,6 +24,7 @@ class FishingSettings:
     inventory_hotkey: str = "i"
     use_item_hotkey: str = "e"
     discard_key: str = "q"
+    chat_hotkey: str = "t"
     start_stop_sound_enabled: bool = True
     garbage_settings: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_GARBAGE_SETTINGS))
     custom_fish_prices: dict[str, float] = field(default_factory=dict)
@@ -72,6 +73,7 @@ class FishingSettings:
             inventory_hotkey=str(data.get("inventory_hotkey", defaults.inventory_hotkey)),
             use_item_hotkey=str(data.get("use_item_hotkey", defaults.use_item_hotkey)),
             discard_key=str(data.get("discard_key", defaults.discard_key)),
+            chat_hotkey=str(data.get("chat_hotkey", defaults.chat_hotkey)),
             start_stop_sound_enabled=bool(data.get("start_stop_sound_enabled", defaults.start_stop_sound_enabled)),
             garbage_settings=garbage_settings,
             custom_fish_prices=custom_fish_prices,

@@ -21,9 +21,10 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from sonar.paths import CONFIG_DIR, PROJECT_DIR, RESOURCE_DIR
+from sonar.streaming.chat import CHAT_COMMANDS, ChatActionResult, ChatCommand, ChatDetection, ChatTab
 
 
-VIEWER_TIMEOUT_SECONDS = 180.0
+VIEWER_TIMEOUT_SECONDS = 300.0
 STREAM_TEMP_PREFIX = "sonar-stream-"
 CLOUDFLARED_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
 STREAMING_RESOURCE_DIR = RESOURCE_DIR / "streaming"
@@ -66,6 +67,12 @@ class StreamSnapshot:
     last_viewer_activity_at: float | None
     seconds_until_auto_stop: int | None
     error: str
+    chat_active: bool = False
+    chat_tabs: tuple[ChatTab, ...] = ()
+    chat_selected_tab_id: str | None = None
+    chat_status_error: str = ""
+    chat_last_action: str = ""
+    chat_commands: tuple[ChatCommand, ...] = CHAT_COMMANDS
 
 
 STREAM_PAGE_HTML = r"""<!doctype html>
@@ -146,6 +153,44 @@ STREAM_PAGE_HTML = r"""<!doctype html>
       font-size: 13px;
       margin-top: 6px;
     }
+    .commandGrid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chatHint {
+      min-height: 18px;
+      color: #d6dce6;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .chatActions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .side .MuiOutlinedInput-root {
+      background: rgba(255, 255, 255, 0.08);
+      color: #f4f7fb;
+    }
+    .side .MuiOutlinedInput-notchedOutline {
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+    .side .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline {
+      border-color: rgba(255, 255, 255, 0.44);
+    }
+    .side .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+      border-color: #7cb7ff;
+    }
+    .side .MuiInputBase-input,
+    .side .MuiSelect-select,
+    .side .MuiInputLabel-root,
+    .side .MuiSvgIcon-root {
+      color: #f4f7fb;
+    }
+    .side .Mui-disabled {
+      -webkit-text-fill-color: rgba(244, 247, 251, 0.46);
+    }
     @media (max-width: 900px) {
       .page {
         grid-template-columns: 1fr;
@@ -173,6 +218,7 @@ STREAM_PAGE_HTML = r"""<!doctype html>
       Chip,
       Divider,
       FormControlLabel,
+      MenuItem,
       Stack,
       Switch,
       TextField,
@@ -186,12 +232,27 @@ STREAM_PAGE_HTML = r"""<!doctype html>
       return "offline";
     }
 
+    function chatHint(message, commands) {
+      const text = (message || "").trimStart();
+      const match = text.match(/^\/([^\s/]+)(?:\s|$)/);
+      if (!match) return "Обычный локальный IC";
+      const command = (commands || []).find((item) => item.code === `/${match[1].toLowerCase()}`);
+      return command ? command.title : "Команда чата";
+    }
+
+    function applyCommandToMessage(message, code) {
+      const body = (message || "").replace(/^\/[^\s/]+(?:\s+|$)/, "");
+      return code ? `${code} ${body}` : body;
+    }
+
     function App() {
       const videoRef = useRef(null);
       const playerRef = useRef(null);
       const sourceKeyRef = useRef("");
       const [status, setStatus] = useState(null);
       const [busy, setBusy] = useState(false);
+      const [message, setMessage] = useState("");
+      const [selectedTabId, setSelectedTabId] = useState("");
 
       async function refresh() {
         const response = await fetch("/api/stream/status", { cache: "no-store" });
@@ -210,6 +271,17 @@ STREAM_PAGE_HTML = r"""<!doctype html>
           clearInterval(heartbeatTimer);
         };
       }, []);
+
+      useEffect(() => {
+        const tabs = status?.chat_tabs || [];
+        if (!tabs.length) {
+          setSelectedTabId("");
+          return;
+        }
+        if (selectedTabId && tabs.some((tab) => tab.id === selectedTabId)) return;
+        const selected = tabs.find((tab) => tab.selected) || tabs[0];
+        setSelectedTabId(selected.id);
+      }, [status?.chat_selected_tab_id, status?.chat_tabs?.length]);
 
       useEffect(() => {
         if (!videoRef.current || playerRef.current) return;
@@ -262,6 +334,13 @@ STREAM_PAGE_HTML = r"""<!doctype html>
         const rest = String(seconds % 60).padStart(2, "0");
         return `${minutes}:${rest}`;
       }, [status]);
+      const chatTabs = status?.chat_tabs || [];
+      const chatCommands = status?.chat_commands || [];
+      const selectedTab = chatTabs.find((tab) => tab.id === selectedTabId) || chatTabs.find((tab) => tab.selected) || chatTabs[0];
+      const hintText = chatHint(message, chatCommands);
+      const chatModeActive = Boolean(status?.chat_active || status?.chat_mode_enabled);
+      const chatModeTransitioning = Boolean(status?.chat_mode_enabled && !status?.chat_active);
+      const chatReady = Boolean(status?.chat_active);
 
       async function setChatZoom(enabled) {
         setBusy(true);
@@ -277,11 +356,57 @@ STREAM_PAGE_HTML = r"""<!doctype html>
         }
       }
 
-      async function enableChatMode() {
+      async function setChatMode(enabled) {
         setBusy(true);
         try {
-          const response = await fetch("/api/stream/chat-mode", { method: "POST" });
+          const response = await fetch("/api/stream/chat-mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled }),
+          });
           setStatus(await response.json());
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function selectChatTab(tabId) {
+        setSelectedTabId(tabId);
+        if (!tabId || !chatReady) return;
+        setBusy(true);
+        try {
+          const response = await fetch("/api/stream/chat-select", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tab_id: tabId }),
+          });
+          setStatus(await response.json());
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function clearChat() {
+        setBusy(true);
+        try {
+          const response = await fetch("/api/stream/chat-clear", { method: "POST" });
+          setStatus(await response.json());
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function sendChatMessage() {
+        if (!message.trim()) return;
+        setBusy(true);
+        try {
+          const response = await fetch("/api/stream/chat-send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tab_id: selectedTab?.id || selectedTabId || null, message }),
+          });
+          setStatus(await response.json());
+          setMessage("");
         } finally {
           setBusy(false);
         }
@@ -320,7 +445,7 @@ STREAM_PAGE_HTML = r"""<!doctype html>
               ),
               React.createElement("div", { className: "metric" },
                 React.createElement("div", { className: "metricLabel" }, "Режим чата"),
-                React.createElement("div", { className: "metricValue" }, status?.chat_mode_enabled ? "Включен" : "Выключен")
+                React.createElement("div", { className: "metricValue" }, status?.chat_active ? "Активен" : status?.chat_mode_enabled ? "Открываю" : "Выключен")
               )
             ),
             status?.error ? React.createElement(Chip, { label: status.error, color: "error", variant: "outlined" }) : null,
@@ -337,18 +462,64 @@ STREAM_PAGE_HTML = r"""<!doctype html>
               React.createElement(Button, {
                 variant: "contained",
                 color: "warning",
-                disabled: busy,
-                onClick: enableChatMode,
-              }, "Включить режим чата"),
-              React.createElement("div", { className: "comment" }, "Режим чата прервёт рыбалку")
+                disabled: busy || chatModeTransitioning,
+                onClick: () => setChatMode(!chatModeActive),
+              }, chatModeActive ? "Выйти из режима чата" : "Включить режим чата"),
+              React.createElement("div", { className: "comment" }, "Режим чата ставит рыбалку на паузу и продолжает её после выхода")
             ),
-            React.createElement(TextField, {
-              label: "Сообщение в чат",
-              size: "small",
-              disabled: true,
-              value: "",
-              fullWidth: true,
-            })
+            React.createElement(Divider, null),
+            React.createElement(Stack, { spacing: 1.25 },
+              React.createElement(TextField, {
+                label: "Вкладка чата",
+                size: "small",
+                select: true,
+                disabled: busy || !chatReady || !chatTabs.length,
+                value: selectedTab?.id || "",
+                onChange: (event) => selectChatTab(event.target.value),
+                fullWidth: true,
+              }, chatTabs.length
+                ? chatTabs.map((tab) => React.createElement(MenuItem, { key: tab.id, value: tab.id }, `${tab.selected ? "● " : ""}${tab.name}`))
+                : React.createElement(MenuItem, { value: "" }, "Вкладки не найдены")
+              ),
+              React.createElement("div", { className: "chatHint" }, hintText),
+              React.createElement(TextField, {
+                label: "Сообщение в чат",
+                size: "small",
+                disabled: busy || !chatReady,
+                value: message,
+                multiline: true,
+                minRows: 3,
+                onChange: (event) => setMessage(event.target.value),
+                fullWidth: true,
+              }),
+              React.createElement("div", { className: "commandGrid" },
+                chatCommands.filter((command) => command.code).map((command) =>
+                  React.createElement(Button, {
+                    key: command.key,
+                    variant: "outlined",
+                    size: "small",
+                    disabled: busy || !chatReady,
+                    title: `${command.title}: ${command.description}`,
+                    onClick: () => setMessage((current) => applyCommandToMessage(current, command.code)),
+                  }, command.code)
+                )
+              ),
+              React.createElement("div", { className: "chatActions" },
+                React.createElement(Button, {
+                  variant: "outlined",
+                  color: "inherit",
+                  disabled: busy || !chatReady,
+                  onClick: clearChat,
+                }, "Очистить"),
+                React.createElement(Button, {
+                  variant: "contained",
+                  disabled: busy || !chatReady || !message.trim(),
+                  onClick: sendChatMessage,
+                }, "Отправить")
+              ),
+              status?.chat_last_action ? React.createElement("div", { className: "comment" }, status.chat_last_action) : null,
+              status?.chat_status_error ? React.createElement(Chip, { label: status.chat_status_error, color: "error", variant: "outlined" }) : null
+            )
           )
         )
       );
@@ -366,7 +537,13 @@ class StreamingService:
         self,
         *,
         log_callback: Callable[[str], None] | None = None,
-        chat_mode_callback: Callable[[], None] | None = None,
+        chat_mode_callback: Callable[[], ChatActionResult | ChatDetection | None] | None = None,
+        chat_exit_callback: Callable[[], ChatActionResult | ChatDetection | None] | None = None,
+        chat_status_callback: Callable[[], ChatDetection] | None = None,
+        chat_select_callback: Callable[[str | None], ChatActionResult] | None = None,
+        chat_send_callback: Callable[[str | None, str], ChatActionResult] | None = None,
+        chat_clear_callback: Callable[[], ChatActionResult] | None = None,
+        game_window_available_callback: Callable[[], bool] | None = None,
         clock: Callable[[], float] = time.monotonic,
         popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
         temp_root: Path | None = None,
@@ -375,6 +552,12 @@ class StreamingService:
     ) -> None:
         self.log_callback = log_callback
         self.chat_mode_callback = chat_mode_callback
+        self.chat_exit_callback = chat_exit_callback
+        self.chat_status_callback = chat_status_callback
+        self.chat_select_callback = chat_select_callback
+        self.chat_send_callback = chat_send_callback
+        self.chat_clear_callback = chat_clear_callback
+        self.game_window_available_callback = game_window_available_callback
         self.clock = clock
         self.popen_factory = popen_factory
         self.temp_root = temp_root or Path(tempfile.gettempdir())
@@ -386,6 +569,9 @@ class StreamingService:
         self._error = ""
         self._chat_zoom_enabled = False
         self._chat_mode_enabled = False
+        self._chat_detection = ChatDetection()
+        self._chat_detection_at = -1_000_000.0
+        self._chat_last_action = ""
         self._started_at: float | None = None
         self._last_viewer_activity_at: float | None = None
         self._runtime_dir = self.temp_root / f"{STREAM_TEMP_PREFIX}runtime-{uuid.uuid4().hex}"
@@ -422,6 +608,11 @@ class StreamingService:
                 return True
             if self._status == "starting" and self._start_thread and self._start_thread.is_alive():
                 return True
+            if self.game_window_available_callback is not None and not self.game_window_available_callback():
+                self._error = "Окно игры не найдено"
+                self._status = "error"
+                self._log("Стрим не запущен: окно игры не найдено")
+                return False
             self._prepare_new_runtime_locked()
             token = uuid.uuid4().hex
             self._runtime_token = token
@@ -460,6 +651,7 @@ class StreamingService:
         self._binary_prepare_thread.start()
 
     def snapshot(self) -> StreamSnapshot:
+        self._refresh_chat_detection_if_needed()
         with self._lock:
             return self._snapshot_locked()
 
@@ -491,10 +683,62 @@ class StreamingService:
         return True
 
     def enable_chat_mode(self) -> StreamSnapshot:
+        result: ChatActionResult | ChatDetection | None = None
         if self.chat_mode_callback is not None:
-            self.chat_mode_callback()
+            result = self.chat_mode_callback()
+        with self._lock:
+            self._chat_mode_enabled = not (isinstance(result, ChatActionResult) and not result.ok)
+            self._apply_chat_result_locked(result)
+        self.set_chat_zoom_enabled(True)
+        return self.snapshot()
+
+    def disable_chat_mode(self) -> StreamSnapshot:
+        result: ChatActionResult | ChatDetection | None = None
+        if self.chat_exit_callback is not None:
+            result = self.chat_exit_callback()
+        with self._lock:
+            self._chat_mode_enabled = isinstance(result, ChatActionResult) and not result.ok
+            self._apply_chat_result_locked(result)
+        return self.snapshot()
+
+    def set_chat_mode_enabled(self, enabled: bool) -> StreamSnapshot:
+        if enabled:
+            return self.enable_chat_mode()
+        return self.disable_chat_mode()
+
+    def send_chat_message(self, tab_id: str | None, message: str) -> StreamSnapshot:
+        if self.chat_send_callback is None:
+            with self._lock:
+                self._error = "Режим чата недоступен"
+            return self.snapshot()
+        result = self.chat_send_callback(tab_id, message)
         with self._lock:
             self._chat_mode_enabled = True
+            self._apply_chat_result_locked(result)
+        self.set_chat_zoom_enabled(True)
+        return self.snapshot()
+
+    def select_chat_tab(self, tab_id: str | None) -> StreamSnapshot:
+        if self.chat_select_callback is None:
+            with self._lock:
+                self._error = "Выбор вкладки чата недоступен"
+            return self.snapshot()
+        result = self.chat_select_callback(tab_id)
+        with self._lock:
+            self._chat_mode_enabled = True
+            self._apply_chat_result_locked(result)
+        self.set_chat_zoom_enabled(True)
+        return self.snapshot()
+
+    def clear_chat_input(self) -> StreamSnapshot:
+        if self.chat_clear_callback is None:
+            with self._lock:
+                self._error = "Очистка чата недоступна"
+            return self.snapshot()
+        result = self.chat_clear_callback()
+        with self._lock:
+            self._chat_mode_enabled = True
+            self._apply_chat_result_locked(result)
         self.set_chat_zoom_enabled(True)
         return self.snapshot()
 
@@ -506,6 +750,43 @@ class StreamingService:
     def stream_url(self) -> str | None:
         with self._lock:
             return self._stream_url_locked()
+
+    def _refresh_chat_detection_if_needed(self, *, force: bool = False) -> None:
+        with self._lock:
+            if self.chat_status_callback is None:
+                return
+            now = self.clock()
+            if not force and now - self._chat_detection_at < 1.0:
+                return
+            callback = self.chat_status_callback
+            game_window_available_callback = self.game_window_available_callback
+        if game_window_available_callback is not None and not game_window_available_callback():
+            with self._lock:
+                self._chat_detection = ChatDetection(error="Окно игры не найдено")
+                self._chat_detection_at = self.clock()
+            return
+        try:
+            detection = callback()
+        except Exception as exc:
+            detection = ChatDetection(error=str(exc))
+        with self._lock:
+            self._chat_detection = detection
+            self._chat_detection_at = self.clock()
+
+    def _apply_chat_result_locked(self, result: ChatActionResult | ChatDetection | None) -> None:
+        if result is None:
+            return
+        if isinstance(result, ChatActionResult):
+            self._chat_detection = result.detection
+            self._chat_detection_at = self.clock()
+            self._chat_last_action = result.message
+            if result.ok:
+                self._error = ""
+            elif result.message:
+                self._error = result.message
+            return
+        self._chat_detection = result
+        self._chat_detection_at = self.clock()
 
     def cleanup_orphaned_runtime_dirs(self) -> None:
         try:
@@ -521,6 +802,9 @@ class StreamingService:
         self._error = ""
         self._chat_zoom_enabled = False
         self._chat_mode_enabled = False
+        self._chat_detection = ChatDetection()
+        self._chat_detection_at = -1_000_000.0
+        self._chat_last_action = ""
         self._started_at = None
         self._last_viewer_activity_at = None
         self._local_url = None
@@ -806,6 +1090,7 @@ class StreamingService:
     def _monitor_loop(self) -> None:
         while not self._stop_monitor.wait(2.0):
             should_stop = False
+            game_missing = False
             restart_needed = False
             with self._lock:
                 if self._active and self._should_auto_stop_locked():
@@ -813,10 +1098,17 @@ class StreamingService:
                 if self._active and self._ffmpeg_process and self._ffmpeg_process.poll() is not None:
                     self._log("FFmpeg завершился, перезапускаю стрим")
                     restart_needed = True
+                active = self._active
+                game_window_available_callback = self.game_window_available_callback
+            if active and game_window_available_callback is not None and not game_window_available_callback():
+                game_missing = True
+            if game_missing:
+                self.stop_stream("окно игры закрыто")
+                continue
             if restart_needed:
                 self._restart_ffmpeg()
             if should_stop:
-                self.stop_stream("нет зрителей 3 минуты")
+                self.stop_stream("нет зрителей 5 минут")
 
     def _should_auto_stop_locked(self) -> bool:
         if not self._active:
@@ -852,6 +1144,11 @@ class StreamingService:
         self._hls_dir = None
         self._local_url = None
         self._public_url = None
+        self._chat_zoom_enabled = False
+        self._chat_mode_enabled = False
+        self._chat_detection = ChatDetection()
+        self._chat_detection_at = -1_000_000.0
+        self._chat_last_action = ""
         self._started_at = None
         self._last_viewer_activity_at = None
         self._runtime_token = None
@@ -862,6 +1159,8 @@ class StreamingService:
             reference = self._last_viewer_activity_at or self._started_at
             if reference is not None:
                 seconds_until_auto_stop = max(0, int(self.viewer_timeout_seconds - (self.clock() - reference)))
+        chat_detection = self._chat_detection
+        chat_tabs = chat_detection.tabs if chat_detection.active else ()
         return StreamSnapshot(
             active=self._active,
             status="preparing" if self._status == "offline" and self._binary_prepare_thread and self._binary_prepare_thread.is_alive() else self._status,
@@ -877,6 +1176,11 @@ class StreamingService:
             last_viewer_activity_at=self._last_viewer_activity_at,
             seconds_until_auto_stop=seconds_until_auto_stop,
             error=self._error or self._binary_prepare_error,
+            chat_active=chat_detection.active,
+            chat_tabs=chat_tabs,
+            chat_selected_tab_id=chat_detection.selected_tab_id if chat_detection.active else None,
+            chat_status_error=chat_detection.error,
+            chat_last_action=self._chat_last_action,
         )
 
     def _stream_url_locked(self) -> str | None:
@@ -1178,7 +1482,25 @@ class StreamRequestHandler(BaseHTTPRequestHandler):
             self._send_json(self.stream_service.snapshot())
             return
         if parsed.path == "/api/stream/chat-mode":
-            self._send_json(self.stream_service.enable_chat_mode())
+            payload = self._read_json_body()
+            if "enabled" in payload:
+                self._send_json(self.stream_service.set_chat_mode_enabled(bool(payload.get("enabled"))))
+            else:
+                self._send_json(self.stream_service.enable_chat_mode())
+            return
+        if parsed.path == "/api/stream/chat-select":
+            payload = self._read_json_body()
+            tab_id = payload.get("tab_id")
+            self._send_json(self.stream_service.select_chat_tab(str(tab_id) if tab_id is not None else None))
+            return
+        if parsed.path == "/api/stream/chat-send":
+            payload = self._read_json_body()
+            tab_id = payload.get("tab_id")
+            message = str(payload.get("message") or "")
+            self._send_json(self.stream_service.send_chat_message(str(tab_id) if tab_id is not None else None, message))
+            return
+        if parsed.path == "/api/stream/chat-clear":
+            self._send_json(self.stream_service.clear_chat_input())
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 

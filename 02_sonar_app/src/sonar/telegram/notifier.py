@@ -190,6 +190,14 @@ class NotificationManager:
         if self.settings.notify_start_stop:
             self.send_message("✅ Рыбалка восстановлена")
 
+    def notify_app_started(self) -> None:
+        self.send_message("Sonar запущен")
+        for chat_id in list(self.settings.admin_ids):
+            self._send_menu(chat_id)
+
+    def notify_app_stopped(self) -> None:
+        self.send_message("Sonar выключен")
+
     def send_message(self, text: str, *, chat_id: int | None = None, reply_markup: dict[str, Any] | None = None) -> bool:
         if self.sink:
             self.sink(text)

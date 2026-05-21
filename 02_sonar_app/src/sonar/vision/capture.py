@@ -37,6 +37,9 @@ class WindowCapture:
         self.hwnd = hwnds[0] if hwnds else None
         return self.hwnd is not None
 
+    def is_window_available(self) -> bool:
+        return self.find_window_by_process()
+
     def get_window_size(self) -> tuple[int, int]:
         import win32gui
 
@@ -82,7 +85,19 @@ class WindowCapture:
             win32gui.ReleaseDC(0, screen_dc)
 
     def _require_window(self) -> int:
-        if self.hwnd is None and not self.find_window_by_process():
+        if self.hwnd is not None and self._is_valid_window(self.hwnd):
+            return self.hwnd
+        self.hwnd = None
+        if not self.find_window_by_process():
             raise RuntimeError(f"Window for process {self.process_name!r} was not found")
         assert self.hwnd is not None
         return self.hwnd
+
+    @staticmethod
+    def _is_valid_window(hwnd: int) -> bool:
+        import win32gui
+
+        try:
+            return bool(hwnd and win32gui.IsWindow(hwnd) and win32gui.IsWindowVisible(hwnd))
+        except Exception:
+            return False

@@ -71,6 +71,9 @@ RANDOM_DELAY_JITTER_SECONDS = 0.6
 TACKLE_ACTION_DELAY_SECONDS = 0.5
 CAST_GREEN_DETECTION_DELAY_SECONDS = 1.0
 FOCUS_STATE_CHECK_INTERVAL_SECONDS = 0.5
+CHAT_STAGE_EXIT_TIMEOUT_SECONDS = 18.0
+CHAT_STAGE_EXIT_POLL_SECONDS = 0.12
+CHAT_STAGE_EXIT_ESC_INTERVAL_SECONDS = 0.65
 REELING_WALKING_GUARD_INTERVAL_SECONDS = 0.5
 REELING_IDLE_RETURN_TIMEOUT_SECONDS = 2.0
 REELING_IDLE_RETURN_POLL_SECONDS = 0.1
@@ -141,6 +144,7 @@ class FishingBot:
         self.casting_monitor: GreenPixelMonitor | None = None
         self.hooking_monitor: TemplateMonitor | None = None
         self._stop_event = threading.Event()
+        self._chat_pause_event = threading.Event()
         self._brain_thread: threading.Thread | None = None
         self._last_triggers: dict[str, float] = {}
         self._last_trigger_matches: dict[str, TemplateMatch] = {}
@@ -240,6 +244,7 @@ class FishingBot:
         self._clear_debug_capture_for_new_session()
         self._focus_game()
         self._stop_event.clear()
+        self._chat_pause_event.clear()
         self.state.running = True
         self.state.phase = BotPhase.IDLE
         self.state.detected_stage = "Свободно"
@@ -276,6 +281,8 @@ class FishingBot:
         self._finish_stop(was_running, reason)
 
     def _finish_stop(self, was_running: bool, reason: str) -> None:
+        if hasattr(self, "_chat_pause_event"):
+            self._chat_pause_event.clear()
         self.reeling_tracker.stop()
         self.inventory_memory_detector.close()
         self.input_controller.release_all_keys()
@@ -294,6 +301,103 @@ class FishingBot:
             if self.settings.start_stop_sound_enabled:
                 play_sound("bot_stop.wav", volume=START_STOP_SOUND_VOLUME)
             self.notification_manager.notify_fishing_stopped(self.session_stats.totals(), reason=reason)
+
+    def pause_for_chat(self, enabled: bool, *, restart_on_resume: bool = True) -> None:
+        if not hasattr(self, "_chat_pause_event"):
+            self._chat_pause_event = threading.Event()
+        enabled = bool(enabled)
+        if enabled:
+            if not self._chat_pause_event.is_set():
+                self.input_controller.release_all_keys()
+                self.state.detected_stage = "Чат"
+                self._log("Рыбалка приостановлена для режима чата")
+            self._chat_pause_event.set()
+            return
+        if self._chat_pause_event.is_set():
+            self._no_stage_since = None
+            if restart_on_resume and self.state.running:
+                self._kickstart_requested = True
+            self._chat_pause_event.clear()
+            self._log("Рыбалка продолжена после режима чата")
+
+    def is_paused_for_chat(self) -> bool:
+        return hasattr(self, "_chat_pause_event") and self._chat_pause_event.is_set()
+
+    def prepare_for_chat_mode(self, timeout: float = CHAT_STAGE_EXIT_TIMEOUT_SECONDS) -> tuple[bool, str]:
+        self._focus_game()
+        self.input_controller.release_all_keys()
+        self._publish_stage("Выход в чат")
+        deadline = time.time() + timeout
+        next_esc_at = 0.0
+        last_stage_label = ""
+        while time.time() < deadline and not self._chat_stage_exit_cancelled():
+            frame = None
+            try:
+                frame = self.capture.capture()
+            except Exception as exc:
+                self._log(f"Режим чата: не удалось получить кадр для выхода из рыбалки: {exc}")
+
+            if frame is not None and self._close_game_menu_if_open(frame):
+                self._chat_mode_sleep(0.2)
+                continue
+            if frame is not None and self._close_inventory_for_chat(frame):
+                self._chat_mode_sleep(0.4)
+                continue
+            if frame is not None and self._dismiss_catch_screen_for_chat(frame):
+                self._chat_mode_sleep(0.35)
+                continue
+
+            self._refresh_triggers()
+            stage = self._detect_stage(self._last_triggers)
+            if stage is None:
+                self._publish_stage("Свободно")
+                return True, "Персонаж выведен из рыбалки"
+
+            stage_label = self._stage_label(stage)
+            if stage_label != last_stage_label:
+                last_stage_label = stage_label
+                self._log(f"Режим чата: выхожу из стадии «{stage_label}»")
+            if time.time() >= next_esc_at:
+                self.input_controller.press_key("esc")
+                self._log("Режим чата: нажата Esc для выхода из рыбалки")
+                next_esc_at = time.time() + CHAT_STAGE_EXIT_ESC_INTERVAL_SECONDS
+            self._chat_mode_sleep(CHAT_STAGE_EXIT_POLL_SECONDS)
+
+        if self._chat_stage_exit_cancelled():
+            return False, "Выход в чат отменён остановкой бота"
+        return False, "Не удалось вывести персонажа из рыбалки"
+
+    def _chat_stage_exit_cancelled(self) -> bool:
+        return self.state.running and self._stop_event.is_set()
+
+    def _chat_mode_sleep(self, seconds: float) -> None:
+        end = time.time() + seconds
+        while time.time() < end and not self._chat_stage_exit_cancelled():
+            time.sleep(min(0.05, max(0.0, end - time.time())))
+
+    def _close_inventory_for_chat(self, frame) -> bool:
+        try:
+            if not self.inventory_detector.is_open(frame):
+                return False
+        except Exception as exc:
+            debug_log(f"CHAT_INVENTORY_DETECT_FAILED {exc}")
+            return False
+        self.input_controller.press_key(self.settings.inventory_hotkey)
+        self._log(f"Режим чата: закрываю инвентарь клавишей {self.settings.inventory_hotkey}")
+        return True
+
+    def _dismiss_catch_screen_for_chat(self, frame) -> bool:
+        try:
+            result = self.catch_detector.detect(frame)
+        except Exception as exc:
+            debug_log(f"CHAT_CATCH_DETECT_FAILED {exc}")
+            return False
+        if not result.visible:
+            return False
+        self._last_catch_result = result
+        self._log("Режим чата: закрываю экран улова перед открытием чата")
+        self._do_fish_catch()
+        return True
 
     def _join_brain_thread(self) -> None:
         if self._brain_thread and self._brain_thread.is_alive():
@@ -345,6 +449,10 @@ class FishingBot:
 
     def _brain_loop(self) -> None:
         while not self._stop_event.is_set():
+            if self.is_paused_for_chat():
+                self._publish_stage("Чат")
+                self._sleep(0.15)
+                continue
             self._update_focus_state_notification()
             triggers = self._get_triggers()
             stage = self._detect_stage(triggers)

@@ -50,6 +50,18 @@ def test_main_menu_contains_stream_entry(monkeypatch):
     assert any(button["callback_data"] == "action:tackle" for row in keyboard for button in row)
 
 
+def test_app_lifecycle_notification_sends_started_before_menu():
+    messages: list[str] = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=False, admin_ids=[1]), sink=messages.append)
+
+    manager.notify_app_started()
+    manager.notify_app_stopped()
+
+    assert messages[0] == "Sonar запущен"
+    assert "Меню" in messages[1]
+    assert messages[-1] == "Sonar выключен"
+
+
 def test_stream_menu_shows_active_link_and_area_switch(monkeypatch):
     snapshot = SimpleNamespace(
         active=True,

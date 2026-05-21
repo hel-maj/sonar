@@ -55,6 +55,7 @@ from sonar.license.manager import LicenseManager
 from sonar.paths import APP_DIR, RESOURCE_DIR
 from sonar.self_uninstall import get_uninstall_availability, schedule_self_uninstall
 from sonar.streaming import StreamingService
+from sonar.streaming.chat import ChatActionResult, ChatDetection, MajesticChatController
 from sonar.version import APP_VERSION
 
 
@@ -135,10 +136,23 @@ class MainWindow(QMainWindow):
             telegram_settings_changed_callback=self.telegram_settings_bridge.changed.emit,
             keep_debug_capture=keep_debug_capture,
         )
+        self.chat_controller = MajesticChatController(
+            capture=self.bot.capture,
+            window_activator=self.bot.window_activator,
+            input_controller=self.bot.input_controller,
+            log_callback=self.log_bridge.message.emit,
+        )
         self.stream_service = StreamingService(
             log_callback=self.log_bridge.message.emit,
             chat_mode_callback=self._enable_chat_mode_from_stream,
+            chat_exit_callback=self._disable_chat_mode_from_stream,
+            chat_status_callback=self._detect_stream_chat_state,
+            chat_select_callback=self._select_stream_chat_tab,
+            chat_send_callback=self._send_stream_chat_message,
+            chat_clear_callback=self._clear_stream_chat,
+            game_window_available_callback=self.bot.capture.is_window_available,
         )
+        self._resume_bot_after_chat = False
         self.bot.configure_streaming_callbacks(
             status_callback=self.stream_service.snapshot,
             start_callback=self._start_stream_from_remote,
@@ -147,6 +161,7 @@ class MainWindow(QMainWindow):
             set_chat_zoom_callback=self.stream_service.set_chat_zoom_enabled,
         )
         self._stats_refreshing = False
+        self._app_stopped_notified = False
         self.setWindowTitle(APP_NAME)
         icon_path = find_app_icon_path()
         if icon_path is not None:
@@ -174,6 +189,7 @@ class MainWindow(QMainWindow):
         self.license_timer = QTimer(self)
         self.license_timer.timeout.connect(self._license_tick)
         self.license_timer.start(1000)
+        QTimer.singleShot(0, self._notify_app_started)
 
     def _build_ui(self) -> None:
         self.tabs = QTabWidget()
@@ -277,6 +293,7 @@ class MainWindow(QMainWindow):
         self.inventory_hotkey_input = QLineEdit()
         self.use_item_hotkey_input = QLineEdit()
         self.discard_key_input = QLineEdit()
+        self.chat_hotkey_input = QLineEdit()
         form.addRow("Авто-питание", self.auto_meal_check)
         form.addRow("Авто-смена наживки", self.auto_change_bait_check)
         form.addRow("Складывать в рюкзак", self.store_backpack_check)
@@ -293,6 +310,7 @@ class MainWindow(QMainWindow):
         form.addRow("Клавиша инвентаря", self.inventory_hotkey_input)
         form.addRow("Клавиша использования", self.use_item_hotkey_input)
         form.addRow("Клавиша выброса", self.discard_key_input)
+        form.addRow("Клавиша чата", self.chat_hotkey_input)
         layout.addWidget(group)
 
         fish_group = QGroupBox("Рыбу оставлять")
@@ -491,6 +509,7 @@ class MainWindow(QMainWindow):
         self.inventory_hotkey_input.setText(fishing.inventory_hotkey)
         self.use_item_hotkey_input.setText(fishing.use_item_hotkey)
         self.discard_key_input.setText(fishing.discard_key)
+        self.chat_hotkey_input.setText(fishing.chat_hotkey)
         for fish_id, checkbox in self.fish_checks.items():
             checkbox.setChecked(fishing.fish_settings.get(fish_id, True))
         self._apply_telegram_settings_to_ui(settings.telegram)
@@ -702,6 +721,7 @@ class MainWindow(QMainWindow):
         fishing.inventory_hotkey = self.inventory_hotkey_input.text().strip() or "i"
         fishing.use_item_hotkey = self.use_item_hotkey_input.text().strip() or "e"
         fishing.discard_key = self.discard_key_input.text().strip() or "q"
+        fishing.chat_hotkey = self.chat_hotkey_input.text().strip() or "t"
         for fish_id, checkbox in self.fish_checks.items():
             fishing.fish_settings[fish_id] = checkbox.isChecked()
         telegram = settings.telegram
@@ -756,6 +776,8 @@ class MainWindow(QMainWindow):
             if hasattr(self, "stream_service"):
                 self.stream_service.stop_stream("self uninstall")
             self.bot.stop()
+            if hasattr(self, "_notify_app_stopped"):
+                self._notify_app_stopped()
             self.bot.notification_manager.stop_polling()
             script_path = schedule_self_uninstall()
         except Exception as exc:
@@ -946,18 +968,74 @@ class MainWindow(QMainWindow):
     def _stop_stream_from_remote(self) -> None:
         self.stream_service.stop_stream("telegram")
 
+    def _notify_app_started(self) -> None:
+        threading.Thread(
+            target=self.bot.notification_manager.notify_app_started,
+            name="sonar-telegram-app-start",
+            daemon=True,
+        ).start()
+
+    def _notify_app_stopped(self) -> None:
+        if getattr(self, "_app_stopped_notified", False):
+            return
+        self._app_stopped_notified = True
+        self.bot.notification_manager.notify_app_stopped()
+
     def stop_stream(self) -> None:
         self.stream_service.stop_stream("ui")
         self._refresh_stream_tab()
 
     def enable_chat_mode(self) -> None:
-        self.stream_service.enable_chat_mode()
+        snapshot = self.stream_service.snapshot()
+        self.stream_service.set_chat_mode_enabled(not (snapshot.chat_active or snapshot.chat_mode_enabled))
         self._refresh_stream_tab()
 
-    def _enable_chat_mode_from_stream(self) -> None:
-        if getattr(self, "bot", None) is not None and self.bot.state.running:
-            self.bot.stop("режим чата")
-        self.log_bridge.message.emit("Режим чата включен")
+    def _enable_chat_mode_from_stream(self) -> ChatActionResult:
+        was_running = getattr(self, "bot", None) is not None and self.bot.state.running
+        self._resume_bot_after_chat = was_running
+        if was_running:
+            self.bot.pause_for_chat(True)
+        self.settings = self.config_manager.load()
+        ready, ready_message = self.bot.prepare_for_chat_mode()
+        if not ready:
+            if was_running:
+                self.bot.pause_for_chat(False, restart_on_resume=False)
+                self._resume_bot_after_chat = False
+            result = ChatActionResult(False, ready_message, self.chat_controller.detect())
+            self.log_bridge.message.emit(f"Режим чата: {ready_message}")
+            return result
+        self.log_bridge.message.emit(f"Режим чата: {ready_message}")
+        result = self.chat_controller.open_chat(self.settings.fishing.chat_hotkey)
+        if not result.ok and was_running:
+            self.bot.pause_for_chat(False, restart_on_resume=False)
+            self._resume_bot_after_chat = False
+        self.log_bridge.message.emit(result.message if result.ok else f"Режим чата: {result.message}")
+        return result
+
+    def _disable_chat_mode_from_stream(self) -> ChatActionResult:
+        result = self.chat_controller.close_chat(force=True)
+        chat_closed = result.ok and not result.detection.active
+        if chat_closed:
+            if self._resume_bot_after_chat and getattr(self, "bot", None) is not None and self.bot.state.running:
+                self.bot.pause_for_chat(False)
+            self._resume_bot_after_chat = False
+        self.log_bridge.message.emit(result.message if result.ok else f"Режим чата: {result.message}")
+        return result
+
+    def _detect_stream_chat_state(self) -> ChatDetection:
+        return self.chat_controller.detect()
+
+    def _select_stream_chat_tab(self, tab_id: str | None) -> ChatActionResult:
+        self.settings = self.config_manager.load()
+        return self.chat_controller.select_tab(tab_id, chat_hotkey=self.settings.fishing.chat_hotkey)
+
+    def _send_stream_chat_message(self, tab_id: str | None, message: str) -> ChatActionResult:
+        self.settings = self.config_manager.load()
+        return self.chat_controller.send_message(tab_id, message, chat_hotkey=self.settings.fishing.chat_hotkey)
+
+    def _clear_stream_chat(self) -> ChatActionResult:
+        self.settings = self.config_manager.load()
+        return self.chat_controller.clear_chat_input(self.settings.fishing.chat_hotkey)
 
     def _stream_quality_changed(self, quality: str) -> None:
         if not hasattr(self, "stream_service"):
@@ -1000,6 +1078,9 @@ class MainWindow(QMainWindow):
             self.stream_quality_combo.blockSignals(quality_block)
             self.stream_chat_zoom_check.blockSignals(chat_block)
         self.stream_stop_button.setEnabled(snapshot.active or snapshot.status in {"starting", "error"})
+        self.stream_chat_mode_button.setText(
+            "Выйти из режима чата" if snapshot.chat_active or snapshot.chat_mode_enabled else "Включить режим чата"
+        )
 
     def reset_session_stats(self) -> None:
         self.session_stats.reset()
@@ -1031,6 +1112,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "stream_service"):
             self.stream_service.stop_stream("app close")
         self.bot.stop()
+        self._notify_app_stopped()
         self.bot.notification_manager.stop_polling()
         event.accept()
 

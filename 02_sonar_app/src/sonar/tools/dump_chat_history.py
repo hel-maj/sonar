@@ -80,7 +80,27 @@ CHAT_DISCOVERY_MARKERS = (
     ('"text":"', 4),
     ('"type":"', 4),
 )
-CHAT_STATE_MARKERS = ("activeFilter", "activeTab", "selectedTab", "currentTab", "chat/changeTab", "chat.setActiveFilter")
+CHAT_STATE_MARKERS = (
+    "chatIsActive",
+    "chatIsShow",
+    "inputStatus",
+    "activeFilter",
+    "activeTab",
+    "selectedTab",
+    "currentTab",
+    "chat/changeTab",
+    "chat.setActiveFilter",
+    "chat/setInputStatus",
+    "chatInput",
+    "input#chatInput",
+    "label.chat-input",
+    "label.chat-input.withCommand",
+    "div.chat.disabled",
+    "div.chat-container > div.chat",
+    "div.main-cover.full-width.full-height > div.chat-container > div.chat",
+    "ui.click",
+    "copy-input",
+)
 CHAT_CONTEXT_MARKERS = tuple(f'"type":"{item}' for item in CHAT_TYPES) + (
     "chatInput",
     "\u0433\u043e\u0432\u043e\u0440\u0438\u0442:",
@@ -109,6 +129,7 @@ VISIBLE_PHONE_RE = re.compile(
 )
 COLOR_TAG_RE = re.compile(r"@\{(?P<color>[0-9A-Fa-f]{6})\}")
 PLAYER_NAME_RE = re.compile(r"(?P<name>[A-Z][A-Za-z_'-]{1,24}\s+[A-Z][A-Za-z_'-]{1,24}(?:\s+[A-Z][A-Za-z_'-]{1,24})?)")
+STATIC_SPEAKER_RE = re.compile(r"^#?(?P<static_id>\d{1,10})$")
 ID_RE = re.compile(r'"id"\s*:\s*"?([0-9A-Za-z_-]{1,32})"?')
 JSON_FIELD_RE = re.compile(
     r'"(?P<key>[A-Za-z_][A-Za-z0-9_-]{0,48})"\s*:\s*'
@@ -135,6 +156,9 @@ PLAYER_ACTION_KEYWORDS = (
     "\u043e\u0442\u0441\u0442\u0435\u0433\u043d\u0443\u043b",
     "\u0434\u043e\u0441\u0442\u0430\u043b",
     "\u0443\u0431\u0440\u0430\u043b",
+    "\u043a\u0443\u043f\u0438\u043b",
+    "\u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043b",
+    "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u043b",
 )
 RECORD_BOUNDARY_RE = re.compile(r'\},\{"type"|\{"type"')
 TEXT_END_MARKERS = (
@@ -218,6 +242,8 @@ class ChatRecord:
     formatting: dict[str, Any] = field(default_factory=dict)
     owner: dict[str, Any] = field(default_factory=dict)
     raw_fields: dict[str, Any] = field(default_factory=dict)
+    order: int | None = None
+    orderSource: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -461,11 +487,17 @@ def _looks_like_player_name(value: str) -> bool:
     )
 
 
+def _static_id_from_speaker(value: str) -> str | None:
+    speaker = value.replace("[default]", "").strip().strip(":,;")
+    match = STATIC_SPEAKER_RE.fullmatch(speaker)
+    return match.group("static_id") if match else None
+
+
 def _looks_like_player_action_tail(value: str) -> bool:
     tail = value.strip()
     if len(tail) < 3 or _russian_score(tail) < 3:
         return False
-    if any(marker in tail for marker in ('"', "{", "}", ":", "_", "Botmessage", "Answers")):
+    if any(marker in tail for marker in ("{", "}", ":", "_", "Botmessage", "Answers")):
         return False
     first = tail[0]
     if not (("а" <= first <= "я") or first == "ё"):
@@ -510,9 +542,15 @@ def _owner_from_fields(fields: dict[str, Any], chat_text: str) -> dict[str, Any]
 
 def _visible_message_owner(text: str) -> dict[str, Any]:
     owner: dict[str, Any] = {}
+    body = re.sub(r"^(?:\[[^\]]+\]\s*)+", "", text).strip()
     if "\u0433\u043e\u0432\u043e\u0440\u0438\u0442:" in text:
         speaker = text.split("\u0433\u043e\u0432\u043e\u0440\u0438\u0442:", 1)[0].replace("[default]", "").strip()
-        if _looks_like_player_name(speaker):
+        speaker = re.sub(r"^(?:\[[^\]]+\]\s*)+", "", speaker).strip()
+        static_id = _static_id_from_speaker(speaker)
+        if static_id:
+            owner["staticId"] = static_id
+            owner["kind"] = "player"
+        elif _looks_like_player_name(speaker):
             owner["name"] = speaker
             owner["kind"] = "player"
     elif "\u043b\u044e\u0431\u0443\u0435\u0442\u0441\u044f" in text:
@@ -521,8 +559,8 @@ def _visible_message_owner(text: str) -> dict[str, Any]:
         if speaker and _looks_like_player_name(speaker):
             owner["name"] = speaker
             owner["kind"] = "player"
-    elif re.match(r"^[A-Z][A-Za-z_'-]{1,24}\s+[A-Z][A-Za-z_'-]{1,24}\s*:\s*\(\(", text):
-        speaker = text.split(":", 1)[0].strip()
+    elif re.match(r"^[A-Z][A-Za-z_'-]{1,24}\s+[A-Z][A-Za-z_'-]{1,24}\s*:\s*\(\(", body):
+        speaker = body.split(":", 1)[0].strip()
         if _looks_like_player_name(speaker):
             owner["name"] = speaker
             owner["kind"] = "player"
@@ -533,9 +571,9 @@ def _visible_message_owner(text: str) -> dict[str, Any]:
             owner["name"] = speaker
             owner["kind"] = "player"
             owner["organization"] = "Weazel News"
-    elif match := PLAYER_NAME_RE.match(text):
+    elif match := PLAYER_NAME_RE.match(body):
         speaker = match.group("name")
-        tail = text[match.end() :].strip()
+        tail = body[match.end() :].strip()
         if _looks_like_player_name(speaker) and _looks_like_player_action_tail(tail):
             owner["name"] = speaker
             owner["kind"] = "player"
@@ -1129,6 +1167,8 @@ def _is_bad_chat_text(text: str, timestamp: int | None) -> bool:
     noise = _chat_text_noise_score(text)
     if any(marker in text for marker in BAD_RECORD_MARKERS):
         return True
+    if "@{" in text or len(re.findall(r"%[A-Z]", text)) >= 2:
+        return True
     if len(text) < 80 and noise >= 4:
         return True
     if timestamp is None and (noise >= 18 or len(text) > 1200):
@@ -1215,6 +1255,11 @@ def _record_from_segment(
     id_value = raw_fields.get("id") or (id_match.group(1) if id_match else None)
     metadata = _record_metadata(raw_fields, chat_text)
     phone_text = (str(phone_value).strip() or None) if phone_value is not None else None
+    if phone_text and record_type == "news":
+        visible_phone = f"\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440: {phone_text}"
+        if visible_phone not in chat_text and phone_text not in chat_text:
+            chat_text = f"{chat_text.rstrip()} {visible_phone}"
+        raw_fields.setdefault("phoneNumber_source", "memory")
     formatting = _formatting_from_raw(raw_text, record_type, chat_text)
     color = _primary_color(formatting)
     stable_id = _stable_message_id(
@@ -1515,6 +1560,8 @@ def _is_valid_rendered_chat_text(text: str, record_type: str) -> bool:
         speaker, message = text.split("\u0433\u043e\u0432\u043e\u0440\u0438\u0442:", 1)
         speaker = speaker.replace("[default]", "").strip()
         message = message.strip()
+        if _static_id_from_speaker(speaker):
+            return len(message) >= 1
         if len(speaker) < 3 or len(message) < 2:
             return False
         if any(ch in speaker for ch in "{}[]\""):
@@ -1608,6 +1655,92 @@ def _is_news_continuation(text: str) -> bool:
     return _russian_score(text) >= 4 and len(text) <= 260
 
 
+def _is_phone_only_record(record: ChatRecord) -> bool:
+    return (
+        record.type == "news"
+        and _phone_from_text(record.text) is not None
+        and record.text.strip().startswith("\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440:")
+    )
+
+
+def _drop_unattached_phone_records(records: list[ChatRecord]) -> list[ChatRecord]:
+    return [record for record in records if not _is_phone_only_record(record)]
+
+
+def _attach_phone_to_record(record: ChatRecord, phone_record: ChatRecord) -> ChatRecord:
+    phone_number = phone_record.phoneNumber or _phone_from_text(phone_record.text)
+    if not phone_number:
+        return record
+    text = record.text
+    phone_text = f"\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440: {phone_number}"
+    if phone_text not in text and phone_number not in text:
+        text = f"{text.rstrip()} {phone_text}"
+    raw_fields = dict(record.raw_fields)
+    attached = list(raw_fields.get("attached_phone_records") or [])
+    attached.append(
+        {
+            "phoneNumber": phone_number,
+            "text": phone_record.text,
+            "source": phone_record.source,
+            "pos": phone_record.pos,
+            "messageId": phone_record.messageId,
+            "stableId": phone_record.stableId,
+        }
+    )
+    raw_fields["attached_phone_records"] = attached
+    raw_fields["phoneNumber_source"] = raw_fields.get("phoneNumber_source") or "rendered_continuation"
+    stable_id = _stable_message_id(
+        record.type,
+        text,
+        record.timestamp,
+        phone_number,
+        record.playerName,
+        record.playerId,
+        record.staticId,
+        record.color,
+    )
+    message_id = record.messageId
+    if raw_fields.get("messageId_source") != "memory":
+        message_id = stable_id
+    return replace(
+        record,
+        text=text,
+        phoneNumber=phone_number,
+        messageId=message_id,
+        stableId=stable_id,
+        raw_fields=raw_fields,
+    )
+
+
+def _attach_standalone_phone_records(records: list[ChatRecord], *, max_distance: int = 0x20000) -> list[ChatRecord]:
+    ordered = sorted(records, key=lambda item: item.pos)
+    out: list[ChatRecord] = []
+    last_news_index: int | None = None
+    last_news_pos: int | None = None
+    for record in ordered:
+        if _is_phone_only_record(record):
+            if (
+                last_news_index is not None
+                and last_news_pos is not None
+                and record.pos >= last_news_pos
+                and record.pos - last_news_pos <= max_distance
+            ):
+                out[last_news_index] = _attach_phone_to_record(out[last_news_index], record)
+                last_news_index = None
+                last_news_pos = None
+                continue
+            out.append(record)
+            continue
+        out.append(record)
+        if record.type == "news" and not record.phoneNumber:
+            last_news_index = len(out) - 1
+            last_news_pos = record.pos
+        elif record.type not in {"news"}:
+            last_news_index = None
+            last_news_pos = None
+    return out
+
+
 def _extract_split_rendered_records(
     nodes: list[RenderedTextNode],
     base_addr: int,
@@ -1626,8 +1759,8 @@ def _extract_split_rendered_records(
         text_parts = [node.text]
         node_starts = {node.start}
         last_end = node.end
-        for tail in nodes[index + 1 : index + 8]:
-            if tail.start - last_end > 260:
+        for tail in nodes[index + 1 : index + 12]:
+            if tail.start - last_end > 4096:
                 break
             if not _is_news_continuation(tail.text):
                 break
@@ -1654,6 +1787,20 @@ def _extract_split_rendered_records(
         )
         if record is None:
             continue
+        if record.phoneNumber and any(_phone_from_text(part) for part in text_parts[1:]):
+            raw_fields = dict(record.raw_fields)
+            raw_fields.setdefault("phoneNumber_source", "rendered_continuation")
+            raw_fields.setdefault(
+                "attached_phone_records",
+                [
+                    {
+                        "phoneNumber": record.phoneNumber,
+                        "source": source,
+                        "pos": base_addr + node.start * scale,
+                    }
+                ],
+            )
+            record = replace(record, raw_fields=raw_fields)
         records.append(record)
         consumed.update(node_starts)
     return records, consumed
@@ -1691,29 +1838,198 @@ def _extract_rendered_records_from_text(
         )
         if record is not None:
             records.append(record)
-    return _dedupe_records(records)
+    return _dedupe_records(_drop_unattached_phone_records(_attach_standalone_phone_records(records)))
+
+
+def _record_visible_key(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _record_text_match(rendered_text: str, candidate_text: str) -> bool:
+    rendered = _record_visible_key(rendered_text)
+    candidate = _record_visible_key(candidate_text)
+    if not rendered or not candidate:
+        return False
+    if rendered == candidate:
+        return True
+    if len(rendered) < 24 or len(candidate) < 24:
+        return False
+    return candidate.startswith(rendered) or rendered.startswith(candidate)
+
+
+def _is_rendered_record(record: ChatRecord) -> bool:
+    return bool(record.raw_fields.get("rendered")) or str(record.source or "").endswith(" rendered")
+
+
+def _record_enrichment_candidates(record: ChatRecord, candidates: list[ChatRecord]) -> list[ChatRecord]:
+    matches: list[ChatRecord] = []
+    for candidate in candidates:
+        if candidate is record or candidate.type != record.type:
+            continue
+        if _record_text_match(record.text, candidate.text):
+            matches.append(candidate)
+    distinct: dict[tuple[Any, ...], ChatRecord] = {}
+    for candidate in matches:
+        key = (
+            candidate.timestamp,
+            candidate.id,
+            candidate.messageId if candidate.raw_fields.get("messageId_source") == "memory" else None,
+            candidate.playerId,
+            candidate.staticId,
+            candidate.playerName,
+            candidate.phoneNumber,
+        )
+        distinct.setdefault(key, candidate)
+    return list(distinct.values())
+
+
+def _enrich_rendered_record(record: ChatRecord, candidate: ChatRecord) -> ChatRecord:
+    raw_fields = dict(record.raw_fields)
+    raw_fields.setdefault("matched_record", {})
+    matched = dict(raw_fields["matched_record"])
+    matched.update(
+        {
+            "source": candidate.source,
+            "pos": candidate.pos,
+            "id": candidate.id,
+            "messageId": candidate.messageId,
+            "timestamp": candidate.timestamp,
+        }
+    )
+    raw_fields["matched_record"] = {key: value for key, value in matched.items() if value is not None}
+    update: dict[str, Any] = {"raw_fields": raw_fields}
+    if record.timestamp is None and candidate.timestamp is not None:
+        update["timestamp"] = candidate.timestamp
+        update["time"] = candidate.time or _timestamp_to_text(candidate.timestamp)
+        raw_fields["timestamp_source"] = "matched_serialized_unique"
+    if record.phoneNumber is None and candidate.phoneNumber is not None:
+        update["phoneNumber"] = candidate.phoneNumber
+        raw_fields["phoneNumber_source"] = raw_fields.get("phoneNumber_source") or "matched_serialized_unique"
+    if record.playerId is None and candidate.playerId is not None:
+        update["playerId"] = candidate.playerId
+        raw_fields["playerId_source"] = "matched_serialized_unique"
+    if record.staticId is None and candidate.staticId is not None:
+        update["staticId"] = candidate.staticId
+        raw_fields["staticId_source"] = "matched_serialized_unique"
+    if record.playerName is None and candidate.playerName is not None:
+        update["playerName"] = candidate.playerName
+        raw_fields["playerName_source"] = "matched_serialized_unique"
+    if not record.owner and candidate.owner:
+        update["owner"] = candidate.owner
+        raw_fields["owner_source"] = "matched_serialized_unique"
+    elif record.owner and candidate.owner:
+        owner = dict(candidate.owner)
+        owner.update(record.owner)
+        update["owner"] = owner
+    return replace(record, **update)
+
+
+def _enrich_rendered_records(records: list[ChatRecord]) -> list[ChatRecord]:
+    candidates = [
+        record
+        for record in records
+        if not _is_rendered_record(record)
+        and (record.timestamp is not None or record.id or record.playerId or record.staticId or record.playerName)
+    ]
+    out: list[ChatRecord] = []
+    for record in records:
+        if not _is_rendered_record(record):
+            out.append(record)
+            continue
+        matches = _record_enrichment_candidates(record, candidates)
+        if len(matches) == 1:
+            out.append(_enrich_rendered_record(record, matches[0]))
+        else:
+            out.append(record)
+    return out
 
 
 def _record_dedupe_key(record: ChatRecord) -> tuple[str, int | None, str]:
-    if record.timestamp is not None:
-        return (record.type, record.timestamp, "")
-    return (record.type, None, record.text[:160])
+    if record.id:
+        return ("id", None, f"{record.type}:{record.id}")
+    if record.raw_fields.get("messageId_source") == "memory" and record.messageId:
+        return ("messageId", None, f"{record.type}:{record.messageId}")
+    if record.raw_fields.get("messageId_source") == "stable_hash" and record.messageId:
+        return (
+            "memory-near",
+            None,
+            (
+                f"{record.type}:{record.process or ''}:{record.pid or ''}:"
+                f"{record.source}:{record.timestamp or ''}:{record.pos // 16}:{record.messageId}"
+            ),
+        )
+    return (
+        "memory",
+        None,
+        (
+            f"{record.type}:{record.process or ''}:{record.pid or ''}:"
+            f"{record.pos}:{record.source}:{record.timestamp or ''}:{record.text[:160]}"
+        ),
+    )
+
+
+def _merge_record_pair(current: ChatRecord, candidate: ChatRecord) -> ChatRecord:
+    if _record_quality(candidate) > _record_quality(current):
+        primary, secondary = candidate, current
+    else:
+        primary, secondary = current, candidate
+    merged = primary
+    if secondary.phoneNumber and not merged.phoneNumber:
+        if secondary.type == "news":
+            merged = _attach_phone_to_record(merged, secondary)
+        else:
+            merged = replace(merged, phoneNumber=secondary.phoneNumber)
+    raw_fields = dict(secondary.raw_fields)
+    raw_fields.update(merged.raw_fields)
+    owner = dict(secondary.owner)
+    owner.update(merged.owner)
+    update: dict[str, Any] = {"raw_fields": raw_fields, "owner": owner}
+    for field_name in ("timestamp", "time", "id", "messageId", "playerId", "staticId", "playerName", "color"):
+        if getattr(merged, field_name) is None and getattr(secondary, field_name) is not None:
+            update[field_name] = getattr(secondary, field_name)
+    if merged.formatting:
+        update["formatting"] = merged.formatting
+    elif secondary.formatting:
+        update["formatting"] = secondary.formatting
+    if update.get("staticId") and not update.get("playerId"):
+        update["playerId"] = None
+    return replace(merged, **update)
+
+
+def _sort_records(records: list[ChatRecord]) -> list[ChatRecord]:
+    return sorted(
+        records,
+        key=lambda item: (
+            0 if item.timestamp is not None else 1,
+            item.timestamp or 0,
+            str(item.process or ""),
+            int(item.pid or 0),
+            item.pos,
+            item.type,
+            item.text,
+        ),
+    )
+
+
+def _assign_record_order(records: list[ChatRecord]) -> list[ChatRecord]:
+    ordered = _sort_records(records)
+    out: list[ChatRecord] = []
+    for index, record in enumerate(ordered, 1):
+        source = "timestamp" if record.timestamp is not None else "memory_position"
+        out.append(replace(record, order=index, orderSource=source))
+    return out
 
 
 def _dedupe_records(records: list[ChatRecord]) -> list[ChatRecord]:
     best: dict[tuple[str, int | None, str], ChatRecord] = {}
-    for record in records:
+    for record in _drop_unattached_phone_records(records):
         key = _record_dedupe_key(record)
         current = best.get(key)
-        if current is None or _record_quality(record) > _record_quality(current):
+        if current is None:
             best[key] = record
-    by_text: dict[tuple[str, str], ChatRecord] = {}
-    for record in best.values():
-        key = (record.type, record.text)
-        current = by_text.get(key)
-        if current is None or _record_quality(record) > _record_quality(current):
-            by_text[key] = record
-    return sorted(by_text.values(), key=lambda item: (item.timestamp or 0, item.type, item.pos))
+        else:
+            best[key] = _merge_record_pair(current, record)
+    return _assign_record_order(_enrich_rendered_records(list(best.values())))
 
 
 def _record_channel(record: ChatRecord | dict[str, Any]) -> str | None:
@@ -1772,13 +2088,171 @@ def _dedupe_fragments(fragments: list[TextFragment]) -> list[TextFragment]:
 
 
 def _record_dict_key(record: dict) -> tuple[str, int | None, str]:
+    record_type = str(record.get("type") or "")
+    record_id = record.get("id")
+    if record_id:
+        return ("id", None, f"{record_type}:{record_id}")
+    raw_fields = record.get("raw_fields") if isinstance(record.get("raw_fields"), dict) else {}
+    message_id = record.get("messageId")
+    if raw_fields.get("messageId_source") == "memory" and message_id:
+        return ("messageId", None, f"{record_type}:{message_id}")
     timestamp = record.get("timestamp")
     if not isinstance(timestamp, int):
         timestamp = None
+    if raw_fields.get("messageId_source") == "stable_hash" and message_id:
+        pos = record.get("pos")
+        if not isinstance(pos, int):
+            pos = 0
+        return (
+            "memory-near",
+            None,
+            (
+                f"{record_type}:{record.get('process') or ''}:{record.get('pid') or ''}:"
+                f"{record.get('source') or ''}:{timestamp or ''}:{pos // 16}:{message_id}"
+            ),
+        )
+    return (
+        "memory",
+        None,
+        (
+            f"{record_type}:{record.get('process') or ''}:{record.get('pid') or ''}:"
+            f"{record.get('pos') or 0}:{record.get('source') or ''}:{timestamp or ''}:"
+            f"{str(record.get('text') or '')[:160]}"
+        ),
+    )
+
+
+def _is_phone_only_record_dict(record: dict) -> bool:
+    text = str(record.get("text") or "").strip()
     record_type = str(record.get("type") or "")
-    if timestamp is not None:
-        return (record_type, timestamp, "")
-    return (record_type, None, str(record.get("text") or "")[:160])
+    return (
+        record_type == "news"
+        and text.startswith("\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440:")
+        and _phone_from_text(text) is not None
+    )
+
+
+def _normalize_record_dict(record: dict) -> dict:
+    normalized = dict(record)
+    record_type = str(normalized.get("type") or "")
+    text = str(normalized.get("text") or "")
+    raw_fields = dict(normalized.get("raw_fields") or {})
+    if text and (raw_fields.get("rendered") or str(normalized.get("source") or "").endswith(" rendered")):
+        owner = _rendered_owner(text)
+        if owner:
+            existing_owner = dict(normalized.get("owner") or {})
+            existing_owner.update(owner)
+            normalized["owner"] = existing_owner
+            raw_fields.update({f"visible_{key}": value for key, value in owner.items()})
+            if owner.get("kind") == "player" and owner.get("name") and not normalized.get("playerName"):
+                normalized["playerName"] = str(owner["name"])
+            if owner.get("playerId") and not normalized.get("playerId"):
+                normalized["playerId"] = str(owner["playerId"])
+            if owner.get("staticId") and not normalized.get("staticId"):
+                normalized["staticId"] = str(owner["staticId"])
+    if raw_fields:
+        normalized["raw_fields"] = raw_fields
+    phone_number = normalized.get("phoneNumber")
+    if record_type == "news" and phone_number:
+        phone_text = f"\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440: {phone_number}"
+        if not text.strip().startswith("\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440:") and phone_text not in text and str(phone_number) not in text:
+            normalized["text"] = f"{text.rstrip()} {phone_text}".strip()
+            raw_fields = dict(normalized.get("raw_fields") or {})
+            raw_fields.setdefault("phoneNumber_source", "record")
+            normalized["raw_fields"] = raw_fields
+    return normalized
+
+
+def _is_rendered_record_dict(record: dict) -> bool:
+    raw_fields = record.get("raw_fields") if isinstance(record.get("raw_fields"), dict) else {}
+    return bool(raw_fields.get("rendered")) or str(record.get("source") or "").endswith(" rendered")
+
+
+def _record_dict_enrichment_candidates(record: dict, candidates: list[dict]) -> list[dict]:
+    matches: list[dict] = []
+    record_type = str(record.get("type") or "")
+    text = str(record.get("text") or "")
+    for candidate in candidates:
+        if str(candidate.get("type") or "") != record_type:
+            continue
+        if _record_text_match(text, str(candidate.get("text") or "")):
+            matches.append(candidate)
+    distinct: dict[tuple[Any, ...], dict] = {}
+    for candidate in matches:
+        raw_fields = candidate.get("raw_fields") if isinstance(candidate.get("raw_fields"), dict) else {}
+        key = (
+            candidate.get("timestamp") if isinstance(candidate.get("timestamp"), int) else None,
+            candidate.get("id"),
+            candidate.get("messageId") if raw_fields.get("messageId_source") == "memory" else None,
+            candidate.get("playerId"),
+            candidate.get("staticId"),
+            candidate.get("playerName"),
+            candidate.get("phoneNumber"),
+        )
+        distinct.setdefault(key, candidate)
+    return list(distinct.values())
+
+
+def _enrich_rendered_record_dict(record: dict, candidate: dict) -> dict:
+    enriched = dict(record)
+    raw_fields = dict(enriched.get("raw_fields") or {})
+    matched = dict(raw_fields.get("matched_record") or {})
+    matched.update(
+        {
+            "source": candidate.get("source"),
+            "pos": candidate.get("pos"),
+            "id": candidate.get("id"),
+            "messageId": candidate.get("messageId"),
+            "timestamp": candidate.get("timestamp"),
+        }
+    )
+    raw_fields["matched_record"] = {key: value for key, value in matched.items() if value is not None}
+    timestamp = candidate.get("timestamp")
+    if not isinstance(enriched.get("timestamp"), int) and isinstance(timestamp, int):
+        enriched["timestamp"] = timestamp
+        enriched["time"] = candidate.get("time") or _timestamp_to_text(timestamp)
+        raw_fields["timestamp_source"] = "matched_serialized_unique"
+    for key, source_name in (
+        ("phoneNumber", "phoneNumber_source"),
+        ("playerId", "playerId_source"),
+        ("staticId", "staticId_source"),
+        ("playerName", "playerName_source"),
+    ):
+        if not enriched.get(key) and candidate.get(key):
+            enriched[key] = candidate[key]
+            raw_fields[source_name] = "matched_serialized_unique"
+    if not enriched.get("owner") and candidate.get("owner"):
+        enriched["owner"] = candidate["owner"]
+        raw_fields["owner_source"] = "matched_serialized_unique"
+    elif isinstance(enriched.get("owner"), dict) and isinstance(candidate.get("owner"), dict):
+        owner = dict(candidate["owner"])
+        owner.update(enriched["owner"])
+        enriched["owner"] = owner
+    enriched["raw_fields"] = raw_fields
+    return enriched
+
+
+def _enrich_rendered_record_dicts(records: list[dict]) -> list[dict]:
+    candidates = [
+        record
+        for record in records
+        if not _is_rendered_record_dict(record)
+        and (
+            isinstance(record.get("timestamp"), int)
+            or record.get("id")
+            or record.get("playerId")
+            or record.get("staticId")
+            or record.get("playerName")
+        )
+    ]
+    out: list[dict] = []
+    for record in records:
+        if not _is_rendered_record_dict(record):
+            out.append(record)
+            continue
+        matches = _record_dict_enrichment_candidates(record, candidates)
+        out.append(_enrich_rendered_record_dict(record, matches[0]) if len(matches) == 1 else record)
+    return out
 
 
 def _record_dict_sort_key(record: dict) -> tuple[int, int, str, str]:
@@ -1822,7 +2296,61 @@ def _prefer_richer_record(current: dict, candidate: dict) -> dict:
     return current
 
 
+def _merge_record_dict_pair(current: dict, candidate: dict) -> dict:
+    primary = _prefer_richer_record(current, candidate)
+    secondary = current if primary is candidate else candidate
+    merged = dict(primary)
+    if not merged.get("phoneNumber") and secondary.get("phoneNumber"):
+        phone_number = str(secondary.get("phoneNumber"))
+        merged["phoneNumber"] = phone_number
+        phone_text = f"\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440: {phone_number}"
+        if phone_text not in str(merged.get("text") or "") and phone_number not in str(merged.get("text") or ""):
+            merged["text"] = f"{str(merged.get('text') or '').rstrip()} {phone_text}".strip()
+    for key in (
+        "timestamp",
+        "time",
+        "id",
+        "messageId",
+        "stableId",
+        "playerId",
+        "staticId",
+        "playerName",
+        "color",
+        "process",
+        "pid",
+        "source",
+        "encoding",
+    ):
+        if not merged.get(key) and secondary.get(key):
+            merged[key] = secondary[key]
+    for key in ("formatting", "owner", "raw_fields"):
+        if isinstance(secondary.get(key), dict) or isinstance(merged.get(key), dict):
+            value = dict(secondary.get(key) or {})
+            value.update(dict(merged.get(key) or {}))
+            merged[key] = value
+    return merged
+
+
+def _dedupe_record_dicts(records: list[dict]) -> list[dict]:
+    best: dict[tuple[str, int | None, str], dict] = {}
+    normalized_records: list[dict] = []
+    for record in records:
+        if _is_phone_only_record_dict(record):
+            continue
+        normalized_records.append(_normalize_record_dict(record))
+    for record in _enrich_rendered_record_dicts(normalized_records):
+        key = _record_dict_key(record)
+        best[key] = _merge_record_dict_pair(best[key], record) if key in best else record
+    out = sorted(best.values(), key=_record_dict_sort_key)
+    for index, record in enumerate(out, 1):
+        record["order"] = index
+        record["orderSource"] = "timestamp" if isinstance(record.get("timestamp"), int) else "memory_position"
+    return out
+
+
 def _merge_fragment_dicts(fragments: list[dict], limit: int) -> list[dict]:
+    if limit <= 0:
+        return []
     out: list[dict] = []
     seen: set[str] = set()
     for fragment in sorted(fragments, key=lambda item: (-len(str(item.get("text") or "")), int(item.get("addr") or 0))):
@@ -1844,17 +2372,49 @@ def _merge_fragment_dicts(fragments: list[dict], limit: int) -> list[dict]:
     return sorted(out, key=lambda item: int(item.get("addr") or 0))
 
 
+def _process_keys_from_report(report: dict) -> set[tuple[str, int]]:
+    keys: set[tuple[str, int]] = set()
+    for section in ("selected_processes", "processes"):
+        for item in report.get(section, []) if isinstance(report.get(section), list) else []:
+            if not isinstance(item, dict):
+                continue
+            process = item.get("process")
+            pid = item.get("pid")
+            if process and isinstance(pid, int):
+                keys.add((str(process), pid))
+    process = report.get("process")
+    pid = report.get("pid")
+    if process and isinstance(pid, int):
+        keys.add((str(process), pid))
+    return keys
+
+
+def _record_belongs_to_processes(record: dict, process_keys: set[tuple[str, int]]) -> bool:
+    if not process_keys:
+        return True
+    process = record.get("process")
+    pid = record.get("pid")
+    if not process or not isinstance(pid, int):
+        return False
+    return (str(process), pid) in process_keys
+
+
 def _merge_history_data(existing: dict | None, incoming: dict, fragment_limit: int) -> dict:
     existing = existing or {}
-    records_by_key: dict[tuple[str, int | None, str], dict] = {}
-    for record in [*existing.get("records", []), *incoming.get("records", [])]:
+    record_candidates: list[dict] = []
+    incoming_process_keys = _process_keys_from_report(incoming)
+    existing_records = [
+        record
+        for record in existing.get("records", [])
+        if isinstance(record, dict) and _record_belongs_to_processes(record, incoming_process_keys)
+    ]
+    for record in [*existing_records, *incoming.get("records", [])]:
         if not isinstance(record, dict) or not str(record.get("text") or "").strip():
             continue
         timestamp = record.get("timestamp") if isinstance(record.get("timestamp"), int) else None
         if _is_bad_chat_text(str(record.get("text") or ""), timestamp):
             continue
-        key = _record_dict_key(record)
-        records_by_key[key] = _prefer_richer_record(records_by_key[key], record) if key in records_by_key else record
+        record_candidates.append(record)
 
     fragments: list[dict] = []
     for fragment in [*existing.get("fragments", []), *incoming.get("fragments", [])]:
@@ -1867,6 +2427,8 @@ def _merge_history_data(existing: dict | None, incoming: dict, fragment_limit: i
             "created_at": incoming.get("created_at"),
             "pid": incoming.get("pid"),
             "selected_processes": incoming.get("selected_processes", []),
+            "chat_state": incoming.get("chat_state"),
+            "chat_input_active": incoming.get("chat_input_active"),
             "active_tab": incoming.get("active_tab"),
             "tabs": incoming.get("tabs"),
             "records": len(incoming.get("records", [])),
@@ -1876,7 +2438,15 @@ def _merge_history_data(existing: dict | None, incoming: dict, fragment_limit: i
         }
     )
 
-    merged_records = sorted(records_by_key.values(), key=_record_dict_sort_key)
+    merged_records = _dedupe_record_dicts(record_candidates)
+    chat_state = incoming.get("chat_state") if isinstance(incoming.get("chat_state"), dict) else existing.get("chat_state")
+    if not isinstance(chat_state, dict):
+        chat_state = _empty_chat_state()
+    chat_input_active = incoming.get("chat_input_active")
+    if not isinstance(chat_input_active, bool):
+        chat_input_active = chat_state.get("chat_input_active")
+    if not isinstance(chat_input_active, bool):
+        chat_input_active = existing.get("chat_input_active")
     active_tab = incoming.get("active_tab") or existing.get("active_tab")
     if not isinstance(active_tab, dict) or active_tab.get("confidence") == "unknown":
         inferred_tab = _infer_active_tab_from_records(merged_records)
@@ -1893,8 +2463,10 @@ def _merge_history_data(existing: dict | None, incoming: dict, fragment_limit: i
         "pid": incoming.get("pid"),
         "memory_dump": incoming.get("memory_dump") or existing.get("memory_dump"),
         "selected_processes": incoming.get("selected_processes") or existing.get("selected_processes", []),
+        "chat_state": chat_state,
+        "chat_input_active": chat_input_active,
         "active_tab": active_tab,
-        "tabs": incoming.get("tabs") or existing.get("tabs") or _known_chat_tabs(active_tab if isinstance(active_tab, dict) else None),
+        "tabs": _known_chat_tabs(active_tab if isinstance(active_tab, dict) else None, merged_records),
         "process_discovery": incoming.get("process_discovery") or existing.get("process_discovery"),
         "records": merged_records,
         "fragments": _merge_fragment_dicts(fragments, fragment_limit),
@@ -1908,6 +2480,7 @@ def _format_history_text(report: dict, title: str, fragment_limit: int) -> str:
     txt_lines = [
         title,
         f"process={report.get('process')} pid={report.get('pid')}",
+        f"chat_input_active={report.get('chat_input_active')}",
         f"active_tab={(report.get('active_tab') or {}).get('name') or (report.get('active_tab') or {}).get('id') or 'unknown'}",
         f"records={len(records)} fragments={min(len(fragments), fragment_limit)}",
         "",
@@ -1952,7 +2525,7 @@ def update_latest_history(json_path: Path, out_dir: Path, latest_name: str, frag
     latest_txt = out_dir / f"{latest_name}.txt"
     incoming = json.loads(json_path.read_text(encoding="utf-8"))
     existing: dict | None = None
-    if latest_json.exists():
+    if not incoming.get("memory_dump") and latest_json.exists():
         try:
             existing = json.loads(latest_json.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -2015,18 +2588,49 @@ def _canonical_tab_id(tab_id: str | None) -> str | None:
     }.get(value, value or None)
 
 
-def _known_chat_tabs(active_tab: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _available_tab_ids_from_records(
+    records: list[ChatRecord] | list[dict[str, Any]] | None,
+    active_tab: dict[str, Any] | None,
+) -> set[str] | None:
+    if records is None:
+        return None
+    available = {"all"}
+    if isinstance(active_tab, dict) and active_tab.get("id"):
+        active_id = _canonical_tab_id(str(active_tab.get("id")))
+        if active_id:
+            available.add(active_id)
+    for record in records:
+        record_type = record.type if isinstance(record, ChatRecord) else str(record.get("type") or "")
+        text = record.text if isinstance(record, ChatRecord) else str(record.get("text") or "")
+        if record_type == "family" or text.startswith("[fam]"):
+            available.add("fam")
+        elif record_type == "fraction" or text.startswith("[frac]"):
+            available.add("frac")
+        elif record_type == "report" or text.startswith("[report]"):
+            available.add("report")
+        elif record_type == "gov":
+            available.add("gov")
+    return available
+
+
+def _known_chat_tabs(
+    active_tab: dict[str, Any] | None,
+    records: list[ChatRecord] | list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     active_id = _canonical_tab_id(str(active_tab.get("id"))) if isinstance(active_tab, dict) and active_tab.get("id") else None
+    available_ids = _available_tab_ids_from_records(records, active_tab)
     tabs = []
     for tab_id in ("all", "fam", "frac", "gov", "report"):
-        tabs.append(
-            {
-                "id": tab_id,
-                "name": _tab_name_from_id(tab_id),
-                "active": active_id == tab_id,
-                "source": "known_chat_tabs",
-            }
-        )
+        tab = {
+            "id": tab_id,
+            "name": _tab_name_from_id(tab_id),
+            "active": active_id == tab_id,
+            "source": "known_chat_tabs",
+        }
+        if available_ids is not None:
+            tab["available"] = tab_id in available_ids
+            tab["availabilitySource"] = "memory.records.inferred"
+        tabs.append(tab)
     return tabs
 
 
@@ -2047,6 +2651,47 @@ def _active_tab_from_value(key: str, value: Any, source: str, addr: int, raw: st
         "confidence": "medium",
         "raw": raw[:500],
     }
+
+
+def _state_confidence_rank(confidence: str | None) -> int:
+    return {
+        "disabled": -1,
+        "unknown": 0,
+        "low": 1,
+        "inferred": 1,
+        "medium": 2,
+        "high": 3,
+    }.get(str(confidence or "unknown"), 0)
+
+
+def _state_bool_from_value(value: str) -> bool | None:
+    normalized = value.strip().strip('"').strip().lower()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    return None
+
+
+def _empty_chat_state(source: str = "memory", confidence: str = "unknown", marker_hit_count: int | None = None) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "chat_input_active": None,
+        "chat_visible": None,
+        "active_tab": None,
+        "source": source,
+        "confidence": confidence,
+    }
+    if marker_hit_count is not None:
+        state["marker_hit_count"] = marker_hit_count
+    return state
+
+
+def _clean_state_raw(value: str | None, limit: int = 700) -> str | None:
+    if value is None:
+        return None
+    cleaned = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]+", " ", str(value))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:limit] if cleaned else None
 
 
 def _extract_active_tab_from_text(text: str, base_addr: int = 0, encoding: str = "utf-8", source: str = "", scale: int = 1) -> dict[str, Any] | None:
@@ -2077,7 +2722,208 @@ def _extract_active_tab_from_text(text: str, base_addr: int = 0, encoding: str =
     return None
 
 
-def _scan_active_tab(
+def _chat_state_from_serialized_fields(
+    text: str,
+    base_addr: int,
+    encoding: str,
+    source: str,
+    scale: int,
+) -> dict[str, Any] | None:
+    fields: dict[str, bool] = {}
+    first_match: re.Match[str] | None = None
+    for key in ("chatIsActive", "chatIsShow", "inputStatus"):
+        pattern = (
+            rf'(?:"{re.escape(key)}"|\b{re.escape(key)}\b)\s*[:=]\s*'
+            r'(?P<value>true|false|0|1|"true"|"false"|"0"|"1")'
+        )
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        parsed = _state_bool_from_value(match.group("value"))
+        if parsed is None:
+            continue
+        fields[key] = parsed
+        first_match = first_match or match
+    if not fields:
+        return None
+
+    assert first_match is not None
+    raw_start = max(0, first_match.start() - 120)
+    raw_end = min(len(text), first_match.end() + 380)
+    state = {
+        "chat_input_active": fields.get("inputStatus", fields.get("chatIsActive")),
+        "chat_visible": fields.get("chatIsShow"),
+        "source": source,
+        "addr": f"0x{base_addr + first_match.start() * scale:X}",
+        "encoding": encoding,
+        "confidence": "high",
+        "raw": _clean_state_raw(text[raw_start:raw_end], 500),
+        "raw_fields": {key: value for key, value in fields.items()},
+    }
+    return state
+
+
+def _chat_state_from_dom_selectors(
+    text: str,
+    base_addr: int,
+    encoding: str,
+    source: str,
+    scale: int,
+) -> dict[str, Any] | None:
+    disabled_matches = list(re.finditer(r"\bdiv\.chat\.disabled\b|\bdiv\.chat-container\s*>\s*div\.chat\.disabled\b", text))
+    enabled_matches = list(
+        re.finditer(
+            r"\bdiv\.main-cover\.full-width\.full-height\s*>\s*div\.chat-container\s*>\s*div\.chat(?![A-Za-z0-9_.-])"
+            r"|\bdiv\.chat-container\s*>\s*div\.chat(?![A-Za-z0-9_.-])",
+            text,
+        )
+    )
+    with_command_matches = list(re.finditer(r"\blabel\.chat-input\.withCommand\b", text))
+    input_click_matches = [
+        match
+        for match in re.finditer(r"\bui\.click\b", text)
+        if "chatInput" in text[max(0, match.start() - 500) : match.end() + 700]
+        or "label.chat-input" in text[max(0, match.start() - 500) : match.end() + 700]
+    ]
+
+    if not disabled_matches and not enabled_matches and not with_command_matches and not input_click_matches:
+        return None
+
+    if disabled_matches and not enabled_matches and not with_command_matches:
+        active = False
+        match = disabled_matches[0]
+        confidence = "medium"
+        reason = "dom_disabled_selector"
+    else:
+        active = True
+        match = (with_command_matches or input_click_matches or enabled_matches or disabled_matches)[0]
+        confidence = "medium" if enabled_matches or with_command_matches else "low"
+        reason = "dom_enabled_selector"
+        if with_command_matches:
+            reason = "dom_input_with_command"
+        elif input_click_matches:
+            reason = "dom_input_click"
+
+    raw_start = max(0, match.start() - 220)
+    raw_end = min(len(text), match.end() + 520)
+    return {
+        "chat_input_active": active,
+        "chat_visible": True,
+        "source": source,
+        "addr": f"0x{base_addr + match.start() * scale:X}",
+        "encoding": encoding,
+        "confidence": confidence,
+        "raw": _clean_state_raw(text[raw_start:raw_end], 700),
+        "raw_fields": {
+            "input_state_source": reason,
+            "dom_disabled_selectors": len(disabled_matches),
+            "dom_enabled_selectors": len(enabled_matches),
+            "dom_with_command_selectors": len(with_command_matches),
+            "dom_input_clicks": len(input_click_matches),
+        },
+    }
+
+
+def _extract_chat_state_from_text(
+    text: str,
+    base_addr: int = 0,
+    encoding: str = "utf-8",
+    source: str = "",
+    scale: int = 1,
+) -> dict[str, Any] | None:
+    candidates = [
+        item
+        for item in (
+            _chat_state_from_serialized_fields(text, base_addr, encoding, source, scale),
+            _chat_state_from_dom_selectors(text, base_addr, encoding, source, scale),
+        )
+        if item is not None
+    ]
+    active_tab = _extract_active_tab_from_text(text, base_addr, encoding, source, scale)
+    if active_tab is not None:
+        candidates.append(
+            {
+                "chat_input_active": None,
+                "chat_visible": None,
+                "active_tab": active_tab,
+                "source": active_tab.get("source") or source,
+                "addr": active_tab.get("addr"),
+                "encoding": active_tab.get("encoding") or encoding,
+                "confidence": active_tab.get("confidence") or "medium",
+                "raw": active_tab.get("raw"),
+                "raw_fields": {"active_tab_source": active_tab.get("field")},
+            }
+        )
+    if not candidates:
+        return None
+    return _merge_chat_state_candidates(candidates)
+
+
+def _merge_chat_state_candidates(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    out = _empty_chat_state()
+    raw_fields: dict[str, Any] = {}
+    best_confidence = "unknown"
+
+    for field in ("chat_input_active", "chat_visible"):
+        field_candidates = [item for item in candidates if isinstance(item.get(field), bool)]
+        if not field_candidates:
+            continue
+        field_candidates.sort(
+            key=lambda item: (
+                _state_confidence_rank(str(item.get("confidence") or "unknown")),
+                int((item.get("raw_fields") or {}).get("dom_enabled_selectors") or 0)
+                + int((item.get("raw_fields") or {}).get("dom_with_command_selectors") or 0),
+            ),
+            reverse=True,
+        )
+        selected = field_candidates[0]
+        out[field] = selected[field]
+        out[f"{field}_confidence"] = selected.get("confidence")
+        out[f"{field}_source"] = selected.get("source")
+        if selected.get("addr"):
+            out[f"{field}_addr"] = selected.get("addr")
+        best_confidence = max(
+            best_confidence,
+            str(selected.get("confidence") or "unknown"),
+            key=_state_confidence_rank,
+        )
+        if isinstance(selected.get("raw_fields"), dict):
+            raw_fields.update(selected["raw_fields"])
+
+    tab_candidates = [item["active_tab"] for item in candidates if isinstance(item.get("active_tab"), dict)]
+    if tab_candidates:
+        tab_candidates.sort(key=lambda item: _state_confidence_rank(str(item.get("confidence") or "unknown")), reverse=True)
+        out["active_tab"] = tab_candidates[0]
+        best_confidence = max(
+            best_confidence,
+            str(tab_candidates[0].get("confidence") or "unknown"),
+            key=_state_confidence_rank,
+        )
+
+    selected_source = next((item.get("source") for item in candidates if item.get("source")), "memory")
+    selected_addr = next((item.get("addr") for item in candidates if item.get("addr")), None)
+    selected_encoding = next((item.get("encoding") for item in candidates if item.get("encoding")), None)
+    selected_raw = next((item.get("raw") for item in candidates if item.get("raw")), None)
+    out.update(
+        {
+            "source": selected_source,
+            "confidence": best_confidence,
+        }
+    )
+    if selected_addr:
+        out["addr"] = selected_addr
+    if selected_encoding:
+        out["encoding"] = selected_encoding
+    if selected_raw:
+        cleaned_raw = _clean_state_raw(str(selected_raw), 700)
+        if cleaned_raw:
+            out["raw"] = cleaned_raw
+    if raw_fields:
+        out["raw_fields"] = raw_fields
+    return out
+
+
+def _scan_chat_state(
     tracker,
     args: argparse.Namespace,
     process_name: str,
@@ -2085,7 +2931,7 @@ def _scan_active_tab(
     regions: list[tuple[int, int]],
 ) -> dict[str, Any]:
     if getattr(args, "no_active_tab", False):
-        return {"id": None, "name": None, "source": "disabled", "confidence": "disabled"}
+        return _empty_chat_state("disabled", "disabled")
     markers = _encoded_markers(CHAT_STATE_MARKERS)
     marker_hits: list[int] = []
     chunk_size = max(4096, args.chunk_mb * 1024 * 1024)
@@ -2113,7 +2959,7 @@ def _scan_active_tab(
         marker_hits.extend(hits)
         scanned += size
 
-    half_window = 2048
+    half_window = 8192
     candidates: list[dict[str, Any]] = []
     for hit in marker_hits:
         for region_start, region_end in regions:
@@ -2124,22 +2970,37 @@ def _scan_active_tab(
             data = tracker._read(start, end - start)
             if not data:
                 break
-            source = f"{process_name}:{pid} active_tab 0x{start:X}-0x{end:X}"
+            source = f"{process_name}:{pid} chat_state 0x{start:X}-0x{end:X}"
             for encoding, text, scale in _decode_texts(data):
                 base = start if encoding != "utf-16-le+1" else start + 1
-                candidate = _extract_active_tab_from_text(text, base, encoding, source, scale)
+                candidate = _extract_chat_state_from_text(text, base, encoding, source, scale)
                 if candidate is not None:
                     candidates.append(candidate)
             break
     if candidates:
-        candidates.sort(key=lambda item: (0 if item.get("confidence") == "high" else 1, str(item.get("id") or "")))
-        return candidates[0]
+        state = _merge_chat_state_candidates(candidates)
+        state["marker_hit_count"] = len(marker_hits)
+        return state
+    return _empty_chat_state("memory", "unknown", len(marker_hits))
+
+
+def _scan_active_tab(
+    tracker,
+    args: argparse.Namespace,
+    process_name: str,
+    pid: int,
+    regions: list[tuple[int, int]],
+) -> dict[str, Any]:
+    state = _scan_chat_state(tracker, args, process_name, pid, regions)
+    active_tab = state.get("active_tab")
+    if isinstance(active_tab, dict):
+        return active_tab
     return {
         "id": None,
         "name": None,
-        "source": "memory",
-        "confidence": "unknown",
-        "marker_hit_count": len(marker_hits),
+        "source": state.get("source") or "memory",
+        "confidence": state.get("confidence") if state.get("confidence") == "disabled" else "unknown",
+        "marker_hit_count": state.get("marker_hit_count", 0),
     }
 
 
@@ -2213,6 +3074,16 @@ def _scan_tracker_history(
             fragments.extend(_extract_wide_fragments(data, start, source, args.min_fragment_chars, process_name, tracker.pid))
             fragments.extend(_extract_chat_input_fragments(data, start, source, args.min_fragment_chars, process_name, tracker.pid))
 
+        chat_state = _scan_chat_state(tracker, args, process_name, tracker.pid, regions)
+        active_tab = chat_state.get("active_tab")
+        if not isinstance(active_tab, dict):
+            active_tab = {
+                "id": None,
+                "name": None,
+                "source": chat_state.get("source") or "memory",
+                "confidence": chat_state.get("confidence") if chat_state.get("confidence") == "disabled" else "unknown",
+                "marker_hit_count": chat_state.get("marker_hit_count", 0),
+            }
         return {
             "process": process_name,
             "pid": tracker.pid,
@@ -2221,12 +3092,34 @@ def _scan_tracker_history(
             "marker_hit_count": len(marker_hits),
             "windows": len(windows),
             "elapsed_seconds": time.perf_counter() - started,
-            "active_tab": _scan_active_tab(tracker, args, process_name, tracker.pid, regions),
+            "chat_state": chat_state,
+            "active_tab": active_tab,
             "records": _dedupe_records(records),
             "fragments": _dedupe_fragments(fragments),
         }
     finally:
         tracker.stop()
+
+
+def _select_chat_state(states: list[dict[str, Any]]) -> dict[str, Any]:
+    candidates = [item for item in states if isinstance(item, dict) and item.get("confidence") != "disabled"]
+    if not candidates:
+        return _empty_chat_state("memory", "unknown")
+    meaningful = [
+        item
+        for item in candidates
+        if isinstance(item.get("chat_input_active"), bool)
+        or isinstance(item.get("chat_visible"), bool)
+        or isinstance(item.get("active_tab"), dict)
+    ]
+    if meaningful:
+        return _merge_chat_state_candidates(meaningful)
+    fallback = candidates[0]
+    return _empty_chat_state(
+        str(fallback.get("source") or "memory"),
+        str(fallback.get("confidence") or "unknown"),
+        fallback.get("marker_hit_count") if isinstance(fallback.get("marker_hit_count"), int) else None,
+    )
 
 
 def dump_history(args: argparse.Namespace) -> Path:
@@ -2273,7 +3166,12 @@ def dump_history(args: argparse.Namespace) -> Path:
     stamp = time.strftime("%Y%m%d_%H%M%S")
     json_path = out_dir / f"chat_history_dump_{stamp}.json"
     txt_path = out_dir / f"chat_history_dump_{stamp}.txt"
+    selected_states = [item.get("chat_state") for item in process_reports if isinstance(item.get("chat_state"), dict)]
+    chat_state = _select_chat_state(selected_states)
     selected_tabs = [item.get("active_tab") for item in process_reports if isinstance(item.get("active_tab"), dict)]
+    state_tab = chat_state.get("active_tab")
+    if isinstance(state_tab, dict):
+        selected_tabs.insert(0, state_tab)
     active_tab = next((item for item in selected_tabs if item.get("confidence") != "unknown"), None)
     active_tab = active_tab or (selected_tabs[0] if selected_tabs else {"id": None, "name": None, "source": "memory", "confidence": "unknown"})
     if active_tab.get("confidence") == "unknown":
@@ -2291,8 +3189,10 @@ def dump_history(args: argparse.Namespace) -> Path:
         "memory_dump": str(dump_root) if dump_root is not None else None,
         "process_discovery": process_discovery,
         "selected_processes": selected_processes,
+        "chat_state": chat_state,
+        "chat_input_active": chat_state.get("chat_input_active"),
         "active_tab": active_tab,
-        "tabs": _known_chat_tabs(active_tab),
+        "tabs": _known_chat_tabs(active_tab, records),
         "processes": process_reports,
         "regions": sum(int(item["regions"]) for item in process_reports),
         "marker_hit_count": sum(int(item["marker_hit_count"]) for item in process_reports),
@@ -2305,6 +3205,7 @@ def dump_history(args: argparse.Namespace) -> Path:
     txt_lines = [
         "Sonar chat history dump",
         f"process={args.process} processes={len(process_reports)}",
+        f"chat_input_active={chat_state.get('chat_input_active')}",
         f"active_tab={active_tab.get('name') or active_tab.get('id') or 'unknown'} confidence={active_tab.get('confidence')}",
         f"records={len(records)} fragments={min(len(fragments), args.fragment_limit)} markers={report['marker_hit_count']} windows={report['windows']} elapsed={elapsed:.2f}s",
         "",
@@ -2351,6 +3252,7 @@ def dump_history(args: argparse.Namespace) -> Path:
             if isinstance(item, dict)
         )
         print(f"Chat processes: {summary}")
+    print(f"Chat input active: {chat_state.get('chat_input_active')}")
     print(f"Active tab: {active_tab.get('name') or active_tab.get('id') or 'unknown'} ({active_tab.get('confidence')})")
     for record in records[: args.print_records]:
         print(f"{record.time or record.timestamp} [{record.type}] {record.text[: args.print_chars]}")
@@ -2375,10 +3277,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-gta-fallback", action="store_true", help="Compatibility flag; GTA5.exe is included in auto discovery unless --cef-only is passed.")
     parser.add_argument("--cef-only", action="store_true", help="Only scan majestic-webengine.exe renderers during auto discovery.")
     parser.add_argument("--active-tab-max-total-mb", type=int, default=512, help="Memory budget for active chat tab probing. 0 scans all selected regions.")
-    parser.add_argument("--active-tab-marker-hits", type=int, default=64)
+    parser.add_argument("--active-tab-marker-hits", type=int, default=256)
     parser.add_argument("--no-active-tab", action="store_true", help="Skip active chat tab probing.")
     parser.add_argument("--min-fragment-chars", type=int, default=8)
-    parser.add_argument("--fragment-limit", type=int, default=80)
+    parser.add_argument("--fragment-limit", type=int, default=0, help="Raw debug fragments to include. Use 0 for records-only output.")
     parser.add_argument("--print-records", type=int, default=20)
     parser.add_argument("--print-chars", type=int, default=260)
     parser.add_argument("--progress", type=int, default=250)

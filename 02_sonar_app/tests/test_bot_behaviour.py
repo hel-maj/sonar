@@ -56,6 +56,11 @@ class ClosedDetector:
         return False
 
 
+class ClosedMenuDetector:
+    def detect(self, frame):
+        return None
+
+
 def make_tackle_scan(counts: dict[str, int]) -> TackleScanResult:
     return TackleScanResult(
         items=tuple(TackleItemCount(slot.key, slot.name, counts.get(slot.key, 1)) for slot in TACKLE_SLOTS),
@@ -129,6 +134,90 @@ def test_prepare_start_does_not_treat_bait_notice_as_active_stage():
 
     assert bot._prepare_fishing_start(timeout=1.0) == "casting"
     assert bot.input_controller.keys == ["e", "e"]
+
+
+def test_chat_pause_keeps_running_state_and_releases_keys():
+    bot = FishingBot.__new__(FishingBot)
+    bot.input_controller = DummyInput()
+    bot.state = BotState(running=True)
+    bot._chat_pause_event = threading.Event()
+    bot._no_stage_since = 1.0
+    logs: list[str] = []
+    bot._log = logs.append
+
+    bot.pause_for_chat(True)
+
+    assert bot.state.running is True
+    assert bot.state.detected_stage == "Чат"
+    assert bot.is_paused_for_chat() is True
+    assert bot.input_controller.keys == ["release_all"]
+
+    bot.pause_for_chat(False)
+
+    assert bot.state.running is True
+    assert bot.is_paused_for_chat() is False
+    assert bot._no_stage_since is None
+    assert bot._kickstart_requested is True
+
+
+def test_chat_pause_can_resume_without_kickstart_after_failed_open():
+    bot = FishingBot.__new__(FishingBot)
+    bot.input_controller = DummyInput()
+    bot.state = BotState(running=True)
+    bot._chat_pause_event = threading.Event()
+    bot._chat_pause_event.set()
+    bot._no_stage_since = 1.0
+    bot._kickstart_requested = False
+    bot._log = lambda message: None
+
+    bot.pause_for_chat(False, restart_on_resume=False)
+
+    assert bot.is_paused_for_chat() is False
+    assert bot._kickstart_requested is False
+
+
+def make_chat_exit_bot(trigger_steps: list[dict[str, DummyMatch]], *, running: bool = False):
+    bot = FishingBot.__new__(FishingBot)
+    bot.input_controller = DummyInput()
+    bot.capture = DummyCapture()
+    bot.trigger_monitor = SequenceTriggerMonitor(trigger_steps)
+    bot.game_menu_detector = ClosedMenuDetector()
+    bot.inventory_detector = ClosedDetector()
+    bot.catch_detector = DummyCatchDetector()
+    bot.settings = FishingSettings()
+    bot.state = BotState(running=running)
+    bot._stop_event = threading.Event()
+    if not running:
+        bot._stop_event.set()
+    bot._last_trigger_matches = {}
+    bot._last_triggers = {}
+    bot._last_catch_result = None
+    bot._last_menu_close_at = 0.0
+    bot._focus_game = lambda: True
+    bot._publish_stage = lambda label: None
+    bot._chat_mode_sleep = lambda seconds: None
+    bot._log = lambda message: None
+    return bot
+
+
+def test_prepare_chat_mode_exits_fishing_stage_even_when_bot_is_not_running():
+    bot = make_chat_exit_bot([{"start2": DummyMatch()}, {}], running=False)
+
+    ok, message = bot.prepare_for_chat_mode(timeout=0.2)
+
+    assert ok is True
+    assert message == "Персонаж выведен из рыбалки"
+    assert bot.input_controller.keys == ["release_all", "esc"]
+
+
+def test_prepare_chat_mode_does_not_press_escape_when_already_idle():
+    bot = make_chat_exit_bot([{}], running=False)
+
+    ok, message = bot.prepare_for_chat_mode(timeout=0.2)
+
+    assert ok is True
+    assert message == "Персонаж выведен из рыбалки"
+    assert bot.input_controller.keys == ["release_all"]
 
 
 def test_auto_change_bait_setting_disables_restart():

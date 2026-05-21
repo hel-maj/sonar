@@ -17,6 +17,12 @@ def test_fishing_settings_accepts_start_stop_sound_toggle():
     assert settings.start_stop_sound_enabled is False
 
 
+def test_fishing_settings_accepts_chat_hotkey():
+    settings = FishingSettings.from_dict({"chat_hotkey": "Y"})
+
+    assert settings.chat_hotkey == "Y"
+
+
 def test_fishing_settings_accepts_tackle_depletion_options():
     settings = FishingSettings.from_dict(
         {

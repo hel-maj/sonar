@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+
 from sonar.tools.dump_chat_history import (
     CHAT_MARKERS,
     ChatRecord,
     DumpMemoryTracker,
     _dedupe_records,
     _extract_active_tab_from_text,
+    _extract_chat_state_from_text,
     _extract_chat_input_fragments,
     _extract_rendered_records_from_text,
     _extract_records_from_text,
@@ -14,6 +17,7 @@ from sonar.tools.dump_chat_history import (
     _known_chat_tabs,
     _merge_history_data,
     _select_chat_candidates,
+    update_latest_history,
 )
 from sonar.tools.find_chat_memory import _scan_chunks, build_needles
 
@@ -166,6 +170,23 @@ def test_extract_chat_records_stops_before_duration_and_prefers_visible_news_own
     }
 
 
+def test_extract_chat_records_appends_memory_phone_to_news_text() -> None:
+    text = (
+        '{"type":"news","text":"[Weazel News] Anna Astere: '
+        '\u0421\u0435\u043c\u044c\u044f Abuzer \u0438\u0449\u0435\u0442 '
+        '\u043a\u0443\u0440\u044c\u0435\u0440\u043e\u0432! \u0417\u0432\u043e\u043d\u0438\u0442\u0435.",'
+        '"phoneNumber":24531993,"id":"25653","timestamp":1779365225778}'
+    )
+
+    records = _extract_records_from_text(text, 0x1000, "utf-8", "webengine", 1)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.phoneNumber == "24531993"
+    assert record.text.endswith("\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440: 24531993")
+    assert record.raw_fields["phoneNumber_source"] == "memory"
+
+
 def test_extract_chat_input_fragments_keeps_short_draft_text() -> None:
     data = (
         "copy-input\x00cb\x00chatInput\x00"
@@ -231,6 +252,69 @@ def test_extract_rendered_records_joins_split_weazel_phone_nodes() -> None:
     assert record.formatting["source"] == "memory.inline_tag"
     assert "Ferruccio Ursus" in record.text
     assert record.owner == {"name": "Rei Omens", "kind": "player", "organization": "Weazel News"}
+
+
+def test_extract_rendered_records_attaches_standalone_phone_line_to_previous_news() -> None:
+    text = (
+        "@{24df42}[Weazel News] Anna Astere: "
+        "\u0421\u0442\u0440\u0435\u043b\u043a\u043e\u0432\u0430\u044f \u0441\u0435\u043c\u044c\u044f Abuzer "
+        "\u0438\u0449\u0435\u0442 \u0434\u0430\u043b\u044c\u043d\u0438\u0445 \u0440\u043e\u0434\u0441\u0442\u0432\u0435\u043d\u043d\u0438\u043a\u043e\u0432. "
+        "\u041a\u0440\u0438\u0442\u0435\u0440\u0438\u0438: 16+."
+        + "\x00" * 600
+        +
+        "@{24df42}\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440: 24531993"
+    )
+
+    records = _extract_rendered_records_from_text(text, 0xA000, "utf-16-le", "webengine", 2)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.type == "news"
+    assert record.phoneNumber == "24531993"
+    assert "\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440: 24531993" in record.text
+    assert record.raw_fields["phoneNumber_source"] == "rendered_continuation"
+    assert record.raw_fields["attached_phone_records"][0]["phoneNumber"] == "24531993"
+    assert record.owner == {"name": "Anna Astere", "kind": "player", "organization": "Weazel News"}
+
+
+def test_extract_rendered_records_drops_unattached_phone_line() -> None:
+    records = _extract_rendered_records_from_text(
+        "@{24df42}\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440: 24531993",
+        0xA000,
+        "utf-16-le",
+        "webengine",
+        2,
+    )
+
+    assert records == []
+
+
+def test_extract_rendered_records_reads_numeric_speaker_as_static_id() -> None:
+    text = (
+        "#16637 \u0433\u043e\u0432\u043e\u0440\u0438\u0442: \u0421\u041a\u0423\u041f \u0412\u042b\u041a\u0423\u041f"
+        "\x0016637 \u0433\u043e\u0432\u043e\u0440\u0438\u0442: \u0421\u041a\u0423\u041f \u0412\u042b\u041a\u0423\u041f 2"
+    )
+
+    records = _extract_rendered_records_from_text(text, 0xA000, "utf-16-le", "webengine", 2)
+
+    assert [(record.staticId, record.playerId, record.playerName) for record in records] == [
+        ("16637", None, None),
+        ("16637", None, None),
+    ]
+    assert [record.owner for record in records] == [
+        {"staticId": "16637", "kind": "player"},
+        {"staticId": "16637", "kind": "player"},
+    ]
+
+
+def test_extract_rendered_records_reads_prefixed_family_action_owner() -> None:
+    text = '[fam] [\u0421\u0435\u043c\u044c\u044f] Marvin Angels \u043a\u0443\u043f\u0438\u043b \u0443\u043b\u0443\u0447\u0448\u0435\u043d\u0438\u0435 "\u041c\u0435\u0442\u0430\u043b\u043b\u0443\u0440\u0433\u0438\u044f I"!'
+
+    records = _extract_rendered_records_from_text(text, 0xA000, "utf-16-le", "webengine", 2)
+
+    assert len(records) == 1
+    assert records[0].playerName == "Marvin Angels"
+    assert records[0].owner == {"name": "Marvin Angels", "kind": "player"}
 
 
 def test_extract_rendered_records_keeps_visible_actions_but_rejects_static_catalog() -> None:
@@ -346,6 +430,53 @@ def test_extract_active_tab_from_numeric_state() -> None:
     assert tab["name"] == "\u0424\u0440\u0430\u043a\u0446\u0438\u044f"
 
 
+def test_extract_chat_state_from_serialized_state() -> None:
+    text = (
+        '{"chatIsActive":true,"chatIsShow":true,"inputStatus":true,'
+        '"activeFilter":{"id":"fam","name":"\u0421\u0435\u043c\u044c\u044f"}}'
+    )
+
+    state = _extract_chat_state_from_text(text, 0x4000, "utf-8", "state", 1)
+
+    assert state is not None
+    assert state["chat_input_active"] is True
+    assert state["chat_visible"] is True
+    assert state["confidence"] == "high"
+    assert state["active_tab"]["id"] == "fam"
+    assert state["active_tab"]["name"] == "\u0421\u0435\u043c\u044c\u044f"
+
+
+def test_extract_chat_state_from_inactive_dom_selector() -> None:
+    text = (
+        "div.message.gov > div.message-wrapper "
+        "div.chat-container > div.chat.disabled > div.chat-content > div#chatMessages.Block "
+        "div.chat.disabled > div.chat-content > div.filters"
+    )
+
+    state = _extract_chat_state_from_text(text, 0x5000, "utf-8", "dom", 1)
+
+    assert state is not None
+    assert state["chat_input_active"] is False
+    assert state["chat_visible"] is True
+    assert state["chat_input_active_confidence"] == "medium"
+    assert state["raw_fields"]["input_state_source"] == "dom_disabled_selector"
+
+
+def test_extract_chat_state_from_active_dom_selector() -> None:
+    text = (
+        "ui.click div.chat-container > div.chat > div.chat-content > div.filters "
+        "div.input-container > label.chat-input.withCommand > input#chatInput[type=\"text\"]"
+    )
+
+    state = _extract_chat_state_from_text(text, 0x6000, "utf-8", "dom", 1)
+
+    assert state is not None
+    assert state["chat_input_active"] is True
+    assert state["chat_visible"] is True
+    assert state["chat_input_active_confidence"] == "medium"
+    assert state["raw_fields"]["input_state_source"] == "dom_input_with_command"
+
+
 def test_infer_active_tab_from_memory_records() -> None:
     tab = _infer_active_tab_from_records(
         [
@@ -375,6 +506,25 @@ def test_known_chat_tabs_marks_active_tab() -> None:
 
     assert [tab["id"] for tab in tabs] == ["all", "fam", "frac", "gov", "report"]
     assert [tab["active"] for tab in tabs] == [False, True, False, False, False]
+
+
+def test_known_chat_tabs_marks_inferred_availability() -> None:
+    tabs = _known_chat_tabs(
+        {"id": "fam"},
+        [
+            {"type": "default", "text": "Marvin Angels \u0433\u043e\u0432\u043e\u0440\u0438\u0442: test"},
+            {"type": "family", "text": "[fam] [\u0421\u0435\u043c\u044c\u044f] Marvin Angels [590]: test"},
+            {"type": "system", "text": "[gov] Government: test"},
+        ],
+    )
+
+    assert [(tab["id"], tab["available"]) for tab in tabs] == [
+        ("all", True),
+        ("fam", True),
+        ("frac", False),
+        ("gov", False),
+        ("report", False),
+    ]
 
 
 def test_dump_memory_tracker_reads_manifest_regions(tmp_path) -> None:
@@ -445,7 +595,7 @@ def test_merge_history_data_accumulates_and_dedupes_records() -> None:
     existing = {
         "created_at": 1.0,
         "records": [
-            {"type": "news", "timestamp": 10, "time": "t1", "text": "first line", "source": "old"},
+            {"type": "news", "timestamp": 10, "time": "t1", "text": "first line", "source": "old", "process": "gta5.exe", "pid": 123},
         ],
         "fragments": [
             {"text": "[gov] first rendered fragment", "addr": 10, "encoding": "utf-16-le", "source": "old"},
@@ -473,7 +623,11 @@ def test_merge_history_data_accumulates_and_dedupes_records() -> None:
     assert merged["kind"] == "sonar_chat_history_latest"
     assert merged["created_at"] == 1.0
     assert merged["process"] == "gta5.exe"
-    assert [record["text"] for record in merged["records"]] == ["first line", "second line"]
+    assert [(record["text"], record.get("source")) for record in merged["records"]] == [
+        ("first line", "old"),
+        ("first line", "new"),
+        ("second line", "new"),
+    ]
     assert [fragment["text"] for fragment in merged["fragments"]] == [
         "[gov] first rendered fragment",
         "[me] second rendered fragment",
@@ -481,22 +635,201 @@ def test_merge_history_data_accumulates_and_dedupes_records() -> None:
     assert merged["snapshots"][-1]["records"] == 2
 
 
-def test_merge_history_data_prefers_cleaner_record_for_same_timestamp() -> None:
+def test_merge_history_data_keeps_same_timestamp_without_identity() -> None:
     incoming = {
         "created_at": 2.0,
         "records": [
-            {"type": "system", "timestamp": 20, "text": "[gov] Good text %B B H H + + + + + + + + garbage"},
-            {"type": "system", "timestamp": 20, "text": "[gov] Good text"},
+            {"type": "system", "timestamp": 20, "text": "[gov] First line"},
+            {"type": "system", "timestamp": 20, "text": "[gov] Second line"},
         ],
         "fragments": [],
     }
 
     merged = _merge_history_data(None, incoming, fragment_limit=10)
 
-    assert [record["text"] for record in merged["records"]] == ["[gov] Good text"]
+    assert [record["text"] for record in merged["records"]] == [
+        "[gov] First line",
+        "[gov] Second line",
+    ]
 
 
-def test_dedupe_records_prefers_timestamped_copy_for_same_text() -> None:
+def test_merge_history_data_drops_unattached_phone_records() -> None:
+    incoming = {
+        "created_at": 2.0,
+        "records": [
+            {"type": "news", "text": "Тел. номер: 24531993", "phoneNumber": "24531993"},
+            {
+                "type": "news",
+                "text": "[Weazel News] Anna Astere: Семья Abuzer ищет курьеров! Звоните. Тел. номер: 24531993",
+                "phoneNumber": "24531993",
+            },
+        ],
+        "fragments": [],
+    }
+
+    merged = _merge_history_data(None, incoming, fragment_limit=10)
+
+    assert [record["text"] for record in merged["records"]] == [
+        "[Weazel News] Anna Astere: Семья Abuzer ищет курьеров! Звоните. Тел. номер: 24531993"
+    ]
+
+
+def test_merge_history_data_appends_phone_number_to_record_text() -> None:
+    incoming = {
+        "created_at": 2.0,
+        "records": [
+            {
+                "type": "news",
+                "text": "[Weazel News] Anna Astere: Семья Abuzer ищет курьеров! Звоните.",
+                "phoneNumber": "24531993",
+            },
+        ],
+        "fragments": [],
+    }
+
+    merged = _merge_history_data(None, incoming, fragment_limit=10)
+
+    record = merged["records"][0]
+    assert record["text"].endswith("Тел. номер: 24531993")
+    assert record["raw_fields"]["phoneNumber_source"] == "record"
+
+
+def test_merge_history_data_honors_zero_fragment_limit() -> None:
+    incoming = {
+        "created_at": 2.0,
+        "records": [],
+        "fragments": [{"text": "[gov] rendered chat fragment", "addr": 20, "encoding": "utf-16-le", "source": "chat"}],
+    }
+
+    merged = _merge_history_data(None, incoming, fragment_limit=0)
+
+    assert merged["fragments"] == []
+
+
+def test_merge_history_data_filters_corrupted_record_text() -> None:
+    incoming = {
+        "created_at": 2.0,
+        "records": [
+            {
+                "type": "family",
+                "timestamp": 1779362408485,
+                "text": '[fam] @{f745a4x A A1\u0435\u043c\u044c\u044f] Marvin Angels \u043a\u0443\u043f\u0438\u043b \u0443\u043b\u0443\u0447\u0448\u0435\u043d\u0438\u0435 \u0434\u043b\u044f \u0441%A \u044c\u0438 "\u041c\u0435\u0442\u0430\u043b %B \u0443%"',
+            },
+            {
+                "type": "family",
+                "timestamp": 1779362119524,
+                "text": '[fam] [\u0421\u0435\u043c\u044c\u044f] Marvin Angels \u043a\u0443\u043f\u0438\u043b \u0443\u043b\u0443\u0447\u0448\u0435\u043d\u0438\u0435 "\u041c\u0435\u0442\u0430\u043b\u043b\u0443\u0440\u0433\u0438\u044f I"!',
+            },
+        ],
+        "fragments": [],
+    }
+
+    merged = _merge_history_data(None, incoming, fragment_limit=0)
+
+    assert [record["timestamp"] for record in merged["records"]] == [1779362119524]
+
+
+def test_merge_history_data_enriches_rendered_timestamp_without_merging() -> None:
+    text = "[fam] [\u0421\u0435\u043c\u044c\u044f] [XD99] Dep.Leader Karen Angels [2310]: (( ? ))"
+    incoming = {
+        "created_at": 2.0,
+        "selected_processes": [{"process": "majestic-webengine.exe", "pid": 61196}],
+        "records": [
+            {
+                "type": "family",
+                "text": text,
+                "timestamp": 1779362408485,
+                "time": "2026-05-21 14:20:08.485",
+                "source": "serialized",
+                "process": "majestic-webengine.exe",
+                "pid": 61196,
+            },
+            {
+                "type": "family",
+                "text": text,
+                "timestamp": None,
+                "time": None,
+                "source": "majestic-webengine.exe:61196 0x1000-0x2000 rendered",
+                "process": "majestic-webengine.exe",
+                "pid": 61196,
+                "raw_fields": {"rendered": True, "messageId_source": "stable_hash"},
+            },
+        ],
+        "fragments": [],
+    }
+
+    merged = _merge_history_data(None, incoming, fragment_limit=0)
+
+    assert len(merged["records"]) == 2
+    rendered = [record for record in merged["records"] if record["source"].endswith(" rendered")][0]
+    assert rendered["timestamp"] == 1779362408485
+    assert rendered["raw_fields"]["timestamp_source"] == "matched_serialized_unique"
+
+
+def test_merge_history_data_does_not_enrich_ambiguous_same_text() -> None:
+    text = "18302 \u0433\u043e\u0432\u043e\u0440\u0438\u0442: 75+2"
+    incoming = {
+        "created_at": 2.0,
+        "records": [
+            {"type": "default", "text": text, "timestamp": 10, "source": "serialized-a"},
+            {"type": "default", "text": text, "timestamp": 20, "source": "serialized-b"},
+            {
+                "type": "default",
+                "text": text,
+                "timestamp": None,
+                "source": "majestic-webengine.exe:61196 0x1000-0x2000 rendered",
+                "raw_fields": {"rendered": True, "messageId_source": "stable_hash"},
+            },
+        ],
+        "fragments": [],
+    }
+
+    merged = _merge_history_data(None, incoming, fragment_limit=0)
+
+    rendered = [record for record in merged["records"] if record["source"].endswith(" rendered")][0]
+    assert rendered["timestamp"] is None
+    assert rendered["staticId"] == "18302"
+
+
+def test_merge_history_data_drops_records_from_old_processes() -> None:
+    existing = {
+        "records": [
+            {"type": "default", "text": "old", "process": "majestic-webengine.exe", "pid": 1},
+            {"type": "default", "text": "stale", "source": "old rendered"},
+        ],
+        "fragments": [],
+    }
+    incoming = {
+        "created_at": 2.0,
+        "selected_processes": [{"process": "majestic-webengine.exe", "pid": 2}],
+        "records": [{"type": "default", "text": "new", "process": "majestic-webengine.exe", "pid": 2}],
+        "fragments": [],
+    }
+
+    merged = _merge_history_data(existing, incoming, fragment_limit=0)
+
+    assert [record["text"] for record in merged["records"]] == ["new"]
+
+
+def test_update_latest_history_replaces_existing_for_memory_dump(tmp_path) -> None:
+    latest = tmp_path / "latest.json"
+    latest.write_text(
+        '{"records":[{"type":"default","text":"old"}],"fragments":[]}',
+        encoding="utf-8",
+    )
+    incoming = tmp_path / "incoming.json"
+    incoming.write_text(
+        '{"created_at":2.0,"memory_dump":"dump","records":[{"type":"default","text":"new"}],"fragments":[]}',
+        encoding="utf-8",
+    )
+
+    update_latest_history(incoming, tmp_path, "latest", fragment_limit=0)
+
+    data = json.loads(latest.read_text(encoding="utf-8"))
+    assert [record["text"] for record in data["records"]] == ["new"]
+
+
+def test_dedupe_records_keeps_same_text_when_identity_differs() -> None:
     rendered = ChatRecord(
         type="news",
         text="[Weazel News] Rei Omens: text",
@@ -526,7 +859,12 @@ def test_dedupe_records_prefers_timestamped_copy_for_same_text() -> None:
 
     records = _dedupe_records([rendered, serialized])
 
-    assert records == [serialized]
+    assert [(record.timestamp, record.id, record.source) for record in records] == [
+        (1779359540332, "25609", "serialized"),
+        (None, None, "rendered"),
+    ]
+    assert [record.order for record in records] == [1, 2]
+    assert [record.orderSource for record in records] == ["timestamp", "memory_position"]
 
 
 def test_merge_history_data_filters_code_fragments() -> None:

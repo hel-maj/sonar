@@ -42,14 +42,14 @@ python -m sonar --smoke-test
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
-python -m sonar.tools.dump_chat_history --process auto --progress 0 --print-records 120 --fragment-limit 120
+python -m sonar.tools.dump_chat_history --process auto --progress 0 --print-records 120 --fragment-limit 0
 ```
 
 Собирать историю непрерывно:
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
-python -m sonar.tools.dump_chat_history --process auto --watch --watch-interval 5 --progress 0 --print-records 120 --fragment-limit 120
+python -m sonar.tools.dump_chat_history --process auto --watch --watch-interval 5 --progress 0 --print-records 120 --fragment-limit 0
 ```
 
 `--process auto` сам выбирает несколько источников чата: `GTA5.exe` и подходящие `majestic-webengine.exe` renderer-процессы. Если нужно ограничиться CEF-процессами, добавь `--cef-only`. Для ручной проверки конкретного процесса можно передать `--process pid:<PID>`.
@@ -65,10 +65,10 @@ python -m sonar.tools.dump_process_memory --process GTA5.exe,majestic-webengine.
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
-python -m sonar.tools.dump_chat_history --memory-dump P:\projects\Majestic\Sonar\logs\chat_memory\process_memory_dump_YYYYMMDD_HHMMSS --process auto --progress 0 --print-records 120 --fragment-limit 120
+python -m sonar.tools.dump_chat_history --memory-dump P:\projects\Majestic\Sonar\logs\chat_memory\process_memory_dump_YYYYMMDD_HHMMSS --process auto --progress 0 --print-records 120 --fragment-limit 0
 ```
 
-Вывод содержит `messageId`, `stableId`, `playerName`, `playerId`, `staticId`, `phoneNumber`, `color`, `formatting`, `owner`, `process` и `pid` там, где эти данные удается найти в памяти. Если реального id рядом с rendered-сообщением нет, `stableId` строится из содержимого сообщения и используется для склейки дампов.
+Вывод содержит `chat_state`, `chat_input_active`, `active_tab`, `tabs`, `messageId`, `stableId`, `order`, `orderSource`, `playerName`, `playerId`, `staticId`, `phoneNumber`, `color`, `formatting`, `owner`, `process` и `pid` там, где эти данные удается найти в памяти. Без реального `id` или memory `messageId` одинаковый текст не считается тем же сообщением; порядок тогда берется из позиции в памяти. `fragments` - это сырой отладочный fallback без метаданных; для рабочего чтения истории держи `--fragment-limit 0`.
 
 ## Сборка exe
 
