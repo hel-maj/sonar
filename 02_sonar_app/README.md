@@ -6,6 +6,7 @@ Sonar - desktop-приложение для автоматизации рыба�
 
 - Автоматизация этапов рыбалки, хранения улова, питания и обработки мусора.
 - OCR и OpenCV-распознавание игровых экранов.
+- Извлечение истории чата из памяти GTA5.exe и majestic-webengine.exe для разработки и диагностики.
 - Статистика сессии с пользовательскими ценами продажи.
 - Telegram-бот с меню, уведомлениями, скриншотом, запуском/остановкой и командами выключения.
 - Проверка лицензии через Keygen CE с привязкой к отпечатку железа.
@@ -32,6 +33,42 @@ python -m sonar --smoke-test
 - `logs`
 
 В собранной portable-версии рядом с exe создается только `config`. Реестр не используется. Файловые логи в release-сборке по умолчанию отключены, а `*.runtime` рядом с exe не создается.
+
+## Чат из памяти
+
+Инструменты ниже нужны для разработки и диагностики. Они читают память запущенной игры или заранее сохраненный дамп и пишут результат в `P:\projects\Majestic\Sonar\logs\chat_memory`.
+
+Снять историю чата из текущей запущенной игры:
+
+```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
+python -m sonar.tools.dump_chat_history --process auto --progress 0 --print-records 120 --fragment-limit 120
+```
+
+Собирать историю непрерывно:
+
+```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
+python -m sonar.tools.dump_chat_history --process auto --watch --watch-interval 5 --progress 0 --print-records 120 --fragment-limit 120
+```
+
+`--process auto` сам выбирает несколько источников чата: `GTA5.exe` и подходящие `majestic-webengine.exe` renderer-процессы. Если нужно ограничиться CEF-процессами, добавь `--cef-only`. Для ручной проверки конкретного процесса можно передать `--process pid:<PID>`.
+
+Создать полный дамп памяти для повторного анализа без запущенной игры:
+
+```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
+python -m sonar.tools.dump_process_memory --process GTA5.exe,majestic-webengine.exe --out-dir P:\projects\Majestic\Sonar\logs\chat_memory
+```
+
+Прочитать историю из сохраненного дампа:
+
+```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
+python -m sonar.tools.dump_chat_history --memory-dump P:\projects\Majestic\Sonar\logs\chat_memory\process_memory_dump_YYYYMMDD_HHMMSS --process auto --progress 0 --print-records 120 --fragment-limit 120
+```
+
+Вывод содержит `messageId`, `stableId`, `playerName`, `playerId`, `staticId`, `phoneNumber`, `color`, `formatting`, `owner`, `process` и `pid` там, где эти данные удается найти в памяти. Если реального id рядом с rendered-сообщением нет, `stableId` строится из содержимого сообщения и используется для склейки дампов.
 
 ## Сборка exe
 

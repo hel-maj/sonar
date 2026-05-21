@@ -4,10 +4,13 @@ import argparse
 import ctypes
 import json
 import re
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
+
+import psutil
 
 from sonar.fishing.memory_reeling import MemoryReelingTracker, PROCESS_ALL_READ, PTR_MAX, PTR_MIN
 from sonar.paths import PROJECT_DIR
@@ -21,6 +24,11 @@ QUERY_TEMPLATE = (
     "Paste fresh chat text here, then run:\n"
     "python -m sonar.tools.find_chat_memory --query-file config/chat_memory_query.txt\n"
 )
+
+
+def _print_safe(text: str) -> None:
+    encoding = sys.stdout.encoding or "utf-8"
+    print(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,9 +228,54 @@ def _collect_search_regions(
     return selected
 
 
-def _open_tracker(process_name: str) -> MemoryReelingTracker:
+def iter_process_targets(process_value: str) -> list[tuple[str, int | None]]:
+    targets: list[tuple[str, int | None]] = []
+    seen: set[int | str] = set()
+    for raw in process_value.split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        if token.lower().startswith("pid:"):
+            pid = int(token.split(":", 1)[1])
+            if pid not in seen:
+                seen.add(pid)
+                targets.append((f"pid:{pid}", pid))
+            continue
+        if token.isdigit():
+            pid = int(token)
+            if pid not in seen:
+                seen.add(pid)
+                targets.append((f"pid:{pid}", pid))
+            continue
+        wanted = token.lower()
+        matches = [
+            proc
+            for proc in psutil.process_iter(["name"])
+            if (proc.info.get("name") or "").lower() == wanted
+        ]
+        if not matches and wanted.endswith(".exe"):
+            matches = [
+                proc
+                for proc in psutil.process_iter(["name"])
+                if (proc.info.get("name") or "").lower() == wanted[:-4]
+            ]
+        if not matches:
+            key = token.lower()
+            if key not in seen:
+                seen.add(key)
+                targets.append((token, None))
+            continue
+        for proc in sorted(matches, key=lambda item: item.pid):
+            if proc.pid in seen:
+                continue
+            seen.add(proc.pid)
+            targets.append((proc.info.get("name") or token, proc.pid))
+    return targets
+
+
+def _open_tracker(process_name: str, pid: int | None = None) -> MemoryReelingTracker:
     tracker = MemoryReelingTracker(process_name, input_controller=NullInputController(), log_callback=print)
-    tracker.pid = tracker._get_pid()
+    tracker.pid = pid if pid is not None else tracker._get_pid()
     if tracker.pid is None:
         raise RuntimeError(f"Process not found: {process_name}")
     tracker.handle = ctypes.windll.kernel32.OpenProcess(PROCESS_ALL_READ, False, tracker.pid)
@@ -276,77 +329,105 @@ def scan_once(args: argparse.Namespace) -> Path:
     if not needles:
         raise ValueError("No searchable byte patterns were generated from the query.")
 
-    tracker = _open_tracker(args.process)
-    time.sleep(args.startup_delay)
-    try:
+    started = time.perf_counter()
+    hits: list[SearchHit] = []
+    records: list[dict[str, object]] = []
+    process_reports: list[dict[str, object]] = []
+    targets = iter_process_targets(args.process)
+    if not targets:
+        raise RuntimeError(f"Process not found: {args.process}")
+
+    for process_name, pid in targets:
+        if len(hits) >= args.hits:
+            break
+        tracker = _open_tracker(process_name, pid)
+        time.sleep(args.startup_delay)
         regions = _collect_search_regions(tracker, args.max_region_mb, args.max_total_mb)
         total_mb = sum(end - start for start, end in regions) / 1024 / 1024
         print(
-            f"Chat memory search: process={args.process} pid={tracker.pid} "
+            f"Chat memory search: process={process_name} pid={tracker.pid} "
             f"query_chars={len(query)} needles={len(needles)} regions={len(regions)} total={total_mb:.1f} MB"
         )
 
         chunk_size = max(4096, args.chunk_mb * 1024 * 1024)
         max_needle_len = max(len(needle.data) for needle in needles)
         overlap = min(max_needle_len - 1, max(0, args.max_overlap_kb * 1024))
-        hits: list[SearchHit] = []
-        started = time.perf_counter()
-        for index, (start, end) in enumerate(regions, 1):
-            if len(hits) >= args.hits:
-                break
-            region_hits = _scan_chunks(
-                tracker._read,
-                start,
-                end,
-                needles,
-                chunk_size,
-                overlap,
-                args.hits - len(hits),
-            )
-            hits.extend(region_hits)
-            if args.progress and (index % args.progress == 0 or region_hits):
-                scanned_mb = sum(reg_end - reg_start for reg_start, reg_end in regions[:index]) / 1024 / 1024
-                print(f"scanned_regions={index}/{len(regions)} scanned={scanned_mb:.1f} MB hits={len(hits)}")
-        hits.sort(key=lambda item: (-item.score[0], -item.score[1], item.addr, item.needle.encoding))
-        records = [_hit_record(tracker, hit, args.context_bytes) for hit in hits[: args.hits]]
-        elapsed = time.perf_counter() - started
-
-        out_dir = Path(args.out_dir or DEFAULT_OUT_DIR)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        stamp = time.strftime("%Y%m%d_%H%M%S")
-        out_path = out_dir / f"chat_memory_search_{stamp}.json"
-        report = {
-            "kind": "sonar_chat_memory_search",
-            "version": 1,
-            "created_at": time.time(),
-            "process": args.process,
-            "pid": tracker.pid,
-            "query_file": str(query_path),
-            "query": query,
-            "encodings": encodings,
-            "regions": len(regions),
-            "total_mb": total_mb,
-            "elapsed_seconds": elapsed,
-            "hits": records,
-        }
-        out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        if records:
-            print(f"Found hits: {len(records)}")
-            for index, record in enumerate(records[: args.print_hits], 1):
-                print(
-                    f"[{index}] addr={record['addr']} encoding={record['encoding']} "
-                    f"label={record['label']} bytes={record['needle_bytes']}"
+        process_hits: list[SearchHit] = []
+        try:
+            for index, (start, end) in enumerate(regions, 1):
+                if len(hits) >= args.hits:
+                    break
+                region_hits = _scan_chunks(
+                    tracker._read,
+                    start,
+                    end,
+                    needles,
+                    chunk_size,
+                    overlap,
+                    args.hits - len(hits),
                 )
-                context = str(record["context"])
-                if context:
-                    print(f"    context: {context[: args.print_context_chars]}")
-        else:
-            print("No hits found. Try a shorter distinctive phrase or increase --max-total-mb.")
-        print(f"Saved report: {out_path}")
-        return out_path
-    finally:
-        tracker.stop()
+                hits.extend(region_hits)
+                process_hits.extend(region_hits)
+                if args.progress and (index % args.progress == 0 or region_hits):
+                    scanned_mb = sum(reg_end - reg_start for reg_start, reg_end in regions[:index]) / 1024 / 1024
+                    print(f"scanned_regions={index}/{len(regions)} scanned={scanned_mb:.1f} MB hits={len(hits)}")
+            process_hits.sort(key=lambda item: (-item.score[0], -item.score[1], item.addr, item.needle.encoding))
+            for hit in process_hits[: max(0, args.hits - len(records))]:
+                record = _hit_record(tracker, hit, args.context_bytes)
+                record["process"] = process_name
+                record["pid"] = tracker.pid
+                records.append(record)
+            process_reports.append(
+                {
+                    "process": process_name,
+                    "pid": tracker.pid,
+                    "regions": len(regions),
+                    "total_mb": total_mb,
+                    "hits": len(process_hits),
+                }
+            )
+        finally:
+            tracker.stop()
+
+    hits.sort(key=lambda item: (-item.score[0], -item.score[1], item.addr, item.needle.encoding))
+    records = records[: args.hits]
+    elapsed = time.perf_counter() - started
+
+    out_dir = Path(args.out_dir or DEFAULT_OUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = out_dir / f"chat_memory_search_{stamp}.json"
+    report = {
+        "kind": "sonar_chat_memory_search",
+        "version": 1,
+        "created_at": time.time(),
+        "process": args.process,
+        "processes": process_reports,
+        "query_file": str(query_path),
+        "query": query,
+        "encodings": encodings,
+        "regions": sum(int(item["regions"]) for item in process_reports),
+        "total_mb": sum(float(item["total_mb"]) for item in process_reports),
+        "elapsed_seconds": elapsed,
+        "hits": records,
+    }
+    out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if records:
+        print(f"Found hits: {len(records)}")
+        for index, record in enumerate(records[: args.print_hits], 1):
+            print(
+                f"[{index}] process={record.get('process')} pid={record.get('pid')} "
+                f"addr={record['addr']} encoding={record['encoding']} "
+                f"label={record['label']} bytes={record['needle_bytes']}"
+            )
+            context = str(record["context"])
+            if context:
+                _print_safe(f"    context: {context[: args.print_context_chars]}")
+    else:
+        print("No hits found. Try a shorter distinctive phrase or increase --max-total-mb.")
+    print(f"Saved report: {out_path}")
+    return out_path
 
 
 def run(args: argparse.Namespace) -> None:

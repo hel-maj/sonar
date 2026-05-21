@@ -32,6 +32,9 @@ dist/
 *.onefile-build/
 
 # Local runtime config and secrets
+.env
+.env.*
+!.env.example
 /config/*.json
 /config/*.enc
 /config/*.key
@@ -44,6 +47,22 @@ dist/
 /logs/
 /debug_capture/
 /training_data/TEMP_DELETE_LATER*/
+/02_sonar_app/logs/
+/02_sonar_app/debug_capture/
+/02_sonar_app/training_data/TEMP_DELETE_LATER*/
+*.runtime
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# Memory/chat extraction artifacts
+**/process_memory_dump_*/
+**/chat_memory_search_*.json
+**/chat_history_dump_*.json
+**/chat_history_dump_*.txt
+**/chat_history_latest.json
+**/chat_history_latest.txt
 
 # Reverse-engineering tool caches and binaries
 /01_reverse_engineering/_tools/ghidra_12.1_PUBLIC*/
