@@ -4,6 +4,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+$OutputEncoding = [System.Text.UTF8Encoding]::new()
 
 if ($Count -lt 1) {
     throw "Count must be greater than zero"
@@ -13,13 +15,70 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $BuildParent = Join-Path $Root "build"
 $DistRoot = Join-Path $Root "dist"
 $IconAssets = Join-Path $Root "assets\game_icons"
+$PythonExe = $null
+$PythonArgs = @()
 
-if (-not $SkipInstall) {
-    python -m pip install --upgrade nuitka ordered-set zstandard
-    if ($LASTEXITCODE -ne 0) { throw "Failed to install build dependencies" }
+function Test-Python312 {
+    param(
+        [string]$Exe,
+        [string[]]$PrefixArgs = @()
+    )
+
+    $Version = & $Exe @PrefixArgs -c "import sys; print(sys.executable + ' ' + sys.version.split()[0]); raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        return $Version
+    }
+    return $null
 }
 
-python (Join-Path $Root "scripts\prepare_streaming_binaries.py")
+$PyLauncher = Get-Command py -ErrorAction SilentlyContinue
+if ($PyLauncher) {
+    $PythonInfo = Test-Python312 $PyLauncher.Source @("-3.12")
+    if ($PythonInfo) {
+        $PythonExe = $PyLauncher.Source
+        $PythonArgs = @("-3.12")
+    }
+}
+
+if (-not $PythonExe) {
+    $Python312Path = "C:\Python312\python.exe"
+    if (Test-Path $Python312Path) {
+        $PythonInfo = Test-Python312 $Python312Path
+        if ($PythonInfo) {
+            $PythonExe = $Python312Path
+            $PythonArgs = @()
+        }
+    }
+}
+
+if (-not $PythonExe) {
+    $Python = Get-Command python -ErrorAction SilentlyContinue
+    if ($Python) {
+        $PythonInfo = Test-Python312 $Python.Source
+        if ($PythonInfo) {
+            $PythonExe = $Python.Source
+            $PythonArgs = @()
+        }
+    }
+}
+
+if (-not $PythonExe) {
+    throw "Python 3.12 is required for secure build"
+}
+
+function Invoke-Python {
+    param([string[]]$Arguments)
+    & $PythonExe @PythonArgs @Arguments
+}
+
+Write-Host "Using Python: $PythonInfo"
+
+if (-not $SkipInstall) {
+    Invoke-Python @("-m", "pip", "install", "--upgrade", "-e", "${Root}[build]")
+    if ($LASTEXITCODE -ne 0) { throw "Failed to install project build dependencies" }
+}
+
+Invoke-Python @((Join-Path $Root "scripts\prepare_streaming_binaries.py"))
 if ($LASTEXITCODE -ne 0) { throw "Failed to prepare streaming binaries" }
 
 if (Test-Path $BuildParent) {
@@ -39,14 +98,18 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     New-Item -ItemType Directory -Path $BuildRoot -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $Root "src") -Destination $BuildRoot -Recurse
 
-    python (Join-Path $Root "scripts\prepare_build_branding.py") `
-        --source-root "$SecureSrc" `
-        --icons-dir "$IconAssets" `
-        --metadata-out "$BrandingInfoPath"
+    Invoke-Python @(
+        (Join-Path $Root "scripts\prepare_build_branding.py"),
+        "--source-root", "$SecureSrc",
+        "--icons-dir", "$IconAssets",
+        "--metadata-out", "$BrandingInfoPath"
+    )
     if ($LASTEXITCODE -ne 0) { throw "Build branding failed" }
 
-    python (Join-Path $Root "scripts\prepare_release_sources.py") `
-        --source-root "$SecureSrc"
+    Invoke-Python @(
+        (Join-Path $Root "scripts\prepare_release_sources.py"),
+        "--source-root", "$SecureSrc"
+    )
     if ($LASTEXITCODE -ne 0) { throw "Release source preparation failed" }
 
     $Branding = Get-Content -LiteralPath $BrandingInfoPath -Raw | ConvertFrom-Json
@@ -80,28 +143,30 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     $SDeletePath = Join-Path $SecureSrc "sonar\sdelete.exe"
 
     Write-Host "Building ${BuildIndex}/${Count}: $OutputExeName"
-    python -m nuitka `
-        --mode=onefile `
-        --assume-yes-for-downloads `
-        --enable-plugin=pyqt6 `
-        --windows-uac-admin `
-        --windows-console-mode=disable `
-        --windows-icon-from-ico="$IconPath" `
-        --product-name="$AppName" `
-        --file-description="$AppName" `
-        --product-version="$WindowsVersion" `
-        --file-version="$WindowsVersion" `
-        --include-package=sonar `
-        --include-package=requests `
-        --include-data-dir="$ResourcesPath=sonar/resources" `
-        --include-data-files="$SecureWipePath=sonar/secure_wipe.ps1" `
-        --include-data-files="$SDeletePath=sonar/sdelete.exe" `
-        --nofollow-import-to=pytest `
-        --nofollow-import-to=tests `
-        --nofollow-import-to=sonar.tools `
-        --output-filename="$OutputExeName" `
-        --output-dir="$AppDist" `
+    Invoke-Python @(
+        "-m", "nuitka",
+        "--mode=onefile",
+        "--assume-yes-for-downloads",
+        "--enable-plugin=pyside6",
+        "--windows-uac-admin",
+        "--windows-console-mode=disable",
+        "--windows-icon-from-ico=$IconPath",
+        "--product-name=$AppName",
+        "--file-description=$AppName",
+        "--product-version=$WindowsVersion",
+        "--file-version=$WindowsVersion",
+        "--include-package=sonar",
+        "--include-package=requests",
+        "--include-data-dir=$ResourcesPath=sonar/resources",
+        "--include-data-files=$SecureWipePath=sonar/secure_wipe.ps1",
+        "--include-data-files=$SDeletePath=sonar/sdelete.exe",
+        "--nofollow-import-to=pytest",
+        "--nofollow-import-to=tests",
+        "--nofollow-import-to=sonar.tools",
+        "--output-filename=$OutputExeName",
+        "--output-dir=$AppDist",
         "$EntryPoint"
+    )
     if ($LASTEXITCODE -ne 0) { throw "Nuitka build failed" }
 
     Get-ChildItem -LiteralPath $AppDist -Directory -Filter "__main__.*" | Remove-Item -Recurse -Force

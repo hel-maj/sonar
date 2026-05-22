@@ -7,9 +7,9 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QRegularExpression, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QRegularExpressionValidator
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QObject, QRegularExpression, QTimer, Qt, Signal
+from PySide6.QtGui import QIcon, QRegularExpressionValidator
+from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QCheckBox,
@@ -85,15 +85,15 @@ def format_update_message_html(text: str) -> str:
 
 
 class LogBridge(QObject):
-    message = pyqtSignal(str)
+    message = Signal(str)
 
 
 class LicenseBridge(QObject):
-    result = pyqtSignal(object)
+    result = Signal(object)
 
 
 class TelegramSettingsBridge(QObject):
-    changed = pyqtSignal(object)
+    changed = Signal(object)
 
 
 class DigitsOnlyDelegate(QStyledItemDelegate):
