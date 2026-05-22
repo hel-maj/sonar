@@ -44,14 +44,22 @@ class WindowCapture:
         import win32gui
 
         hwnd = self._require_window()
-        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        try:
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        except Exception as exc:
+            self.hwnd = None
+            raise RuntimeError("Окно игры недоступно") from exc
         return right - left, bottom - top
 
     def client_to_screen(self, x: int, y: int) -> tuple[int, int]:
         import win32gui
 
         hwnd = self._require_window()
-        return win32gui.ClientToScreen(hwnd, (int(x), int(y)))
+        try:
+            return win32gui.ClientToScreen(hwnd, (int(x), int(y)))
+        except Exception as exc:
+            self.hwnd = None
+            raise RuntimeError("Окно игры недоступно") from exc
 
     def capture(self) -> np.ndarray:
         import win32gui
@@ -59,8 +67,12 @@ class WindowCapture:
         import win32con
 
         hwnd = self._require_window()
-        left, top, right, bottom = win32gui.GetClientRect(hwnd)
-        screen_left, screen_top = win32gui.ClientToScreen(hwnd, (left, top))
+        try:
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)
+            screen_left, screen_top = win32gui.ClientToScreen(hwnd, (left, top))
+        except Exception as exc:
+            self.hwnd = None
+            raise RuntimeError("Окно игры недоступно") from exc
         width = right - left
         height = bottom - top
         if width <= 0 or height <= 0:

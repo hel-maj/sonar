@@ -35,16 +35,17 @@ class ChatCommand:
 
 
 CHAT_COMMANDS: tuple[ChatCommand, ...] = (
-    ChatCommand("local_ic", "Обычный локальный IC", "", "Сообщение в чат"),
-    ChatCommand("whisper", "Шёпот", "/w", "Видит только конкретный игрок"),
-    ChatCommand("shout", "Крик", "/s", "Видят игроки в увеличенном радиусе"),
-    ChatCommand("local_ooc", "Локальный OOC", "/b", "Неролевое сообщение рядом"),
-    ChatCommand("fraction_ic", "Фракционный IC", "/f", "Ролевой чат организации"),
-    ChatCommand("fraction_ooc", "Фракционный OOC", "/fb", "Неролевой чат организации"),
-    ChatCommand("family_ic", "Семейный IC", "/c", "Ролевой чат семьи"),
-    ChatCommand("family_ooc", "Семейный OOC", "/cb", "Неролевой чат семьи"),
-    ChatCommand("group_ic", "Групповой IC", "/g", "Ролевой чат временной группы"),
-    ChatCommand("group_ooc", "Групповой OOC", "/gb", "Неролевой чат временной группы"),
+    ChatCommand("local_ic", "обычный локальный IC", "", "сообщение в чат"),
+    ChatCommand("whisper", "IC, шёпот", "/w", "видит только конкретный игрок"),
+    ChatCommand("shout", "IC, крик", "/s", "видят игроки в увеличенном радиусе"),
+    ChatCommand("local_ooc", "OOC", "/b", "неролевое сообщение рядом"),
+    ChatCommand("me", "RP-действие", "/me", "описание действия персонажа"),
+    ChatCommand("do", "RP-ситуация", "/do", "описание ситуации или факта"),
+    ChatCommand("family_ic", "семейный IC", "/c", "ролевой чат семьи"),
+    ChatCommand("family_ooc", "семейный OOC", "/cb", "неролевой чат семьи"),
+    ChatCommand("group_ic", "групповой IC", "/g", "ролевой чат временной группы"),
+    ChatCommand("group_ooc", "групповой OOC", "/gb", "неролевой чат временной группы"),
+    ChatCommand("report", "обращение администрации", "/report", "сообщение администрации"),
 )
 CHAT_COMMAND_BY_CODE = {command.code: command for command in CHAT_COMMANDS if command.code}
 EXPLICIT_CHAT_COMMAND_RE = re.compile(r"^/[^\s/]+(?:\s|$)", re.IGNORECASE)
@@ -210,9 +211,134 @@ class MajesticChatDetector:
             if inner_mean > 95:
                 continue
             candidates.append((rect, inner_mean))
+        edge_rect = self._detect_input_rect_from_edges(frame)
+        if edge_rect is not None:
+            candidates.append((edge_rect, 0.0))
+        valid_candidates = [item for item in candidates if self._looks_like_input_body(frame, item[0]) and self._has_command_buttons_below(frame, item[0])]
+        if valid_candidates:
+            return max(valid_candidates, key=lambda item: (item[0].y, item[0].width * item[0].height))[0]
         if not candidates:
             return None
-        return max(candidates, key=lambda item: (item[0].width * item[0].height, -abs(item[0].y - height * 0.44)))[0]
+        return max(candidates, key=lambda item: (item[0].y, item[0].width * item[0].height))[0]
+
+    def _detect_input_rect_from_edges(self, frame: np.ndarray) -> Rect | None:
+        height, width = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 20, 70)
+        x_limit = max(1, int(width * 0.30))
+        row_scores = edges[:, :x_limit].sum(axis=1) / 255
+        min_score = max(90, int(width * 0.045))
+        groups: list[tuple[int, int]] = []
+        start: int | None = None
+        last = 0
+        for y in range(int(height * 0.20), int(height * 0.62)):
+            if row_scores[y] >= min_score:
+                if start is None:
+                    start = y
+                last = y
+            elif start is not None:
+                groups.append((start, last))
+                start = None
+        if start is not None:
+            groups.append((start, last))
+
+        candidates: list[Rect] = []
+        min_input_height = int(height * 0.028)
+        max_input_height = int(height * 0.078)
+        for index, (top_start, top_end) in enumerate(groups):
+            top = (top_start + top_end) // 2
+            top_span = self._largest_horizontal_edge_span(edges, top, x_limit)
+            if top_span is None:
+                continue
+            for bottom_start, bottom_end in groups[index + 1 :]:
+                bottom = (bottom_start + bottom_end) // 2
+                rect_height = bottom - top + 1
+                if rect_height < min_input_height:
+                    continue
+                if rect_height > max_input_height:
+                    break
+                bottom_span = self._largest_horizontal_edge_span(edges, bottom, x_limit)
+                if bottom_span is None:
+                    continue
+                left = min(top_span[0], bottom_span[0])
+                right = max(top_span[1], bottom_span[1])
+                rect_width = right - left + 1
+                if not (
+                    left < width * 0.07
+                    and width * 0.18 <= rect_width <= width * 0.36
+                    and height * 0.025 <= rect_height <= height * 0.08
+                ):
+                    continue
+                rect = Rect(int(left), int(top), int(rect_width), int(rect_height))
+                if self._looks_like_input_body(frame, rect) and self._has_command_buttons_below(frame, rect):
+                    candidates.append(rect)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: (item.y, item.width * item.height))
+
+    @staticmethod
+    def _largest_horizontal_edge_span(edges: np.ndarray, y: int, x_limit: int) -> tuple[int, int] | None:
+        band = edges[max(0, y - 2) : min(edges.shape[0], y + 3), :x_limit]
+        columns = np.where(band.max(axis=0) > 0)[0]
+        if columns.size == 0:
+            return None
+        segments: list[tuple[int, int]] = []
+        start = int(columns[0])
+        last = start
+        for column in columns[1:]:
+            current = int(column)
+            if current - last <= 18:
+                last = current
+                continue
+            segments.append((start, last))
+            start = current
+            last = current
+        segments.append((start, last))
+        return max(segments, key=lambda item: item[1] - item[0])
+
+    @staticmethod
+    def _looks_like_input_body(frame: np.ndarray, rect: Rect) -> bool:
+        height, width = frame.shape[:2]
+        clamped = rect.clamp(width, height)
+        if clamped.width <= 0 or clamped.height <= 0:
+            return False
+        crop = frame[clamped.slice()]
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 20, 70)
+        inner = gray[4 : max(5, gray.shape[0] - 4), 4 : max(5, gray.shape[1] - 4)]
+        if inner.size == 0:
+            return False
+        bright_ratio = float((inner > 130).mean())
+        edge_density = float((edges > 0).mean())
+        return bright_ratio <= 0.04 and edge_density <= 0.11
+
+    @staticmethod
+    def _has_command_buttons_below(frame: np.ndarray, rect: Rect) -> bool:
+        height, width = frame.shape[:2]
+        y1 = min(height, rect.bottom + 3)
+        y2 = min(height, rect.bottom + max(52, int(height * 0.07)))
+        x2 = min(width, rect.x + rect.width + max(20, int(width * 0.04)))
+        if y2 <= y1 or x2 <= 0:
+            return False
+        crop = frame[y1:y2, :x2]
+        scale = max(0.5, min(width / 1920.0, height / 1080.0))
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        text_mask = ((hsv[:, :, 2] > 110) & (hsv[:, :, 1] < 120)).astype("uint8") * 255
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(5, int(round(9 * scale))), max(2, int(round(3 * scale)))))
+        text_mask = cv2.morphologyEx(text_mask, cv2.MORPH_CLOSE, kernel)
+        components = cv2.connectedComponentsWithStats(text_mask, 8)[2]
+        command_text_tops: list[int] = []
+        for x, y, component_width, component_height, area in components[1:]:
+            if (
+                x < width * 0.22
+                and 8 * scale <= component_width <= 85 * scale
+                and 7 * scale <= component_height <= 28 * scale
+                and area >= 15 * scale
+            ):
+                command_text_tops.append(y1 + int(y))
+        if len(command_text_tops) < 3:
+            return False
+        return min(command_text_tops) - rect.bottom <= max(30, int(height * 0.035))
 
     def _read_tab_text(self, frame: np.ndarray, rect: Rect) -> str | None:
         try:
@@ -333,6 +459,7 @@ class MajesticChatController:
         self.input_controller.release_all_keys()
         detection = self.detect()
         if detection.active:
+            self._focus_input(detection)
             return ChatActionResult(True, "Чат уже активен", detection)
         if not self.input_controller.press_key(chat_hotkey):
             return ChatActionResult(False, "Не удалось нажать клавишу чата", self.detect())
@@ -340,9 +467,10 @@ class MajesticChatController:
         while time.monotonic() < deadline:
             detection = self.detect()
             if detection.active:
+                self._focus_input(detection)
                 return ChatActionResult(True, "Чат открыт", detection)
             self.sleep(CHAT_POLL_SECONDS)
-        return ChatActionResult(False, "Чат не стал активным", detection)
+        return ChatActionResult(False, "Поле ввода чата не подтвердилось", detection)
 
     def close_chat(self, *, timeout: float = CHAT_CLOSE_TIMEOUT_SECONDS, force: bool = False) -> ChatActionResult:
         if not self.window_activator.activate_window():
@@ -364,6 +492,7 @@ class MajesticChatController:
         opened = self.open_chat(chat_hotkey)
         if not opened.ok:
             return opened
+        self._focus_input(opened.detection)
         self._clear_input()
         return ChatActionResult(True, "Поле ввода очищено", self.detect())
 
@@ -383,10 +512,12 @@ class MajesticChatController:
             return opened
         detection = self._select_tab(tab_id, opened.detection)
         selected_tab_id = tab_id or detection.selected_tab_id
+        self._focus_input(detection)
         self._clear_input()
         detection = self.detect()
         if selected_tab_id and not message_uses_explicit_chat_command(text):
             detection = self._restore_tab_prefix(selected_tab_id, detection)
+        self._focus_input(detection)
         self.clipboard_setter(text)
         self.input_controller.hotkey("ctrl", "v")
         self.sleep(0.05)
@@ -410,10 +541,12 @@ class MajesticChatController:
         selected_tab = self._find_tab(detection, selected_tab_id) or next((tab for tab in detection.tabs if tab.selected), None)
         if selected_tab is None:
             return detection
-        other_tab = next((tab for tab in detection.tabs if tab.id != selected_tab.id), None)
-        if other_tab is None:
+        if self._is_all_tab(selected_tab):
             return detection
-        self._click_tab(other_tab)
+        all_tab = self._find_tab(detection, "all")
+        if all_tab is None or all_tab.id == selected_tab.id:
+            return detection
+        self._click_tab(all_tab)
         self.sleep(CHAT_TAB_SWITCH_DELAY_SECONDS)
         refreshed = self.detect()
         selected_tab = self._find_tab(refreshed, selected_tab_id) or selected_tab
@@ -428,6 +561,24 @@ class MajesticChatController:
             self.input_controller.press_key("backspace")
             self.sleep(CHAT_CLEAR_DELAY_SECONDS)
 
+    def _focus_input(self, detection: ChatDetection) -> None:
+        if not self.window_activator.activate_window():
+            return
+        rect = detection.input_rect
+        if rect is None:
+            try:
+                frame = self.capture.capture()
+                height, width = frame.shape[:2]
+                rect = Rect(int(width * 0.015), int(height * 0.425), int(width * 0.25), max(32, int(height * 0.045)))
+            except Exception:
+                return
+        screen_x, screen_y = self.capture.client_to_screen(
+            rect.x + min(max(20, rect.width // 5), max(20, rect.width - 20)),
+            rect.y + rect.height // 2,
+        )
+        self.input_controller.click(screen_x, screen_y)
+        self.sleep(0.05)
+
     def _click_tab(self, tab: ChatTab) -> None:
         screen_x, screen_y = self.capture.client_to_screen(tab.rect.x + tab.rect.width // 2, tab.rect.y + tab.rect.height // 2)
         self.input_controller.click(screen_x, screen_y)
@@ -436,9 +587,27 @@ class MajesticChatController:
     def _find_tab(detection: ChatDetection, tab_id: str) -> ChatTab | None:
         tab_id = str(tab_id)
         for tab in detection.tabs:
-            if tab.id == tab_id or tab.name == tab_id:
+            if tab.id == tab_id or tab.name == tab_id or MajesticChatController._tab_alias_matches(tab, tab_id):
                 return tab
         return None
+
+    @staticmethod
+    def _is_all_tab(tab: ChatTab) -> bool:
+        return tab.id == "0" or MajesticChatController._tab_alias_matches(tab, "all")
+
+    @staticmethod
+    def _tab_alias_matches(tab: ChatTab, tab_id: str) -> bool:
+        normalized_id = tab_id.strip().lower()
+        normalized_name = tab.name.strip().lower()
+        aliases = {
+            "all": {"0", "все", "вкладка 1"},
+            "fam": {"1", "семья", "family", "вкладка 2"},
+            "frac": {"2", "фракция", "fraction", "вкладка 3"},
+            "gov": {"3", "департамент", "department", "вкладка 4"},
+            "report": {"4", "репорт", "report", "вкладка 5"},
+        }
+        expected = aliases.get(normalized_id, {normalized_id})
+        return tab.id in expected or normalized_name in expected
 
 
 def set_clipboard_text(text: str) -> None:

@@ -36,6 +36,24 @@ def test_keygen_status_extracts_license_and_release_metadata():
     assert status.masked_key == "FA5B1-*****-G2K34"
     assert status.latest_version == "1.2.1"
     assert status.update_message == "Новая версия\n🐟 быстрее"
+    assert status.role == "user"
+
+
+def test_keygen_status_extracts_license_role_from_metadata():
+    status = parse_keygen_status(
+        {
+            "meta": {"valid": True, "code": "VALID"},
+            "data": {
+                "id": "license-id",
+                "attributes": {
+                    "key": "FA5B1-ABCDE-G2K34",
+                    "metadata": {"role": "Admin"},
+                },
+            },
+        }
+    )
+
+    assert status.role == "admin"
 
 
 def test_machine_fingerprint_is_sha256_hex():

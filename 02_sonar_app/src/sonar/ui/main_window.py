@@ -151,7 +151,10 @@ class MainWindow(QMainWindow):
             chat_send_callback=self._send_stream_chat_message,
             chat_clear_callback=self._clear_stream_chat,
             game_window_available_callback=self.bot.capture.is_window_available,
+            snapshot_mode_changed_callback=self._stream_snapshot_mode_changed_from_page,
+            license_role_callback=self._license_role,
         )
+        self.stream_service.set_snapshot_mode_enabled(self.settings.fishing.stream_snapshot_mode)
         self._resume_bot_after_chat = False
         self.bot.configure_streaming_callbacks(
             status_callback=self.stream_service.snapshot,
@@ -159,6 +162,7 @@ class MainWindow(QMainWindow):
             stop_callback=self._stop_stream_from_remote,
             set_quality_callback=self.stream_service.set_quality,
             set_chat_zoom_callback=self.stream_service.set_chat_zoom_enabled,
+            set_snapshot_mode_callback=self._set_stream_snapshot_mode_from_remote,
         )
         self._stats_refreshing = False
         self._app_stopped_notified = False
@@ -467,20 +471,26 @@ class MainWindow(QMainWindow):
         self.stream_quality_combo.currentTextChanged.connect(self._stream_quality_changed)
         self.stream_chat_zoom_check = QCheckBox("Увеличить чат")
         self.stream_chat_zoom_check.stateChanged.connect(self._stream_chat_zoom_changed)
+        self.stream_snapshot_mode_check = QCheckBox("Режим 10fps")
+        self.stream_snapshot_mode_check.stateChanged.connect(self._stream_snapshot_mode_changed)
         controls.addRow("Качество", self.stream_quality_combo)
         controls.addRow("Область чата", self.stream_chat_zoom_check)
+        controls.addRow("Скриншоты", self.stream_snapshot_mode_check)
         layout.addWidget(controls_group)
 
         buttons = QHBoxLayout()
+        self.stream_start_button = QPushButton("Запустить стрим")
+        self.stream_start_button.clicked.connect(self.start_stream)
         self.stream_stop_button = QPushButton("Остановить стрим")
         self.stream_stop_button.clicked.connect(self.stop_stream)
         self.stream_chat_mode_button = QPushButton("Включить режим чата")
         self.stream_chat_mode_button.clicked.connect(self.enable_chat_mode)
+        buttons.addWidget(self.stream_start_button)
         buttons.addWidget(self.stream_stop_button)
         buttons.addWidget(self.stream_chat_mode_button)
         layout.addLayout(buttons)
 
-        note = QLabel("Запуск стрима доступен из Telegram. Режим чата прервёт рыбалку.")
+        note = QLabel("Стрим можно запускать здесь или из Telegram. Режим чата приостанавливает рыбалку и восстанавливает её при выходе.")
         note.setWordWrap(True)
         layout.addWidget(note)
         layout.addStretch(1)
@@ -510,6 +520,8 @@ class MainWindow(QMainWindow):
         self.use_item_hotkey_input.setText(fishing.use_item_hotkey)
         self.discard_key_input.setText(fishing.discard_key)
         self.chat_hotkey_input.setText(fishing.chat_hotkey)
+        if hasattr(self, "stream_snapshot_mode_check"):
+            self.stream_snapshot_mode_check.setChecked(fishing.stream_snapshot_mode)
         for fish_id, checkbox in self.fish_checks.items():
             checkbox.setChecked(fishing.fish_settings.get(fish_id, True))
         self._apply_telegram_settings_to_ui(settings.telegram)
@@ -722,6 +734,8 @@ class MainWindow(QMainWindow):
         fishing.use_item_hotkey = self.use_item_hotkey_input.text().strip() or "e"
         fishing.discard_key = self.discard_key_input.text().strip() or "q"
         fishing.chat_hotkey = self.chat_hotkey_input.text().strip() or "t"
+        if hasattr(self, "stream_snapshot_mode_check"):
+            fishing.stream_snapshot_mode = self.stream_snapshot_mode_check.isChecked()
         for fish_id, checkbox in self.fish_checks.items():
             fishing.fish_settings[fish_id] = checkbox.isChecked()
         telegram = settings.telegram
@@ -968,6 +982,14 @@ class MainWindow(QMainWindow):
     def _stop_stream_from_remote(self) -> None:
         self.stream_service.stop_stream("telegram")
 
+    def _set_stream_snapshot_mode_from_remote(self, enabled: bool) -> bool:
+        ok = self.stream_service.set_snapshot_mode_enabled(enabled)
+        self.settings = self.config_manager.load()
+        self.settings.fishing.stream_snapshot_mode = bool(enabled)
+        self.config_manager.save(self.settings)
+        self._refresh_stream_tab()
+        return ok
+
     def _notify_app_started(self) -> None:
         threading.Thread(
             target=self.bot.notification_manager.notify_app_started,
@@ -985,6 +1007,10 @@ class MainWindow(QMainWindow):
         self.stream_service.stop_stream("ui")
         self._refresh_stream_tab()
 
+    def start_stream(self) -> None:
+        self._start_stream_from_remote()
+        self._refresh_stream_tab()
+
     def enable_chat_mode(self) -> None:
         snapshot = self.stream_service.snapshot()
         self.stream_service.set_chat_mode_enabled(not (snapshot.chat_active or snapshot.chat_mode_enabled))
@@ -996,6 +1022,11 @@ class MainWindow(QMainWindow):
         if was_running:
             self.bot.pause_for_chat(True)
         self.settings = self.config_manager.load()
+        result = self.chat_controller.open_chat(self.settings.fishing.chat_hotkey, timeout=1.5)
+        if result.ok:
+            self.log_bridge.message.emit(result.message)
+            return result
+        self.log_bridge.message.emit(f"Режим чата: {result.message}, возвращаю персонажа в простой")
         ready, ready_message = self.bot.prepare_for_chat_mode()
         if not ready:
             if was_running:
@@ -1037,6 +1068,11 @@ class MainWindow(QMainWindow):
         self.settings = self.config_manager.load()
         return self.chat_controller.clear_chat_input(self.settings.fishing.chat_hotkey)
 
+    def _stream_snapshot_mode_changed_from_page(self, enabled: bool) -> None:
+        self.settings = self.config_manager.load()
+        self.settings.fishing.stream_snapshot_mode = bool(enabled)
+        self.config_manager.save(self.settings)
+
     def _stream_quality_changed(self, quality: str) -> None:
         if not hasattr(self, "stream_service"):
             return
@@ -1049,6 +1085,32 @@ class MainWindow(QMainWindow):
             return
         self.stream_service.set_chat_zoom_enabled(self.stream_chat_zoom_check.isChecked())
         self._refresh_stream_tab()
+
+    def _stream_snapshot_mode_changed(self, *args) -> None:
+        del args
+        if not hasattr(self, "stream_service"):
+            return
+        enabled = self.stream_snapshot_mode_check.isChecked()
+        self.settings = self.config_manager.load()
+        self.settings.fishing.stream_snapshot_mode = enabled
+        self.config_manager.save(self.settings)
+        threading.Thread(
+            target=self._apply_stream_snapshot_mode_from_ui,
+            args=(enabled,),
+            name="sonar-stream-snapshot-mode-ui",
+            daemon=True,
+        ).start()
+        self._refresh_stream_tab()
+
+    def _apply_stream_snapshot_mode_from_ui(self, enabled: bool) -> None:
+        self.stream_service.set_snapshot_mode_enabled(enabled)
+        QTimer.singleShot(0, self._refresh_stream_tab)
+
+    def _license_role(self) -> str:
+        try:
+            return self.license_manager.cached_status().role
+        except Exception:
+            return "user"
 
     def _refresh_stream_tab(self) -> None:
         if not hasattr(self, "stream_status_label"):
@@ -1071,16 +1133,21 @@ class MainWindow(QMainWindow):
             self.stream_url_label.setText("—")
         quality_block = self.stream_quality_combo.blockSignals(True)
         chat_block = self.stream_chat_zoom_check.blockSignals(True)
+        snapshot_block = self.stream_snapshot_mode_check.blockSignals(True)
         try:
             self.stream_quality_combo.setCurrentText(snapshot.quality)
             self.stream_chat_zoom_check.setChecked(snapshot.chat_zoom_enabled)
+            self.stream_snapshot_mode_check.setChecked(snapshot.snapshot_mode_enabled)
         finally:
             self.stream_quality_combo.blockSignals(quality_block)
             self.stream_chat_zoom_check.blockSignals(chat_block)
-        self.stream_stop_button.setEnabled(snapshot.active or snapshot.status in {"starting", "error"})
+            self.stream_snapshot_mode_check.blockSignals(snapshot_block)
+        self.stream_start_button.setEnabled((not snapshot.active) and snapshot.status not in {"starting", "preparing"})
+        self.stream_stop_button.setEnabled(snapshot.active or snapshot.status in {"starting", "preparing", "error"})
         self.stream_chat_mode_button.setText(
             "Выйти из режима чата" if snapshot.chat_active or snapshot.chat_mode_enabled else "Включить режим чата"
         )
+        self.stream_chat_mode_button.setEnabled(snapshot.active or snapshot.chat_active or snapshot.chat_mode_enabled)
 
     def reset_session_stats(self) -> None:
         self.session_stats.reset()

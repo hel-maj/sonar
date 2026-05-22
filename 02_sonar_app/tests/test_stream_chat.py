@@ -42,6 +42,24 @@ def test_chat_detector_finds_family_tab_selection_on_night_screenshot():
     assert detection.selected_tab_id == "1"
 
 
+def test_chat_detector_uses_input_bar_when_message_backgrounds_are_enabled():
+    detector = MajesticChatDetector()
+
+    for name in (
+        "chat_input_message_backgrounds_200258.jpg",
+        "chat_input_message_backgrounds_212128.jpg",
+        "chat_input_message_backgrounds_212134.jpg",
+        "chat_input_message_backgrounds_212140.jpg",
+        "chat_input_message_backgrounds_212144.jpg",
+        "chat_input_message_backgrounds_212151.jpg",
+    ):
+        detection = detector.detect(load_frame(name))
+        assert detection.active is True, name
+        assert detection.input_rect is not None, name
+        assert 450 <= detection.input_rect.y <= 500, name
+        assert detection.input_rect.width >= 420, name
+
+
 def test_chat_detector_rejects_tabs_without_active_input():
     frame = load_frame("chat_all_day.jpg")
     frame[430:560, 0:560] = frame[580:710, 0:560]
@@ -62,9 +80,11 @@ def test_chat_detector_rejects_visible_tabs_when_input_is_closed():
 
 
 def test_chat_command_hint_uses_known_majestic_slash_codes():
-    assert chat_command_hint("/b бегаю по полю") == "Локальный OOC"
-    assert chat_command_hint("/cb текст") == "Семейный OOC"
-    assert chat_command_hint("обычный текст") == "Обычный локальный IC"
+    assert chat_command_hint("/b бегаю по полю") == "OOC"
+    assert chat_command_hint("/cb текст") == "семейный OOC"
+    assert chat_command_hint("обычный текст") == "обычный локальный IC"
+    assert chat_command_hint("/me машет рукой") == "RP-действие"
+    assert chat_command_hint("/report нужна помощь") == "обращение администрации"
     assert message_uses_explicit_chat_command("/gb привет") is True
     assert message_uses_explicit_chat_command("без слеша") is False
 
@@ -180,7 +200,7 @@ def test_select_tab_clicks_requested_tab_in_game():
 
     assert result.ok is True
     clicks = [action for action in input_controller.actions if action[0] == "click"]
-    assert len(clicks) == 1
+    assert len(clicks) == 2
 
 
 def test_send_message_restores_tab_prefix_for_plain_text():
@@ -195,7 +215,22 @@ def test_send_message_restores_tab_prefix_for_plain_text():
     assert input_controller.actions.count(("hotkey", ("ctrl", "a"))) == 1
     assert ("hotkey", ("ctrl", "v")) in input_controller.actions
     clicks = [action for action in input_controller.actions if action[0] == "click"]
-    assert len(clicks) == 2
+    assert len(clicks) == 3
+
+
+def test_send_message_restores_non_all_tab_prefix_through_all_tab():
+    input_controller = DummyInput()
+    clipboard: list[str] = []
+    controller = make_controller([make_detection("1")] * 6, input_controller, clipboard)
+
+    result = controller.send_message("1", "привет", chat_hotkey="t")
+
+    assert result.ok is True
+    assert clipboard == ["привет"]
+    clicks = [action for action in input_controller.actions if action[0] == "click"]
+    assert len(clicks) == 5
+    assert ("click", ("49", "35")) in clicks
+    assert ("click", ("107", "35")) in clicks
 
 
 def test_send_message_skips_tab_restore_for_explicit_slash_command():
@@ -208,4 +243,4 @@ def test_send_message_skips_tab_restore_for_explicit_slash_command():
     assert result.ok is True
     assert clipboard == ["/cb привет"]
     clicks = [action for action in input_controller.actions if action[0] == "click"]
-    assert clicks == []
+    assert len(clicks) == 3

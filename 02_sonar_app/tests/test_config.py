@@ -67,4 +67,5 @@ def test_license_settings_serializes_only_runtime_license_state():
         "license_id": "license-id",
         "last_validated_at": "2026-05-19T10:00:00+00:00",
         "expires_at": "2026-06-19T10:00:00+00:00",
+        "role": "user",
     }

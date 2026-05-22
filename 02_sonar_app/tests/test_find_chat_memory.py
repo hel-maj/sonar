@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
 
+from sonar.tools import dump_chat_history as dch
 from sonar.tools.dump_chat_history import (
     CHAT_MARKERS,
     ChatRecord,
     DumpMemoryTracker,
+    _cached_process_identity_mismatch,
     _dedupe_records,
     _extract_active_tab_from_text,
     _extract_chat_state_from_text,
@@ -15,6 +18,8 @@ from sonar.tools.dump_chat_history import (
     _extract_wide_fragments,
     _infer_active_tab_from_records,
     _known_chat_tabs,
+    _load_cached_chat_windows,
+    _load_cached_chat_process,
     _merge_history_data,
     _select_chat_candidates,
     update_latest_history,
@@ -254,6 +259,25 @@ def test_extract_rendered_records_joins_split_weazel_phone_nodes() -> None:
     assert record.owner == {"name": "Rei Omens", "kind": "player", "organization": "Weazel News"}
 
 
+def test_extract_rendered_records_keeps_repeated_visible_messages() -> None:
+    text = (
+        "@{24df42}[Weazel News] Anton Romanov: "
+        "\u041d\u0430\u0431\u043e\u0440 \u0432 \u0441\u0435\u043c\u044c\u044e Oxford. "
+        "\u041f\u043e\u0447\u0442\u0430: whyclloud@ds.gg."
+        "\x00"
+        "@{24df42}[Weazel News] Anton Romanov: "
+        "\u041d\u0430\u0431\u043e\u0440 \u0432 \u0441\u0435\u043c\u044c\u044e Oxford. "
+        "\u041f\u043e\u0447\u0442\u0430: whyclloud@ds.gg."
+    )
+
+    records = _extract_rendered_records_from_text(text, 0xA000, "utf-16-le", "webengine", 2)
+
+    assert len(records) == 2
+    assert records[0].text == records[1].text
+    assert records[0].stableId == records[1].stableId
+    assert records[0].occurrenceId != records[1].occurrenceId
+
+
 def test_extract_rendered_records_attaches_standalone_phone_line_to_previous_news() -> None:
     text = (
         "@{24df42}[Weazel News] Anna Astere: "
@@ -315,6 +339,38 @@ def test_extract_rendered_records_reads_prefixed_family_action_owner() -> None:
     assert len(records) == 1
     assert records[0].playerName == "Marvin Angels"
     assert records[0].owner == {"name": "Marvin Angels", "kind": "player"}
+
+
+def test_extract_rendered_records_classifies_default_prefixed_action_as_me() -> None:
+    text = (
+        "[default] @{c2a2da}Marvin Angels "
+        "\u0443\u0441\u0442\u0430\u043b \u0431\u0435\u0433\u0430\u0442\u044c, \u0447\u0438\u043b\u044e"
+    )
+
+    records = _extract_rendered_records_from_text(text, 0xA000, "utf-16-le", "webengine", 2)
+
+    assert len(records) == 1
+    assert records[0].type == "me"
+    assert records[0].text == (
+        "[me] Marvin Angels "
+        "\u0443\u0441\u0442\u0430\u043b \u0431\u0435\u0433\u0430\u0442\u044c, \u0447\u0438\u043b\u044e"
+    )
+    assert records[0].playerName == "Marvin Angels"
+    assert records[0].owner == {"name": "Marvin Angels", "kind": "player"}
+
+
+def test_extract_rendered_records_reads_static_id_action_with_result_colon() -> None:
+    text = (
+        "132388 \u0431\u0440\u043e\u0441\u0438\u043b \u043a\u043e\u0441\u0442\u0438 "
+        "\u0412\u044b\u043f\u0430\u043b\u043e: 4"
+    )
+
+    records = _extract_rendered_records_from_text(text, 0xA000, "utf-16-le", "webengine", 2)
+
+    assert len(records) == 1
+    assert records[0].type == "me"
+    assert records[0].staticId == "132388"
+    assert records[0].owner == {"staticId": "132388", "kind": "player"}
 
 
 def test_extract_rendered_records_keeps_visible_actions_but_rejects_static_catalog() -> None:
@@ -694,6 +750,39 @@ def test_merge_history_data_appends_phone_number_to_record_text() -> None:
     assert record["raw_fields"]["phoneNumber_source"] == "record"
 
 
+def test_merge_history_data_trims_ui_tail_before_dedupe() -> None:
+    incoming = {
+        "created_at": 2.0,
+        "records": [
+            {
+                "type": "news",
+                "text": "[Weazel News] Sanctity Ryota: Продам зеленые наушники Appia Pro Max. Цена: договорная.",
+                "messageId": "same",
+                "stableId": "same",
+                "occurrenceId": "occ-1",
+                "raw_fields": {"messageId_source": "stable_hash"},
+                "pos": 10,
+            },
+            {
+                "type": "news",
+                "text": "[Weazel News] Sanctity Ryota: Продам зеленые наушники Appia Pro Max. Цена: договорная. к сытости Конская сила",
+                "messageId": "same",
+                "stableId": "same",
+                "occurrenceId": "occ-1",
+                "raw_fields": {"messageId_source": "stable_hash"},
+                "pos": 20,
+            },
+        ],
+        "fragments": [],
+    }
+
+    merged = _merge_history_data(None, incoming, fragment_limit=0)
+
+    assert [record["text"] for record in merged["records"]] == [
+        "[Weazel News] Sanctity Ryota: Продам зеленые наушники Appia Pro Max. Цена: договорная."
+    ]
+
+
 def test_merge_history_data_honors_zero_fragment_limit() -> None:
     incoming = {
         "created_at": 2.0,
@@ -829,7 +918,7 @@ def test_update_latest_history_replaces_existing_for_memory_dump(tmp_path) -> No
     assert [record["text"] for record in data["records"]] == ["new"]
 
 
-def test_dedupe_records_keeps_same_text_when_identity_differs() -> None:
+def test_dedupe_records_merges_rendered_with_same_serialized_identity() -> None:
     rendered = ChatRecord(
         type="news",
         text="[Weazel News] Rei Omens: text",
@@ -842,6 +931,7 @@ def test_dedupe_records_keeps_same_text_when_identity_differs() -> None:
         pos=20,
         messageId="stable",
         stableId="stable",
+        raw_fields={"rendered": True, "messageId_source": "stable_hash"},
     )
     serialized = ChatRecord(
         type="news",
@@ -855,16 +945,114 @@ def test_dedupe_records_keeps_same_text_when_identity_differs() -> None:
         pos=10,
         messageId="25609",
         stableId="stable",
+        raw_fields={"messageId_source": "memory"},
     )
 
     records = _dedupe_records([rendered, serialized])
 
-    assert [(record.timestamp, record.id, record.source) for record in records] == [
-        (1779359540332, "25609", "serialized"),
-        (None, None, "rendered"),
+    assert len(records) == 1
+    assert records[0].timestamp == 1779359540332
+    assert records[0].id == "25609"
+    assert records[0].messageId == "25609"
+    assert records[0].stableId == "stable"
+    assert records[0].order == 1
+    assert records[0].orderSource == "timestamp"
+
+
+def test_dedupe_records_keeps_same_text_when_memory_identity_differs() -> None:
+    first = ChatRecord(
+        type="news",
+        text="[Weazel News] Rei Omens: text",
+        timestamp=1779359540332,
+        time="2026-05-21 13:32:20.332",
+        phoneNumber=None,
+        id="25609",
+        source="serialized-a",
+        encoding="utf-16-le",
+        pos=10,
+        messageId="25609",
+        stableId="stable-a",
+        raw_fields={"messageId_source": "memory"},
+    )
+    second = ChatRecord(
+        type="news",
+        text="[Weazel News] Rei Omens: text",
+        timestamp=1779359541332,
+        time="2026-05-21 13:32:21.332",
+        phoneNumber=None,
+        id="25610",
+        source="serialized-b",
+        encoding="utf-16-le",
+        pos=20,
+        messageId="25610",
+        stableId="stable-b",
+        raw_fields={"messageId_source": "memory"},
+    )
+
+    records = _dedupe_records([second, first])
+
+    assert [(record.id, record.timestamp) for record in records] == [
+        ("25609", 1779359540332),
+        ("25610", 1779359541332),
     ]
-    assert [record.order for record in records] == [1, 2]
-    assert [record.orderSource for record in records] == ["timestamp", "memory_position"]
+
+
+def test_dedupe_records_merges_rendered_repeats_by_occurrence_id() -> None:
+    first = ChatRecord(
+        type="news",
+        text="[Weazel News] Rei Omens: text",
+        timestamp=None,
+        time=None,
+        phoneNumber=None,
+        id=None,
+        source="rendered-a",
+        encoding="utf-16-le",
+        pos=20,
+        messageId="stable",
+        stableId="stable",
+        occurrenceId="occ-1",
+        raw_fields={"rendered": True, "messageId_source": "stable_hash"},
+    )
+    second = ChatRecord(
+        type="news",
+        text="[Weazel News] Rei Omens: text",
+        timestamp=None,
+        time=None,
+        phoneNumber=None,
+        id=None,
+        source="rendered-b",
+        encoding="utf-16-le",
+        pos=40,
+        messageId="stable",
+        stableId="stable",
+        occurrenceId="occ-1",
+        raw_fields={"rendered": True, "messageId_source": "stable_hash"},
+    )
+
+    records = _dedupe_records([first, second])
+
+    assert len(records) == 1
+    assert records[0].messageId == "stable"
+    assert records[0].orderSource == "memory_position"
+
+
+def test_merge_history_data_orders_memory_records_by_position() -> None:
+    incoming = {
+        "created_at": 2.0,
+        "records": [
+            {"type": "news", "text": "[Weazel News] later", "source": "rendered", "process": "p", "pid": 1, "pos": 20},
+            {"type": "news", "text": "[Weazel News] earlier", "source": "rendered", "process": "p", "pid": 1, "pos": 10},
+        ],
+        "fragments": [],
+    }
+
+    merged = _merge_history_data(None, incoming, fragment_limit=0)
+
+    assert [record["text"] for record in merged["records"]] == [
+        "[Weazel News] earlier",
+        "[Weazel News] later",
+    ]
+    assert [record["order"] for record in merged["records"]] == [1, 2]
 
 
 def test_merge_history_data_filters_code_fragments() -> None:
@@ -894,3 +1082,133 @@ def test_merge_history_data_filters_code_fragments() -> None:
         "[gov] rendered chat fragment",
         "\u0421\u043a\u043e\u0440\u043e \u0437\u0430\u043a\u0440\u043e\u044e \u043a\u043e\u043d\u0442\u0440\u0430\u043a\u0442",
     ]
+
+
+def test_cached_process_identity_rejects_restarted_parent() -> None:
+    cached = {
+        "process": "majestic-webengine.exe",
+        "pid": 53576,
+        "parent_pid": 65048,
+        "parent_create_time": 100.0,
+        "role": "renderer",
+        "create_time": 120.0,
+        "exe": "C:\\Majestic\\cef\\majestic-webengine.exe",
+        "command_line": "majestic-webengine.exe --type=renderer --renderer-client-id=8",
+    }
+    snapshot = {
+        **cached,
+        "parent_create_time": 200.0,
+    }
+
+    assert _cached_process_identity_mismatch(cached, snapshot, expected_process="majestic-webengine.exe", expected_pid=53576) == "parent_restarted"
+
+
+def test_cached_process_identity_requires_complete_window_identity() -> None:
+    cached = {
+        "process": "majestic-webengine.exe",
+        "pid": 53576,
+        "parent_pid": 65048,
+        "parent_create_time": 100.0,
+        "role": "renderer",
+        "create_time": 120.0,
+    }
+    snapshot = {
+        **cached,
+        "exe": "C:\\Majestic\\cef\\majestic-webengine.exe",
+        "command_line": "majestic-webengine.exe --type=renderer --renderer-client-id=8",
+    }
+
+    assert _cached_process_identity_mismatch(cached, snapshot, require_command_line=True) == "identity_incomplete"
+
+
+def test_load_cached_chat_windows_rejects_old_identity_format(tmp_path, monkeypatch) -> None:
+    cache_path = tmp_path / "chat_windows_latest.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "kind": "sonar_chat_window_cache",
+                "updated_at": 10.0,
+                "process": "majestic-webengine.exe",
+                "pid": 53576,
+                "create_time": 120.0,
+                "windows": [{"start": "0x1000", "end": "0x1200"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeProcess:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+    monkeypatch.setattr(dch.psutil, "Process", FakeProcess)
+    monkeypatch.setattr(
+        dch,
+        "_process_snapshot",
+        lambda proc: {
+            "process": "majestic-webengine.exe",
+            "pid": proc.pid,
+            "parent_pid": 65048,
+            "parent_process": "GTA5.exe",
+            "parent_create_time": 100.0,
+            "role": "renderer",
+            "create_time": 120.0,
+            "exe": "C:\\Majestic\\cef\\majestic-webengine.exe",
+            "command_line": "majestic-webengine.exe --type=renderer --renderer-client-id=8",
+        },
+    )
+    args = Namespace(no_window_cache=False, window_cache_max_age=0.0)
+
+    windows, info = _load_cached_chat_windows(args, tmp_path, "majestic-webengine.exe", 53576, [(0x1000, 0x2000)])
+
+    assert windows == []
+    assert info == {"cache": "identity_incomplete"}
+
+
+def test_load_cached_chat_process_rejects_restarted_process(tmp_path, monkeypatch) -> None:
+    cache_path = tmp_path / "chat_process_latest.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "kind": "sonar_chat_process_cache",
+                "updated_at": 10.0,
+                "selected": {
+                    "process": "majestic-webengine.exe",
+                    "pid": 53576,
+                    "parent_pid": 65048,
+                    "parent_process": "GTA5.exe",
+                    "parent_create_time": 100.0,
+                    "role": "renderer",
+                    "create_time": 120.0,
+                    "exe": "C:\\Majestic\\cef\\majestic-webengine.exe",
+                    "command_line": "majestic-webengine.exe --type=renderer --renderer-client-id=8",
+                },
+                "candidates": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeProcess:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+    monkeypatch.setattr(dch.psutil, "Process", FakeProcess)
+    monkeypatch.setattr(
+        dch,
+        "_process_snapshot",
+        lambda proc: {
+            "process": "majestic-webengine.exe",
+            "pid": proc.pid,
+            "parent_pid": 65048,
+            "parent_process": "GTA5.exe",
+            "parent_create_time": 100.0,
+            "role": "renderer",
+            "create_time": 300.0,
+            "exe": "C:\\Majestic\\cef\\majestic-webengine.exe",
+            "command_line": "majestic-webengine.exe --type=renderer --renderer-client-id=8",
+        },
+    )
+    args = Namespace(no_process_cache=False, cef_only=True, auto_max_total_mb=1024)
+
+    assert _load_cached_chat_process(args, tmp_path) is None

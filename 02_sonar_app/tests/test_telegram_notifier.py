@@ -16,6 +16,14 @@ class Response:
     status_code = 200
 
 
+class MessageResponse(Response):
+    def __init__(self, message_id: int) -> None:
+        self.message_id = message_id
+
+    def json(self):
+        return {"result": {"message_id": self.message_id}}
+
+
 def test_notification_menu_edits_callback_message_and_uses_two_columns(monkeypatch):
     manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
     calls = []
@@ -88,10 +96,12 @@ def test_stream_menu_shows_active_link_and_area_switch(monkeypatch):
 
     payload = calls[0][1]["json"]
     keyboard = payload["reply_markup"]["inline_keyboard"]
-    assert "Меню стрима игры" in payload["text"]
+    assert "Стрим игры" in payload["text"]
     assert "Область: Чат" in payload["text"]
-    assert any(button["callback_data"] == "stream:open" for row in keyboard for button in row)
-    assert any(button["callback_data"] == "stream:switch_area" for row in keyboard for button in row)
+    assert "Режим: 30fps" in payload["text"]
+    assert "Статус: 🟢 online" in payload["text"]
+    assert any(button.get("url") == "https://example.test/live/" for row in keyboard for button in row)
+    assert any(button.get("callback_data") == "stream:switch_area" for row in keyboard for button in row)
 
 
 def test_stream_menu_hides_open_button_until_public_link(monkeypatch):
@@ -120,7 +130,7 @@ def test_stream_menu_hides_open_button_until_public_link(monkeypatch):
     manager._send_stream_menu(1, message_id=42)
 
     keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
-    assert not any(button["callback_data"] == "stream:open" for row in keyboard for button in row)
+    assert not any(button.get("url") for row in keyboard for button in row)
 
 
 def test_stream_menu_allows_cancelling_starting_stream(monkeypatch):
@@ -149,8 +159,40 @@ def test_stream_menu_allows_cancelling_starting_stream(monkeypatch):
 
     payload = calls[0][1]["json"]
     keyboard = payload["reply_markup"]["inline_keyboard"]
-    assert "Статус starting" in payload["text"]
+    assert "Статус: 🟡 starting" in payload["text"]
     assert any(button["text"] == "⏹ Остановить запуск" for row in keyboard for button in row)
+
+
+def test_stream_menu_switches_snapshot_mode_from_telegram(monkeypatch):
+    snapshot = SimpleNamespace(
+        active=True,
+        status="online",
+        quality="720p",
+        area="full",
+        error="",
+        seconds_until_auto_stop=120,
+        snapshot_mode_enabled=False,
+        stream_url="https://example.test/live/",
+    )
+    switched: list[bool] = []
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_status_callback=lambda: snapshot,
+        stream_set_snapshot_mode_callback=lambda enabled: switched.append(enabled) or True,
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._switch_stream_mode(1, message_id=42)
+
+    assert switched == [True]
+    keyboard = calls[-1][1]["json"]["reply_markup"]["inline_keyboard"]
+    assert any(button["callback_data"] == "stream:switch_mode" for row in keyboard for button in row)
 
 
 def test_stream_start_refreshes_menu_until_online(monkeypatch):
@@ -159,6 +201,7 @@ def test_stream_start_refreshes_menu_until_online(monkeypatch):
     monkeypatch.setattr(notifier_module, "STREAM_MENU_PUBLIC_URL_GRACE_SECONDS", 0.01)
     monkeypatch.setattr(notifier_module, "STREAM_LINK_DELIVERY_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(notifier_module, "STREAM_LINK_DELIVERY_MAX_SECONDS", 0.5)
+    monkeypatch.setattr(NotificationManager, "_url_is_reachable", staticmethod(lambda url: True))
     state = {
         "snapshot": SimpleNamespace(
             active=False,
@@ -213,15 +256,33 @@ def test_stream_start_refreshes_menu_until_online(monkeypatch):
 
     deadline = time.monotonic() + 1.0
     while time.monotonic() < deadline:
-        if any("Статус online" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText"):
+        if any("Статус: 🟢 online" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText"):
             break
         time.sleep(0.01)
 
-    assert any("Статус starting" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText")
-    assert any("Статус online" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText")
+    assert any("Статус: 🟡 starting" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText")
+    assert any("Статус: 🟢 online" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText")
 
 
-def test_send_stream_link_waits_for_public_url_instead_of_sending_local(monkeypatch):
+def test_stream_stop_deletes_sent_stream_links(monkeypatch):
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        if method == "sendMessage":
+            return MessageResponse(77)
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.send_message("🖥 Трансляция:\nhttps://example.test/live/", chat_id=1)
+    manager._delete_stream_link_messages(1)
+
+    assert any(call[0] == "deleteMessage" and call[1]["json"]["message_id"] == 77 for call in calls)
+
+
+def test_send_stream_link_shows_menu_without_sending_local_link(monkeypatch):
     snapshot = SimpleNamespace(
         active=True,
         status="online",
@@ -237,33 +298,60 @@ def test_send_stream_link_waits_for_public_url_instead_of_sending_local(monkeypa
         stream_status_callback=lambda: snapshot,
     )
     calls = []
-    scheduled = []
 
     def fake_post(self, method, **kwargs):
         calls.append((method, kwargs))
         return Response()
 
-    def fake_schedule(self, chat_id):
-        scheduled.append(chat_id)
-
     monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
-    monkeypatch.setattr(NotificationManager, "_schedule_stream_link_delivery", fake_schedule)
 
     manager._send_stream_link(1)
 
-    assert scheduled == [1]
     assert calls[0][0] == "sendMessage"
     text = calls[0][1]["json"]["text"]
-    assert "готовится" in text
+    assert "Формируется" in text
     assert "127.0.0.1" not in text
 
 
-def test_stream_start_sends_public_link_automatically(monkeypatch):
+def test_stream_menu_marks_unreachable_cloudflare_link_as_forming(monkeypatch):
+    snapshot = SimpleNamespace(
+        active=True,
+        status="online",
+        quality="720p",
+        area="full",
+        error="",
+        seconds_until_auto_stop=120,
+        public_url="https://example.trycloudflare.com",
+        stream_url="https://example.trycloudflare.com/live/",
+    )
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_status_callback=lambda: snapshot,
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+    monkeypatch.setattr(NotificationManager, "_url_is_reachable", staticmethod(lambda url: False))
+
+    manager._send_stream_menu(1, message_id=42)
+
+    payload = calls[0][1]["json"]
+    assert "Ссылка: Формируется..." in payload["text"]
+    keyboard = payload["reply_markup"]["inline_keyboard"]
+    assert not any(button.get("url") for row in keyboard for button in row)
+
+
+def test_stream_start_refreshes_menu_with_public_link(monkeypatch):
     monkeypatch.setattr(notifier_module, "STREAM_MENU_REFRESH_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(notifier_module, "STREAM_MENU_REFRESH_MAX_SECONDS", 0.5)
     monkeypatch.setattr(notifier_module, "STREAM_MENU_PUBLIC_URL_GRACE_SECONDS", 0.01)
     monkeypatch.setattr(notifier_module, "STREAM_LINK_DELIVERY_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(notifier_module, "STREAM_LINK_DELIVERY_MAX_SECONDS", 0.5)
+    monkeypatch.setattr(NotificationManager, "_url_is_reachable", staticmethod(lambda url: True))
     state = {
         "snapshot": SimpleNamespace(
             active=False,
@@ -321,13 +409,15 @@ def test_stream_start_sends_public_link_automatically(monkeypatch):
 
     deadline = time.monotonic() + 1.0
     while time.monotonic() < deadline:
-        if any("https://example.trycloudflare.com/live/" in call[1]["json"]["text"] for call in calls if call[0] == "sendMessage"):
+        if any("https://example.trycloudflare.com/live/" in call[1]["json"]["text"] for call in calls if call[0] == "editMessageText"):
             break
         time.sleep(0.01)
 
+    edited_messages = [call[1]["json"]["text"] for call in calls if call[0] == "editMessageText"]
     sent_messages = [call[1]["json"]["text"] for call in calls if call[0] == "sendMessage"]
-    assert any("https://example.trycloudflare.com/live/" in text for text in sent_messages)
-    assert not any("127.0.0.1" in text for text in sent_messages)
+    assert any("https://example.trycloudflare.com/live/" in text for text in edited_messages)
+    assert not any("https://example.trycloudflare.com/live/" in text for text in sent_messages)
+    assert not any("127.0.0.1" in text for text in edited_messages)
 
 
 def test_stats_menu_message_uses_income_range():

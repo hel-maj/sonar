@@ -118,6 +118,7 @@ class FishingBot:
     stream_stop_callback: Callable[[], None] | None = None
     stream_set_quality_callback: Callable[[str], bool] | None = None
     stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None
+    stream_set_snapshot_mode_callback: Callable[[bool], bool] | None = None
     session_stats: FishingSessionStats = field(
         default_factory=lambda: FishingSessionStats(default_prices=parse_fish_prices_from_markdown())
     )
@@ -199,6 +200,7 @@ class FishingBot:
             stream_stop_callback=self.stream_stop_callback,
             stream_set_quality_callback=self.stream_set_quality_callback,
             stream_set_chat_zoom_callback=self.stream_set_chat_zoom_callback,
+            stream_set_snapshot_mode_callback=self.stream_set_snapshot_mode_callback,
         )
 
     def configure_streaming_callbacks(
@@ -209,12 +211,14 @@ class FishingBot:
         stop_callback: Callable[[], None] | None = None,
         set_quality_callback: Callable[[str], bool] | None = None,
         set_chat_zoom_callback: Callable[[bool], bool] | None = None,
+        set_snapshot_mode_callback: Callable[[bool], bool] | None = None,
     ) -> None:
         self.stream_status_callback = status_callback
         self.stream_start_callback = start_callback
         self.stream_stop_callback = stop_callback
         self.stream_set_quality_callback = set_quality_callback
         self.stream_set_chat_zoom_callback = set_chat_zoom_callback
+        self.stream_set_snapshot_mode_callback = set_snapshot_mode_callback
         self._configure_notifications()
 
     def _save_telegram_settings(self, telegram_settings) -> None:

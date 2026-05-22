@@ -24,7 +24,7 @@ def test_chat_zoom_capture_uses_left_top_two_thirds(tmp_path, monkeypatch):
 
     assert command[command.index("-offset_x") + 1] == "0"
     assert command[command.index("-offset_y") + 1] == "0"
-    assert command[command.index("-video_size") + 1] == "960x720"
+    assert command[command.index("-video_size") + 1] == "540x720"
 
 
 def test_chat_zoom_resets_for_every_new_stream(tmp_path):
@@ -51,6 +51,33 @@ def test_chat_mode_can_be_disabled_through_exit_callback(tmp_path):
     assert service.enable_chat_mode().chat_mode_enabled is True
     assert service.disable_chat_mode().chat_mode_enabled is False
     assert calls == ["open", "close"]
+
+
+def test_chat_memory_can_be_enabled_without_chat_mode(tmp_path, monkeypatch):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    monkeypatch.setattr(service, "_chat_memory_scan_worker", lambda generation: None)
+
+    snapshot = service.set_chat_memory_enabled(True)
+
+    assert snapshot.chat_memory_enabled is True
+    assert snapshot.chat_mode_enabled is False
+
+
+def test_chat_mode_restores_previous_chat_memory_setting_on_exit(tmp_path, monkeypatch):
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_mode_callback=lambda: ChatActionResult(True, "open"),
+        chat_exit_callback=lambda: ChatActionResult(True, "close"),
+    )
+    monkeypatch.setattr(service, "_refresh_chat_memory_if_needed", lambda *, force=False: None)
+
+    assert service.enable_chat_mode().chat_memory_enabled is True
+    assert service.disable_chat_mode().chat_memory_enabled is False
+
+    service.set_chat_memory_enabled(True)
+    assert service.enable_chat_mode().chat_memory_enabled is True
+    assert service.disable_chat_mode().chat_memory_enabled is True
 
 
 def test_chat_mode_stays_enabled_when_exit_callback_fails(tmp_path):
@@ -135,14 +162,77 @@ def test_stream_page_uses_react_ui_kit_and_video_player():
     assert "liveRangeSafeTimeDelta" in STREAM_PAGE_HTML
     assert "sourceKeyRef" in STREAM_PAGE_HTML
     assert "/hls/live.m3u8?stream=" in STREAM_PAGE_HTML
+    assert "player.src([])" in STREAM_PAGE_HTML
     assert "player.load()" in STREAM_PAGE_HTML
     assert "/api/stream/chat-send" in STREAM_PAGE_HTML
     assert "/api/stream/chat-select" in STREAM_PAGE_HTML
-    assert "Вкладка чата" in STREAM_PAGE_HTML
+    assert "/api/stream/chat-memory" in STREAM_PAGE_HTML
+    assert "/api/stream/chat" in STREAM_PAGE_HTML
+    assert "outboxConfirmationCandidates" in STREAM_PAGE_HTML
+    assert "recordConfirmsOutbox(record, item)" in STREAM_PAGE_HTML
+    assert "confirmedOutboxMatches" in STREAM_PAGE_HTML
+    assert "chat_confirmed_outbox" in STREAM_PAGE_HTML
+    assert "Ждёт подтверждения" in STREAM_PAGE_HTML
+    assert "Ждёт дамп" in STREAM_PAGE_HTML
+    assert "Не подтверждено" in STREAM_PAGE_HTML
+    assert "повторная отправка" not in STREAM_PAGE_HTML
+    assert "retryItems" not in STREAM_PAGE_HTML
+    assert "4500" not in STREAM_PAGE_HTML
+    assert "/api/stream/snapshot-batch" not in STREAM_PAGE_HTML
+    assert "snapshotStream" not in STREAM_PAGE_HTML
+    assert "fps10" in STREAM_PAGE_HTML
+    assert "chatTabs" in STREAM_PAGE_HTML
+    assert "commandHelpButton" in STREAM_PAGE_HTML
+    assert "streamHidden" in STREAM_PAGE_HTML
+    assert "window.close()" in STREAM_PAGE_HTML
+    assert "Режим 10fps" in STREAM_PAGE_HTML
     assert "Выйти из режима чата" in STREAM_PAGE_HTML
 
 
-def test_ffmpeg_hls_window_keeps_enough_segments(tmp_path):
+def test_chat_memory_refresh_does_not_show_loading_when_history_exists(tmp_path, monkeypatch):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._chat_mode_enabled = True
+    service._chat_memory = {"records": [{"text": "old"}], "tabs": [{"id": "all", "name": "Все"}]}
+    service._chat_memory_at = -1_000_000.0
+    monkeypatch.setattr(service, "_chat_memory_scan_worker", lambda generation: None)
+
+    service._refresh_chat_memory_if_needed(force=True)
+
+    with service._lock:
+        assert service._chat_memory_loading is False
+
+
+def test_chat_confirmation_queries_cover_me_and_short_ic() -> None:
+    me_queries = StreamingService._chat_confirmation_queries("/m решил подрочить", "Marvin Angels")
+    short_ic_queries = StreamingService._chat_confirmation_queries("12345", "Marvin Angels")
+
+    assert "Marvin Angels решил подрочить" in me_queries
+    assert "решил подрочить" in me_queries
+    assert "Marvin Angels говорит: 12345" in short_ic_queries
+    assert "говорит: 12345" in short_ic_queries
+    assert "12345" not in short_ic_queries
+
+
+def test_send_chat_message_waits_for_memory_confirmation(tmp_path, monkeypatch):
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_send_callback=lambda tab_id, message: ChatActionResult(True, "Сообщение отправлено"),
+    )
+    confirm_calls: list[bool] = []
+    monkeypatch.setattr(service, "_refresh_chat_memory_if_needed", lambda *, force=False: None)
+    monkeypatch.setattr(service, "_refresh_chat_confirmations_if_needed", lambda *, force=False: confirm_calls.append(force))
+
+    service.send_chat_message(None, "12345")
+
+    assert confirm_calls == [True]
+    with service._lock:
+        assert len(service._chat_recent_sends) == 1
+        assert service._chat_recent_sends[0]["text"] == "12345"
+        assert service._chat_recent_sends[0]["confirmed"] is False
+
+
+def test_ffmpeg_hls_window_is_tuned_for_lower_latency(tmp_path):
     service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
     service._temp_dir = tmp_path / "session"
     service._hls_dir = service._temp_dir / "hls"
@@ -150,11 +240,27 @@ def test_ffmpeg_hls_window_keeps_enough_segments(tmp_path):
 
     command = service._build_ffmpeg_command(Path("ffmpeg.exe"))
 
-    assert command[command.index("-hls_time") + 1] == "2"
-    assert command[command.index("-hls_list_size") + 1] == "12"
-    assert command[command.index("-hls_delete_threshold") + 1] == "12"
+    assert command[command.index("-framerate") + 1] == "30"
+    assert command[command.index("-g") + 1] == "30"
+    assert command[command.index("-hls_time") + 1] == "1"
+    assert command[command.index("-hls_list_size") + 1] == "5"
+    assert command[command.index("-hls_delete_threshold") + 1] == "5"
     assert "append_list" not in command[command.index("-hls_flags") + 1]
     assert "independent_segments" in command[command.index("-hls_flags") + 1]
+
+
+def test_low_fps_mode_uses_ffmpeg_hls_at_ten_fps(tmp_path):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._snapshot_mode_enabled = True
+    service._temp_dir = tmp_path / "session"
+    service._hls_dir = service._temp_dir / "hls"
+    service._hls_dir.mkdir(parents=True)
+
+    command = service._build_ffmpeg_command(Path("ffmpeg.exe"))
+
+    assert command[command.index("-framerate") + 1] == "10"
+    assert command[command.index("-g") + 1] == "10"
+    assert "gdigrab" in command
 
 
 def test_hls_playlist_ready_requires_segment_file(tmp_path):

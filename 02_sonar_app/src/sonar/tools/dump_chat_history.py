@@ -22,6 +22,8 @@ from sonar.tools.find_chat_memory import _collect_search_regions, _open_tracker,
 
 DEFAULT_OUT_DIR = PROJECT_DIR / "logs" / "chat_memory"
 PROCESS_CACHE_NAME = "chat_process_latest.json"
+WINDOW_CACHE_NAME = "chat_windows_latest.json"
+STATE_WINDOW_CACHE_NAME = "chat_state_windows_latest.json"
 AUTO_PROCESS_TOKENS = {"auto", "auto-chat", "chat", "cef-chat"}
 CHAT_MARKERS = (
     '"timestamp":',
@@ -40,13 +42,30 @@ CHAT_MARKERS = (
     "Weazel News",
     "\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440:",
     "\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u043d\u0430 Majestic Role Play",
+    "\u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0432\u0440\u0435\u043c\u044f",
+    "\u0421\u0430\u043c\u043e\u043b\u0435\u0442 \u0441\u0431\u0440\u043e\u0441\u0438\u043b \u0433\u0440\u0443\u0437",
+    "\u0410\u0443\u043a\u0446\u0438\u043e\u043d",
+    "\u0423\u0432\u0430\u0436\u0430\u0435\u043c\u044b\u0435 \u0438\u0433\u0440\u043e\u043a\u0438",
     "\u041f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f\u043c\u0438",
     "\u0412\u0441\u0435\u0433\u043e \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432",
     "\u043b\u044e\u0431\u0443\u0435\u0442\u0441\u044f",
 )
+CHAT_HISTORY_MARKERS = (
+    "%D0%B3%D0%BE%D0%B2%D0%BE%D1%80%D0%B8%D1%82",
+    "[default]",
+    "[me]",
+    "[global]",
+    "[Weazel News]",
+    "\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u043d\u0430 Majestic Role Play",
+    "\u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0432\u0440\u0435\u043c\u044f",
+    "\u0421\u0430\u043c\u043e\u043b\u0435\u0442 \u0441\u0431\u0440\u043e\u0441\u0438\u043b \u0433\u0440\u0443\u0437",
+    "\u0410\u0443\u043a\u0446\u0438\u043e\u043d",
+    "\u0423\u0432\u0430\u0436\u0430\u0435\u043c\u044b\u0435 \u0438\u0433\u0440\u043e\u043a\u0438",
+)
 CHAT_TYPES = ("default", "news", "system", "me", "admin", "family", "fraction", "gov", "report")
 CHAT_PREFIX_MARKERS = (
     "[default]",
+    "[global]",
     "[gov]",
     "[global]",
     "[me]",
@@ -104,7 +123,10 @@ CHAT_STATE_MARKERS = (
 CHAT_CONTEXT_MARKERS = tuple(f'"type":"{item}' for item in CHAT_TYPES) + (
     "chatInput",
     "\u0433\u043e\u0432\u043e\u0440\u0438\u0442:",
+    "%D0%B3%D0%BE%D0%B2%D0%BE%D1%80%D0%B8%D1%82",
+    "%20%D0%B3%D0%BE%D0%B2%D0%BE%D1%80%D0%B8%D1%82",
     "[default]",
+    "[global]",
     "[gov]",
     "[me]",
     "[admin]",
@@ -115,6 +137,10 @@ CHAT_CONTEXT_MARKERS = tuple(f'"type":"{item}' for item in CHAT_TYPES) + (
     "Weazel News",
     "\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440:",
     "\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u043d\u0430 Majestic Role Play",
+    "\u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0432\u0440\u0435\u043c\u044f",
+    "\u0421\u0430\u043c\u043e\u043b\u0435\u0442 \u0441\u0431\u0440\u043e\u0441\u0438\u043b \u0433\u0440\u0443\u0437",
+    "\u0410\u0443\u043a\u0446\u0438\u043e\u043d",
+    "\u0423\u0432\u0430\u0436\u0430\u0435\u043c\u044b\u0435 \u0438\u0433\u0440\u043e\u043a\u0438",
     "\u041f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f\u043c\u0438",
     "\u0412\u0441\u0435\u0433\u043e \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432",
     "\u043b\u044e\u0431\u0443\u0435\u0442\u0441\u044f",
@@ -159,6 +185,8 @@ PLAYER_ACTION_KEYWORDS = (
     "\u043a\u0443\u043f\u0438\u043b",
     "\u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043b",
     "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u043b",
+    "\u0443\u0441\u0442\u0430\u043b",
+    "\u0431\u0440\u043e\u0441\u0438\u043b",
 )
 RECORD_BOUNDARY_RE = re.compile(r'\},\{"type"|\{"type"')
 TEXT_END_MARKERS = (
@@ -217,6 +245,22 @@ BAD_RECORD_MARKERS = (
     '+(" говорит',
     '+" говорит',
 )
+CHAT_UI_TAIL_MARKERS = (
+    " ru:",
+    " Кейс ",
+    " Оранжевые ",
+    " Опьянение",
+    " к здоровью",
+    " к сытости",
+    " к жажде",
+    " Стальной инструмент",
+    " Конская сила",
+    " Бесплатное вращение",
+    " Уже доступно",
+    " Открыть багажник",
+    " Вы успешно получили предмет",
+    " return ",
+)
 NOISE_TOKEN_RE = re.compile(r"^[%+*/_=|\\:;.,!?@#\"'()[\]{}-]*[A-Za-z0-9]{0,4}[%+*/_=|\\:;.,!?@#\"'()[\]{}-]*$")
 
 
@@ -235,6 +279,7 @@ class ChatRecord:
     pid: int | None = None
     messageId: str | None = None
     stableId: str | None = None
+    occurrenceId: str | None = None
     playerId: str | None = None
     staticId: str | None = None
     playerName: str | None = None
@@ -267,6 +312,14 @@ class RenderedTextNode:
 def _marker_bytes() -> list[bytes]:
     out: list[bytes] = []
     for marker in CHAT_MARKERS:
+        out.append(marker.encode("utf-8"))
+        out.append(marker.encode("utf-16-le"))
+    return out
+
+
+def _history_marker_bytes() -> list[bytes]:
+    out: list[bytes] = []
+    for marker in CHAT_HISTORY_MARKERS:
         out.append(marker.encode("utf-8"))
         out.append(marker.encode("utf-16-le"))
     return out
@@ -462,11 +515,12 @@ def _stable_message_id(
     static_id: str | None,
     color: str | None,
 ) -> str:
+    identity_text = re.sub(r"\s+", " ", text).strip().rstrip(" .,!?:;")
     payload = "\x1f".join(
         [
             record_type,
             str(timestamp or ""),
-            text,
+            identity_text,
             phone_number or "",
             player_name or "",
             player_id or "",
@@ -474,6 +528,11 @@ def _stable_message_id(
             color or "",
         ]
     )
+    return hashlib.sha1(payload.encode("utf-8", errors="ignore")).hexdigest()[:20]
+
+
+def _occurrence_message_id(stable_id: str, process: str | None, pid: int | None, pos: int, source: str | None = None) -> str:
+    payload = "\x1f".join([stable_id, process or "", str(pid or ""), f"{pos:X}", source or ""])
     return hashlib.sha1(payload.encode("utf-8", errors="ignore")).hexdigest()[:20]
 
 
@@ -497,16 +556,41 @@ def _looks_like_player_action_tail(value: str) -> bool:
     tail = value.strip()
     if len(tail) < 3 or _russian_score(tail) < 3:
         return False
-    if any(marker in tail for marker in ("{", "}", ":", "_", "Botmessage", "Answers")):
+    lowered = tail.lower()
+    if any(marker in tail for marker in ("{", "}", "_", "Botmessage", "Answers")):
+        return False
+    if ":" in tail and "\u0432\u044b\u043f\u0430\u043b\u043e:" not in lowered:
         return False
     first = tail[0]
     if not (("а" <= first <= "я") or first == "ё"):
         return False
-    lowered = tail.lower()
     first_word = lowered.split(maxsplit=1)[0].strip(".,!?:;")
     if first_word in {"в", "во", "у", "на", "с", "со", "к", "ко", "из", "не"}:
         return False
     return any(keyword in lowered for keyword in PLAYER_ACTION_KEYWORDS)
+
+
+def _chat_body_without_prefixes(text: str) -> str:
+    return re.sub(r"^(?:\[[^\]]+\]\s*)+", "", text).strip()
+
+
+def _visible_action_owner_from_body(body: str) -> dict[str, Any]:
+    owner: dict[str, Any] = {}
+    player_match = PLAYER_NAME_RE.match(body)
+    if player_match:
+        speaker = player_match.group("name")
+        tail = body[player_match.end() :].strip()
+        if _looks_like_player_name(speaker) and _looks_like_player_action_tail(tail):
+            owner["name"] = speaker
+            owner["kind"] = "player"
+            return owner
+    static_match = re.match(r"#?(?P<static_id>\d{1,10})(?:\s+|$)", body)
+    if static_match:
+        tail = body[static_match.end() :].strip()
+        if _looks_like_player_action_tail(tail):
+            owner["staticId"] = static_match.group("static_id")
+            owner["kind"] = "player"
+    return owner
 
 
 def _owner_from_fields(fields: dict[str, Any], chat_text: str) -> dict[str, Any]:
@@ -542,7 +626,7 @@ def _owner_from_fields(fields: dict[str, Any], chat_text: str) -> dict[str, Any]
 
 def _visible_message_owner(text: str) -> dict[str, Any]:
     owner: dict[str, Any] = {}
-    body = re.sub(r"^(?:\[[^\]]+\]\s*)+", "", text).strip()
+    body = _chat_body_without_prefixes(text)
     if "\u0433\u043e\u0432\u043e\u0440\u0438\u0442:" in text:
         speaker = text.split("\u0433\u043e\u0432\u043e\u0440\u0438\u0442:", 1)[0].replace("[default]", "").strip()
         speaker = re.sub(r"^(?:\[[^\]]+\]\s*)+", "", speaker).strip()
@@ -571,12 +655,8 @@ def _visible_message_owner(text: str) -> dict[str, Any]:
             owner["name"] = speaker
             owner["kind"] = "player"
             owner["organization"] = "Weazel News"
-    elif match := PLAYER_NAME_RE.match(body):
-        speaker = match.group("name")
-        tail = body[match.end() :].strip()
-        if _looks_like_player_name(speaker) and _looks_like_player_action_tail(tail):
-            owner["name"] = speaker
-            owner["kind"] = "player"
+    elif action_owner := _visible_action_owner_from_body(body):
+        owner.update(action_owner)
     elif text.startswith("[default]"):
         tail = text.removeprefix("[default]").strip()
         words = tail.split()
@@ -675,16 +755,89 @@ def _process_snapshot(proc: psutil.Process) -> dict[str, Any] | None:
     try:
         name = proc.name()
         cmdline = proc.cmdline()
+        try:
+            exe = proc.exe()
+        except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+            exe = None
+        try:
+            cpu_times = proc.cpu_times()
+            cpu_time = float(cpu_times.user + cpu_times.system)
+        except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+            cpu_time = 0.0
+        parent_pid = proc.ppid()
+        parent_process = None
+        parent_create_time = None
+        try:
+            parent = proc.parent()
+            if parent is not None:
+                parent_process = parent.name()
+                parent_create_time = parent.create_time()
+        except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+            pass
         return {
             "process": name,
             "pid": proc.pid,
-            "parent_pid": proc.ppid(),
+            "parent_pid": parent_pid,
+            "parent_process": parent_process,
+            "parent_create_time": parent_create_time,
             "role": _process_role(cmdline),
             "create_time": proc.create_time(),
+            "cpu_time": cpu_time,
+            "exe": exe,
             "command_line": " ".join(cmdline),
         }
     except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
         return None
+
+
+def _close_float(value: Any, expected: Any, *, tolerance: float = 1.0) -> bool:
+    if not isinstance(value, (int, float)) or not isinstance(expected, (int, float)):
+        return False
+    return abs(float(value) - float(expected)) <= tolerance
+
+
+def _cached_process_identity_mismatch(
+    cached: dict[str, Any],
+    snapshot: dict[str, Any],
+    *,
+    expected_process: str | None = None,
+    expected_pid: int | None = None,
+    require_command_line: bool = False,
+) -> str | None:
+    if expected_pid is not None and cached.get("pid") != expected_pid:
+        return "pid_mismatch"
+    if expected_process and not expected_process.startswith("pid:"):
+        cached_process = str(cached.get("process") or "")
+        if cached_process and cached_process.lower() != expected_process.lower():
+            return "process_mismatch"
+    cached_process = str(cached.get("process") or "")
+    snapshot_process = str(snapshot.get("process") or "")
+    if cached_process and snapshot_process and cached_process.lower() != snapshot_process.lower():
+        return "process_mismatch"
+    if not _close_float(cached.get("create_time"), snapshot.get("create_time")):
+        return "process_restarted"
+    cached_command_line = cached.get("command_line")
+    snapshot_command_line = snapshot.get("command_line")
+    if require_command_line and not isinstance(cached_command_line, str):
+        return "identity_incomplete"
+    if cached.get("parent_pid") != snapshot.get("parent_pid"):
+        return "parent_mismatch"
+    cached_parent_create_time = cached.get("parent_create_time")
+    snapshot_parent_create_time = snapshot.get("parent_create_time")
+    if cached_parent_create_time is not None or snapshot_parent_create_time is not None:
+        if not _close_float(cached_parent_create_time, snapshot_parent_create_time):
+            return "parent_restarted"
+    cached_role = cached.get("role")
+    snapshot_role = snapshot.get("role")
+    if cached_role is not None and snapshot_role is not None and cached_role != snapshot_role:
+        return "role_mismatch"
+    cached_exe = cached.get("exe")
+    snapshot_exe = snapshot.get("exe")
+    if cached_exe and snapshot_exe and str(cached_exe).lower() != str(snapshot_exe).lower():
+        return "exe_mismatch"
+    if cached_command_line and snapshot_command_line and cached_command_line != snapshot_command_line:
+        return "command_line_mismatch"
+    return None
 
 
 def _auto_process_candidates(*, include_gta: bool = False) -> list[dict[str, Any]]:
@@ -822,6 +975,33 @@ def _score_chat_process(
         tracker.stop()
 
 
+def _is_gta_process(process_name: str, pid: int | None) -> bool:
+    if str(process_name).lower().startswith("gta5"):
+        return True
+    if pid is None:
+        return False
+    try:
+        snapshot = _process_snapshot(psutil.Process(pid))
+    except psutil.Error:
+        return False
+    return bool(snapshot and str(snapshot.get("process") or "").lower().startswith("gta5"))
+
+
+def _is_cef_state_only_scan(args: argparse.Namespace, process_name: str, pid: int | None) -> bool:
+    if not _is_auto_process(str(getattr(args, "process", ""))) or getattr(args, "cef_only", False):
+        return False
+    name = str(process_name).lower()
+    if name.startswith("majestic-webengine"):
+        return True
+    if pid is None:
+        return False
+    try:
+        snapshot = _process_snapshot(psutil.Process(pid))
+    except psutil.Error:
+        return False
+    return bool(snapshot and str(snapshot.get("process") or "").lower().startswith("majestic-webengine"))
+
+
 def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, int, int, int]:
     process = str(candidate.get("process") or "").lower()
     return (
@@ -837,11 +1017,297 @@ def _select_chat_candidates(candidates: list[dict[str, Any]], limit: int) -> lis
     return [item for item in ranked if int(item.get("marker_hit_count") or 0) > 0][:limit]
 
 
+def _select_auto_chat_candidates(
+    candidates: list[dict[str, Any]],
+    limit: int,
+    *,
+    include_gta: bool,
+) -> list[dict[str, Any]]:
+    ranked = [item for item in sorted(candidates, key=_candidate_sort_key) if int(item.get("marker_hit_count") or 0) > 0]
+    if not include_gta or limit <= 1:
+        return ranked[:limit]
+    gta = [item for item in ranked if str(item.get("process") or "").lower().startswith("gta5")]
+    cef = [item for item in ranked if not str(item.get("process") or "").lower().startswith("gta5")]
+    selected: list[dict[str, Any]] = []
+    if cef:
+        selected.append(cef[0])
+    if gta:
+        selected.append(gta[0])
+    for item in ranked:
+        if len(selected) >= limit:
+            break
+        if item not in selected:
+            selected.append(item)
+    return selected[:limit]
+
+
+def _select_snapshot_chat_candidates(snapshots: list[dict[str, Any]], limit: int, *, include_gta: bool) -> list[dict[str, Any]]:
+    if not include_gta:
+        return []
+    cef = [
+        item
+        for item in snapshots
+        if str(item.get("process") or "").lower().startswith("majestic-webengine")
+        and item.get("role") == "renderer"
+    ]
+    gta = [item for item in snapshots if str(item.get("process") or "").lower().startswith("gta5")]
+    cef.sort(key=lambda item: (-float(item.get("cpu_time") or 0.0), int(item.get("pid") or 0)))
+    gta.sort(key=lambda item: (-float(item.get("create_time") or 0.0), int(item.get("pid") or 0)))
+    selected: list[dict[str, Any]] = []
+    if cef and limit > 1:
+        selected.append({**cef[0], "score": None, "marker_hit_count": None, "selection": "snapshot"})
+    if gta:
+        selected.append({**gta[0], "score": None, "marker_hit_count": None, "selection": "snapshot"})
+    return selected[:limit]
+
+
 def _process_cache_path(out_dir: Path) -> Path:
     return out_dir / PROCESS_CACHE_NAME
 
 
-def _load_cached_chat_process(args: argparse.Namespace, out_dir: Path) -> dict[str, Any] | None:
+def _window_cache_path(out_dir: Path) -> Path:
+    return out_dir / WINDOW_CACHE_NAME
+
+
+def _state_window_cache_path(out_dir: Path) -> Path:
+    return out_dir / STATE_WINDOW_CACHE_NAME
+
+
+def _clamp_window_to_regions(window: tuple[int, int], regions: list[tuple[int, int]]) -> tuple[int, int] | None:
+    start, end = window
+    for region_start, region_end in regions:
+        if end <= region_start or start >= region_end:
+            continue
+        clamped = (max(start, region_start), min(end, region_end))
+        if clamped[1] > clamped[0]:
+            return clamped
+    return None
+
+
+def _expand_windows(
+    windows: list[tuple[int, int]],
+    regions: list[tuple[int, int]],
+    pad_bytes: int,
+) -> list[tuple[int, int]]:
+    if pad_bytes <= 0:
+        return _merge_windows(windows)
+    expanded: list[tuple[int, int]] = []
+    for start, end in windows:
+        clamped = _clamp_window_to_regions((start - pad_bytes, end + pad_bytes), regions)
+        if clamped is not None:
+            expanded.append(clamped)
+    return _merge_windows(expanded)
+
+
+def _parse_cached_window(item: Any) -> tuple[int, int] | None:
+    if isinstance(item, dict):
+        start_value = item.get("start")
+        end_value = item.get("end")
+    elif isinstance(item, (list, tuple)) and len(item) >= 2:
+        start_value, end_value = item[0], item[1]
+    else:
+        return None
+    try:
+        start = int(str(start_value), 0) if isinstance(start_value, str) else int(start_value)
+        end = int(str(end_value), 0) if isinstance(end_value, str) else int(end_value)
+    except (TypeError, ValueError):
+        return None
+    return (start, end) if end > start else None
+
+
+def _load_cached_chat_windows(
+    args: argparse.Namespace,
+    out_dir: Path,
+    process_name: str,
+    pid: int,
+    regions: list[tuple[int, int]],
+) -> tuple[list[tuple[int, int]], dict[str, Any]]:
+    if getattr(args, "no_window_cache", False):
+        return [], {"cache": "disabled"}
+    path = _window_cache_path(out_dir)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], {"cache": "miss"}
+    if not isinstance(data, dict):
+        return [], {"cache": "invalid"}
+    if data.get("pid") != pid:
+        return [], {"cache": "pid_mismatch"}
+    max_age = float(getattr(args, "window_cache_max_age", 0.0) or 0.0)
+    updated_at = data.get("updated_at")
+    if max_age > 0 and isinstance(updated_at, (int, float)) and time.time() - float(updated_at) > max_age:
+        return [], {"cache": "stale"}
+    try:
+        snapshot = _process_snapshot(psutil.Process(pid))
+    except psutil.Error:
+        return [], {"cache": "process_gone"}
+    if snapshot is None:
+        return [], {"cache": "process_gone"}
+    mismatch = _cached_process_identity_mismatch(
+        data,
+        snapshot,
+        expected_process=process_name,
+        expected_pid=pid,
+        require_command_line=True,
+    )
+    if mismatch:
+        return [], {"cache": mismatch}
+    cached_process = str(data.get("process") or "")
+    snapshot_process = str(snapshot.get("process") or process_name)
+    windows: list[tuple[int, int]] = []
+    for raw_window in data.get("windows", []) if isinstance(data.get("windows"), list) else []:
+        window = _parse_cached_window(raw_window)
+        if window is None:
+            continue
+        clamped = _clamp_window_to_regions(window, regions)
+        if clamped is not None:
+            windows.append(clamped)
+    windows = _merge_windows(windows)
+    if not windows:
+        return [], {"cache": "empty"}
+    return windows, {
+        "cache": "hit",
+        "path": str(path),
+        "windows": len(windows),
+        "process": cached_process or snapshot_process,
+        "pid": pid,
+        "updated_at": updated_at,
+    }
+
+
+def _write_chat_window_cache(
+    out_dir: Path,
+    process_name: str,
+    pid: int,
+    windows: list[tuple[int, int]],
+    *,
+    marker_hit_count: int,
+    record_count: int,
+) -> None:
+    if not windows:
+        return
+    try:
+        snapshot = _process_snapshot(psutil.Process(pid)) or {}
+    except psutil.Error:
+        snapshot = {}
+    process = str(snapshot.get("process") or process_name)
+    payload = {
+        "kind": "sonar_chat_window_cache",
+        "updated_at": time.time(),
+        "process": process,
+        "pid": pid,
+        "parent_pid": snapshot.get("parent_pid"),
+        "parent_process": snapshot.get("parent_process"),
+        "parent_create_time": snapshot.get("parent_create_time"),
+        "role": snapshot.get("role"),
+        "create_time": snapshot.get("create_time"),
+        "exe": snapshot.get("exe"),
+        "command_line": snapshot.get("command_line"),
+        "marker_hit_count": marker_hit_count,
+        "record_count": record_count,
+        "windows": [{"start": f"0x{start:X}", "end": f"0x{end:X}"} for start, end in _merge_windows(windows)],
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _window_cache_path(out_dir).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_cached_state_windows(
+    args: argparse.Namespace,
+    out_dir: Path,
+    process_name: str,
+    pid: int,
+    regions: list[tuple[int, int]],
+) -> tuple[list[tuple[int, int]], dict[str, Any]]:
+    if getattr(args, "no_state_window_cache", False):
+        return [], {"cache": "disabled"}
+    path = _state_window_cache_path(out_dir)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], {"cache": "miss"}
+    if not isinstance(data, dict):
+        return [], {"cache": "invalid"}
+    if data.get("pid") != pid:
+        return [], {"cache": "pid_mismatch"}
+    max_age = float(getattr(args, "state_window_cache_max_age", 0.0) or 0.0)
+    updated_at = data.get("updated_at")
+    if max_age > 0 and isinstance(updated_at, (int, float)) and time.time() - float(updated_at) > max_age:
+        return [], {"cache": "stale"}
+    try:
+        snapshot = _process_snapshot(psutil.Process(pid))
+    except psutil.Error:
+        return [], {"cache": "process_gone"}
+    if snapshot is None:
+        return [], {"cache": "process_gone"}
+    mismatch = _cached_process_identity_mismatch(
+        data,
+        snapshot,
+        expected_process=process_name,
+        expected_pid=pid,
+        require_command_line=True,
+    )
+    if mismatch:
+        return [], {"cache": mismatch}
+    cached_process = str(data.get("process") or "")
+    snapshot_process = str(snapshot.get("process") or process_name)
+    windows: list[tuple[int, int]] = []
+    for raw_window in data.get("windows", []) if isinstance(data.get("windows"), list) else []:
+        window = _parse_cached_window(raw_window)
+        if window is None:
+            continue
+        clamped = _clamp_window_to_regions(window, regions)
+        if clamped is not None:
+            windows.append(clamped)
+    windows = _merge_windows(windows)
+    if not windows:
+        return [], {"cache": "empty"}
+    return windows, {
+        "cache": "hit",
+        "path": str(path),
+        "windows": len(windows),
+        "process": cached_process or snapshot_process,
+        "pid": pid,
+        "updated_at": updated_at,
+    }
+
+
+def _write_state_window_cache(
+    out_dir: Path,
+    process_name: str,
+    pid: int,
+    windows: list[tuple[int, int]],
+    *,
+    marker_hit_count: int,
+    candidate_count: int,
+) -> None:
+    if not windows:
+        return
+    try:
+        snapshot = _process_snapshot(psutil.Process(pid)) or {}
+    except psutil.Error:
+        snapshot = {}
+    process = str(snapshot.get("process") or process_name)
+    payload = {
+        "kind": "sonar_chat_state_window_cache",
+        "updated_at": time.time(),
+        "process": process,
+        "pid": pid,
+        "parent_pid": snapshot.get("parent_pid"),
+        "parent_process": snapshot.get("parent_process"),
+        "parent_create_time": snapshot.get("parent_create_time"),
+        "role": snapshot.get("role"),
+        "create_time": snapshot.get("create_time"),
+        "exe": snapshot.get("exe"),
+        "command_line": snapshot.get("command_line"),
+        "marker_hit_count": marker_hit_count,
+        "candidate_count": candidate_count,
+        "windows": [{"start": f"0x{start:X}", "end": f"0x{end:X}"} for start, end in _merge_windows(windows)],
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _state_window_cache_path(out_dir).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_cached_chat_processes(args: argparse.Namespace, out_dir: Path) -> list[dict[str, Any]] | None:
     if getattr(args, "no_process_cache", False):
         return None
     path = _process_cache_path(out_dir)
@@ -850,31 +1316,49 @@ def _load_cached_chat_process(args: argparse.Namespace, out_dir: Path) -> dict[s
     except (OSError, json.JSONDecodeError):
         return None
     selected = data.get("selected")
-    if not isinstance(selected, dict):
+    if isinstance(selected, dict):
+        selected_items = [selected]
+    elif isinstance(selected, list):
+        selected_items = [item for item in selected if isinstance(item, dict)]
+    else:
         return None
-    pid = selected.get("pid")
-    process_name = selected.get("process")
-    if not isinstance(pid, int) or not isinstance(process_name, str):
-        return None
-    if process_name.lower().startswith("gta5") and getattr(args, "cef_only", False):
-        return None
-    try:
-        snapshot = _process_snapshot(psutil.Process(pid))
-    except psutil.Error:
-        return None
-    if snapshot is None or str(snapshot.get("process", "")).lower() != process_name.lower():
-        return None
-    cached_create_time = selected.get("create_time")
-    if isinstance(cached_create_time, (int, float)) and abs(float(cached_create_time) - float(snapshot["create_time"])) > 1:
-        return None
-    report = _score_chat_process(args, process_name, pid, max_total_mb=min(args.auto_max_total_mb, 256), marker_hit_limit=8)
-    if int(report.get("marker_hit_count") or 0) <= 0:
-        return None
-    report["cache"] = "hit"
-    return report
+    loaded: list[dict[str, Any]] = []
+    for item in selected_items:
+        pid = item.get("pid")
+        process_name = item.get("process")
+        if not isinstance(pid, int) or not isinstance(process_name, str):
+            return None
+        if process_name.lower().startswith("gta5") and getattr(args, "cef_only", False):
+            return None
+        try:
+            snapshot = _process_snapshot(psutil.Process(pid))
+        except psutil.Error:
+            return None
+        if snapshot is None:
+            return None
+        mismatch = _cached_process_identity_mismatch(
+            item,
+            snapshot,
+            expected_process=process_name,
+            expected_pid=pid,
+        )
+        if mismatch:
+            return None
+        loaded_item = dict(item)
+        loaded_item.update(snapshot)
+        loaded_item["cache"] = "hit"
+        loaded.append(loaded_item)
+    return loaded or None
 
 
-def _write_chat_process_cache(out_dir: Path, selected: dict[str, Any], candidates: list[dict[str, Any]]) -> None:
+def _load_cached_chat_process(args: argparse.Namespace, out_dir: Path) -> dict[str, Any] | None:
+    loaded = _load_cached_chat_processes(args, out_dir)
+    if not loaded:
+        return None
+    return loaded[0]
+
+
+def _write_chat_process_cache(out_dir: Path, selected: list[dict[str, Any]] | dict[str, Any], candidates: list[dict[str, Any]]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "kind": "sonar_chat_process_cache",
@@ -890,23 +1374,29 @@ def _resolve_process_targets(args: argparse.Namespace, out_dir: Path) -> tuple[l
         targets = iter_process_targets(args.process)
         return targets, {"mode": "manual", "selected": [{"process": name, "pid": pid} for name, pid in targets]}
 
-    cached = _load_cached_chat_process(args, out_dir)
+    cached = _load_cached_chat_processes(args, out_dir)
     if cached is not None:
-        return [(str(cached["process"]), int(cached["pid"]))], {
+        return [(str(item["process"]), int(item["pid"])) for item in cached], {
             "mode": "auto",
             "cache": "hit",
-            "selected": [cached],
-            "candidates": [cached],
+            "selected": cached,
+            "candidates": cached,
         }
 
-    candidates = [
-        _score_chat_process(args, str(item["process"]), int(item["pid"]))
-        for item in _auto_process_candidates(include_gta=not getattr(args, "cef_only", False))
-        if isinstance(item.get("pid"), int)
-    ]
-    selected = _select_chat_candidates(candidates, max(1, args.max_chat_processes))
+    include_gta = not getattr(args, "cef_only", False)
+    snapshots = _auto_process_candidates(include_gta=include_gta)
+    if include_gta:
+        candidates = [item for item in snapshots if isinstance(item.get("pid"), int)]
+        selected = _select_snapshot_chat_candidates(candidates, max(1, args.max_chat_processes), include_gta=include_gta)
+    else:
+        candidates = [
+            _score_chat_process(args, str(item["process"]), int(item["pid"]))
+            for item in snapshots
+            if isinstance(item.get("pid"), int)
+        ]
+        selected = _select_auto_chat_candidates(candidates, max(1, args.max_chat_processes), include_gta=include_gta)
     if selected:
-        _write_chat_process_cache(out_dir, selected[0], candidates)
+        _write_chat_process_cache(out_dir, selected, candidates)
     return [(str(item["process"]), int(item["pid"])) for item in selected], {
         "mode": "auto",
         "cache": "miss",
@@ -1149,6 +1639,19 @@ def _trim_corrupted_tail(text: str) -> str:
     return text
 
 
+def _trim_chat_ui_tail(text: str) -> str:
+    if not text.startswith(CHAT_PREFIX_MARKERS) and "говорит:" not in text:
+        return text
+    best = len(text)
+    for marker in CHAT_UI_TAIL_MARKERS:
+        index = text.find(marker)
+        if index >= 40:
+            best = min(best, index)
+    if best == len(text):
+        return text
+    return text[:best].rstrip(" ,.;:-")
+
+
 def _chat_text_noise_score(text: str) -> int:
     score = 0
     score += text.count("\ufffd") * 20
@@ -1215,6 +1718,7 @@ def _clean_chat_text(text: str) -> str:
             break
     while text and not (text[0].isalnum() or text[0] == "["):
         text = text[1:].lstrip()
+    text = _trim_chat_ui_tail(text)
     return text
 
 
@@ -1434,6 +1938,10 @@ def _is_chat_fragment(text: str, min_chars: int) -> bool:
         for marker in (
             "\u0422\u0435\u043b. \u043d\u043e\u043c\u0435\u0440:",
             "\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u043d\u0430 Majestic Role Play",
+            "\u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0432\u0440\u0435\u043c\u044f",
+            "\u0421\u0430\u043c\u043e\u043b\u0435\u0442 \u0441\u0431\u0440\u043e\u0441\u0438\u043b \u0433\u0440\u0443\u0437",
+            "\u0410\u0443\u043a\u0446\u0438\u043e\u043d",
+            "\u0423\u0432\u0430\u0436\u0430\u0435\u043c\u044b\u0435 \u0438\u0433\u0440\u043e\u043a\u0438",
             "\u041f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f\u043c\u0438",
             "\u0412\u0441\u0435\u0433\u043e \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432",
             "\u0433\u043e\u0432\u043e\u0440\u0438\u0442:",
@@ -1493,6 +2001,7 @@ def _extract_chat_input_fragments(
 
 
 def _rendered_chat_type(text: str) -> str | None:
+    body = _chat_body_without_prefixes(text)
     if text.startswith("[fam]"):
         return "family"
     if text.startswith("[frac]"):
@@ -1506,19 +2015,26 @@ def _rendered_chat_type(text: str) -> str | None:
     if text.startswith(
         (
             "\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u043d\u0430 Majestic Role Play",
+            "\u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0432\u0440\u0435\u043c\u044f",
+            "\u0421\u0430\u043c\u043e\u043b\u0435\u0442 \u0441\u0431\u0440\u043e\u0441\u0438\u043b \u0433\u0440\u0443\u0437",
+            "\u0410\u0443\u043a\u0446\u0438\u043e\u043d",
+            "[\u0410\u0443\u043a\u0446\u0438\u043e\u043d]",
             "\u041f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f\u043c\u0438",
             "\u0412\u0441\u0435\u0433\u043e \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432",
         )
     ):
         return "system"
+    if re.match(r"^[A-Z][A-Za-z_'-]{1,24}\s+[A-Z][A-Za-z_'-]{1,24}:\s+\u0423\u0432\u0430\u0436\u0430\u0435\u043c\u044b\u0435 \u0438\u0433\u0440\u043e\u043a\u0438", text):
+        return "admin"
     if text.startswith("[default]") and "\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u043d\u0430 Majestic Role Play" in text:
         return "system"
+    if text.startswith("[default]") and "\u0433\u043e\u0432\u043e\u0440\u0438\u0442:" not in body and _visible_action_owner_from_body(body):
+        return "me"
     if text.startswith("[default]") or "\u0433\u043e\u0432\u043e\u0440\u0438\u0442:" in text:
         return "default"
     if re.match(r"^[A-Z][A-Za-z_'-]{1,24}\s+[A-Z][A-Za-z_'-]{1,24}\s*:\s*\(\(", text):
         return "default"
-    player_match = PLAYER_NAME_RE.match(text)
-    if player_match and _looks_like_player_name(player_match.group("name")) and _looks_like_player_action_tail(text[player_match.end() :]):
+    if _visible_action_owner_from_body(text):
         return "me"
     if text.startswith("[me]"):
         return "me"
@@ -1543,13 +2059,31 @@ def _is_valid_rendered_chat_text(text: str, record_type: str) -> bool:
         if owner.get("kind") != "player":
             return False
         name = str(owner.get("name") or "")
-        if not name or not _looks_like_player_name(name):
+        static_id = str(owner.get("staticId") or "")
+        if name and not _looks_like_player_name(name):
             return False
-        tail = text.split(name, 1)[1] if name in text else ""
+        if not name and not static_id:
+            return False
+        speaker = name or static_id
+        tail = text.split(speaker, 1)[1] if speaker in text else ""
         if not _looks_like_player_action_tail(tail):
             return False
     if record_type == "system" and len(text) < 80 and _chat_text_noise_score(text) >= 4:
         return False
+    if record_type == "system":
+        has_runtime_prefix = text.startswith(("[global]", "[default]", "[gov]", "[ el News]"))
+        template_like_system = (
+            text.startswith(("\u0410\u0443\u043a\u0446\u0438\u043e\u043d", "[\u0410\u0443\u043a\u0446\u0438\u043e\u043d]"))
+            or text.startswith("\u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0432\u0440\u0435\u043c\u044f")
+            or text.startswith("\u0421\u0430\u043c\u043e\u043b\u0435\u0442 \u0441\u0431\u0440\u043e\u0441\u0438\u043b \u0433\u0440\u0443\u0437")
+            or text.startswith("\u041f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f\u043c\u0438")
+        )
+        if template_like_system and not has_runtime_prefix:
+            return False
+        if text in {"\u0410\u0443\u043a\u0446\u0438\u043e\u043d", "\u0410\u0443\u043a\u0446\u0438\u043e\u043d - \u0421\u0442\u0430\u0432\u043a\u0430 \u043d\u0430 \u043b\u043e\u0442"}:
+            return False
+        if text.startswith("[\u0410\u0443\u043a\u0446\u0438\u043e\u043d] \u041b\u043e\u0442 \"") and len(text) < 40:
+            return False
     if (
         record_type == "system"
         and "\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c \u043d\u0430 Majestic Role Play" in text
@@ -1567,6 +2101,14 @@ def _is_valid_rendered_chat_text(text: str, record_type: str) -> bool:
         if any(ch in speaker for ch in "{}[]\""):
             return False
     return True
+
+
+def _canonical_rendered_chat_text(text: str, record_type: str) -> str:
+    if record_type == "me" and text.startswith("[default]"):
+        body = _chat_body_without_prefixes(text)
+        if body:
+            return f"[me] {body}"
+    return text
 
 
 def _rendered_text_nodes(text: str) -> list[RenderedTextNode]:
@@ -1611,6 +2153,7 @@ def _rendered_record_from_text(
 ) -> ChatRecord | None:
     if len(chat_text) < 6 or _is_bad_chat_text(chat_text, None):
         return None
+    chat_text = _canonical_rendered_chat_text(chat_text, record_type)
     if not _is_valid_rendered_chat_text(chat_text, record_type):
         return None
     owner = _rendered_owner(chat_text)
@@ -1621,6 +2164,7 @@ def _rendered_record_from_text(
     player_id = str(owner.get("playerId")) if owner.get("playerId") else None
     static_id = str(owner.get("staticId")) if owner.get("staticId") else None
     stable_id = _stable_message_id(record_type, chat_text, None, phone_number, player_name, player_id, static_id, color)
+    occurrence_id = _occurrence_message_id(stable_id, process, pid, base_pos, source)
     raw_fields: dict[str, Any] = {"rendered": True, "messageId_source": "stable_hash"}
     raw_fields.update({f"visible_{key}": value for key, value in owner.items()})
     return ChatRecord(
@@ -1637,6 +2181,7 @@ def _rendered_record_from_text(
         pid=pid,
         messageId=stable_id,
         stableId=stable_id,
+        occurrenceId=occurrence_id,
         playerId=player_id,
         staticId=static_id,
         playerName=player_name,
@@ -1702,12 +2247,14 @@ def _attach_phone_to_record(record: ChatRecord, phone_record: ChatRecord) -> Cha
     message_id = record.messageId
     if raw_fields.get("messageId_source") != "memory":
         message_id = stable_id
+    occurrence_id = _occurrence_message_id(stable_id, record.process, record.pid, record.pos, record.source)
     return replace(
         record,
         text=text,
         phoneNumber=phone_number,
         messageId=message_id,
         stableId=stable_id,
+        occurrenceId=occurrence_id,
         raw_fields=raw_fields,
     )
 
@@ -1902,6 +2449,13 @@ def _enrich_rendered_record(record: ChatRecord, candidate: ChatRecord) -> ChatRe
         update["timestamp"] = candidate.timestamp
         update["time"] = candidate.time or _timestamp_to_text(candidate.timestamp)
         raw_fields["timestamp_source"] = "matched_serialized_unique"
+    if record.id is None and candidate.id is not None:
+        update["id"] = candidate.id
+        raw_fields["id_source"] = "matched_serialized_unique"
+    if candidate.raw_fields.get("messageId_source") == "memory" and candidate.messageId is not None:
+        update["messageId"] = candidate.messageId
+        raw_fields["messageId_source"] = "memory"
+        raw_fields["messageId_source_detail"] = "matched_serialized_unique"
     if record.phoneNumber is None and candidate.phoneNumber is not None:
         update["phoneNumber"] = candidate.phoneNumber
         raw_fields["phoneNumber_source"] = raw_fields.get("phoneNumber_source") or "matched_serialized_unique"
@@ -1950,14 +2504,16 @@ def _record_dedupe_key(record: ChatRecord) -> tuple[str, int | None, str]:
     if record.raw_fields.get("messageId_source") == "memory" and record.messageId:
         return ("messageId", None, f"{record.type}:{record.messageId}")
     if record.raw_fields.get("messageId_source") == "stable_hash" and record.messageId:
-        return (
-            "memory-near",
-            None,
-            (
-                f"{record.type}:{record.process or ''}:{record.pid or ''}:"
-                f"{record.source}:{record.timestamp or ''}:{record.pos // 16}:{record.messageId}"
-            ),
-        )
+        if record.timestamp is None:
+            occurrence = record.occurrenceId or _occurrence_message_id(
+                record.messageId,
+                record.process,
+                record.pid,
+                record.pos,
+                record.source,
+            )
+            return ("stableOccurrence", None, f"{record.type}:{occurrence}")
+        return ("stableId", record.timestamp, f"{record.type}:{record.messageId}")
     return (
         "memory",
         None,
@@ -1984,7 +2540,7 @@ def _merge_record_pair(current: ChatRecord, candidate: ChatRecord) -> ChatRecord
     owner = dict(secondary.owner)
     owner.update(merged.owner)
     update: dict[str, Any] = {"raw_fields": raw_fields, "owner": owner}
-    for field_name in ("timestamp", "time", "id", "messageId", "playerId", "staticId", "playerName", "color"):
+    for field_name in ("timestamp", "time", "id", "messageId", "stableId", "occurrenceId", "playerId", "staticId", "playerName", "color"):
         if getattr(merged, field_name) is None and getattr(secondary, field_name) is not None:
             update[field_name] = getattr(secondary, field_name)
     if merged.formatting:
@@ -2022,14 +2578,14 @@ def _assign_record_order(records: list[ChatRecord]) -> list[ChatRecord]:
 
 def _dedupe_records(records: list[ChatRecord]) -> list[ChatRecord]:
     best: dict[tuple[str, int | None, str], ChatRecord] = {}
-    for record in _drop_unattached_phone_records(records):
+    for record in _enrich_rendered_records(_drop_unattached_phone_records(records)):
         key = _record_dedupe_key(record)
         current = best.get(key)
         if current is None:
             best[key] = record
         else:
             best[key] = _merge_record_pair(current, record)
-    return _assign_record_order(_enrich_rendered_records(list(best.values())))
+    return _assign_record_order(list(best.values()))
 
 
 def _record_channel(record: ChatRecord | dict[str, Any]) -> str | None:
@@ -2100,17 +2656,19 @@ def _record_dict_key(record: dict) -> tuple[str, int | None, str]:
     if not isinstance(timestamp, int):
         timestamp = None
     if raw_fields.get("messageId_source") == "stable_hash" and message_id:
-        pos = record.get("pos")
-        if not isinstance(pos, int):
-            pos = 0
-        return (
-            "memory-near",
-            None,
-            (
-                f"{record_type}:{record.get('process') or ''}:{record.get('pid') or ''}:"
-                f"{record.get('source') or ''}:{timestamp or ''}:{pos // 16}:{message_id}"
-            ),
-        )
+        if timestamp is None:
+            occurrence = record.get("occurrenceId")
+            if not occurrence:
+                pos = record.get("pos")
+                occurrence = _occurrence_message_id(
+                    str(message_id),
+                    str(record.get("process") or "") or None,
+                    record.get("pid") if isinstance(record.get("pid"), int) else None,
+                    int(pos) if isinstance(pos, int) else 0,
+                    str(record.get("source") or "") or None,
+                )
+            return ("stableOccurrence", None, f"{record_type}:{occurrence}")
+        return ("stableId", timestamp, f"{record_type}:{message_id}")
     return (
         "memory",
         None,
@@ -2135,7 +2693,8 @@ def _is_phone_only_record_dict(record: dict) -> bool:
 def _normalize_record_dict(record: dict) -> dict:
     normalized = dict(record)
     record_type = str(normalized.get("type") or "")
-    text = str(normalized.get("text") or "")
+    text = _trim_chat_ui_tail(str(normalized.get("text") or ""))
+    normalized["text"] = text
     raw_fields = dict(normalized.get("raw_fields") or {})
     if text and (raw_fields.get("rendered") or str(normalized.get("source") or "").endswith(" rendered")):
         owner = _rendered_owner(text)
@@ -2160,6 +2719,30 @@ def _normalize_record_dict(record: dict) -> dict:
             raw_fields = dict(normalized.get("raw_fields") or {})
             raw_fields.setdefault("phoneNumber_source", "record")
             normalized["raw_fields"] = raw_fields
+            text = str(normalized.get("text") or "")
+    if raw_fields.get("messageId_source") == "stable_hash" and text:
+        timestamp = normalized.get("timestamp") if isinstance(normalized.get("timestamp"), int) else None
+        stable_id = _stable_message_id(
+            record_type,
+            text,
+            timestamp,
+            str(normalized.get("phoneNumber")) if normalized.get("phoneNumber") else None,
+            str(normalized.get("playerName")) if normalized.get("playerName") else None,
+            str(normalized.get("playerId")) if normalized.get("playerId") else None,
+            str(normalized.get("staticId")) if normalized.get("staticId") else None,
+            str(normalized.get("color")) if normalized.get("color") else None,
+        )
+        normalized["messageId"] = stable_id
+        normalized["stableId"] = stable_id
+        if not normalized.get("occurrenceId") and not isinstance(timestamp, int):
+            pos = normalized.get("pos")
+            normalized["occurrenceId"] = _occurrence_message_id(
+                stable_id,
+                str(normalized.get("process") or "") or None,
+                normalized.get("pid") if isinstance(normalized.get("pid"), int) else None,
+                int(pos) if isinstance(pos, int) else 0,
+                str(normalized.get("source") or "") or None,
+            )
     return normalized
 
 
@@ -2212,6 +2795,14 @@ def _enrich_rendered_record_dict(record: dict, candidate: dict) -> dict:
         enriched["timestamp"] = timestamp
         enriched["time"] = candidate.get("time") or _timestamp_to_text(timestamp)
         raw_fields["timestamp_source"] = "matched_serialized_unique"
+    if not enriched.get("id") and candidate.get("id"):
+        enriched["id"] = candidate["id"]
+        raw_fields["id_source"] = "matched_serialized_unique"
+    candidate_raw = candidate.get("raw_fields") if isinstance(candidate.get("raw_fields"), dict) else {}
+    if candidate_raw.get("messageId_source") == "memory" and candidate.get("messageId"):
+        enriched["messageId"] = candidate["messageId"]
+        raw_fields["messageId_source"] = "memory"
+        raw_fields["messageId_source_detail"] = "matched_serialized_unique"
     for key, source_name in (
         ("phoneNumber", "phoneNumber_source"),
         ("playerId", "playerId_source"),
@@ -2255,11 +2846,27 @@ def _enrich_rendered_record_dicts(records: list[dict]) -> list[dict]:
     return out
 
 
-def _record_dict_sort_key(record: dict) -> tuple[int, int, str, str]:
+def _record_dict_sort_key(record: dict) -> tuple[int, int, str, int, int, str, str]:
     timestamp = record.get("timestamp")
     if not isinstance(timestamp, int):
         timestamp = 0
-    return (0 if timestamp else 1, timestamp, str(record.get("type") or ""), str(record.get("text") or ""))
+    if timestamp:
+        return (0, timestamp, "", 0, 0, str(record.get("type") or ""), str(record.get("text") or ""))
+    pid = record.get("pid")
+    if not isinstance(pid, int):
+        pid = 0
+    pos = record.get("pos")
+    if not isinstance(pos, int):
+        pos = 0
+    return (
+        0 if timestamp else 1,
+        timestamp,
+        str(record.get("process") or ""),
+        pid,
+        pos,
+        str(record.get("type") or ""),
+        str(record.get("text") or ""),
+    )
 
 
 def _prefer_richer_record(current: dict, candidate: dict) -> dict:
@@ -2275,6 +2882,7 @@ def _prefer_richer_record(current: dict, candidate: dict) -> dict:
         "id",
         "messageId",
         "stableId",
+        "occurrenceId",
         "playerId",
         "staticId",
         "playerName",
@@ -2312,6 +2920,7 @@ def _merge_record_dict_pair(current: dict, candidate: dict) -> dict:
         "id",
         "messageId",
         "stableId",
+        "occurrenceId",
         "playerId",
         "staticId",
         "playerName",
@@ -2345,6 +2954,55 @@ def _dedupe_record_dicts(records: list[dict]) -> list[dict]:
     for index, record in enumerate(out, 1):
         record["order"] = index
         record["orderSource"] = "timestamp" if isinstance(record.get("timestamp"), int) else "memory_position"
+    return out
+
+
+def _history_seen_order(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value > 0:
+        return int(value)
+    return None
+
+
+def _assign_history_seen_order(records: list[dict], existing_records: list[dict]) -> list[dict]:
+    existing_orders: dict[tuple[str, int | None, str], int] = {}
+    max_order = 0
+    for record in existing_records:
+        if not isinstance(record, dict):
+            continue
+        normalized = _normalize_record_dict(record)
+        key = _record_dict_key(normalized)
+        seen_order = _history_seen_order(record.get("seenOrder")) or _history_seen_order(record.get("order"))
+        if seen_order is None:
+            continue
+        existing_orders[key] = seen_order
+        max_order = max(max_order, seen_order)
+
+    ordered = sorted(records, key=_record_dict_sort_key)
+    next_order = max_order + 1
+    for record in ordered:
+        key = _record_dict_key(record)
+        seen_order = existing_orders.get(key)
+        if seen_order is None:
+            seen_order = next_order
+            next_order += 1
+        record["seenOrder"] = seen_order
+
+    out = sorted(
+        ordered,
+        key=lambda record: (
+            0 if isinstance(record.get("timestamp"), int) else 1,
+            int(record.get("timestamp")) if isinstance(record.get("timestamp"), int) else 0,
+            _history_seen_order(record.get("seenOrder")) or 0,
+            str(record.get("process") or ""),
+            int(record.get("pid") or 0) if isinstance(record.get("pid"), int) else 0,
+            int(record.get("pos") or 0) if isinstance(record.get("pos"), int) else 0,
+        ),
+    )
+    for index, record in enumerate(out, 1):
+        record["order"] = index
+        record["orderSource"] = "timestamp" if isinstance(record.get("timestamp"), int) else "history_seen"
     return out
 
 
@@ -2414,6 +3072,11 @@ def _merge_history_data(existing: dict | None, incoming: dict, fragment_limit: i
         timestamp = record.get("timestamp") if isinstance(record.get("timestamp"), int) else None
         if _is_bad_chat_text(str(record.get("text") or ""), timestamp):
             continue
+        raw_fields = record.get("raw_fields")
+        if isinstance(raw_fields, dict) and raw_fields.get("rendered"):
+            record_type = str(record.get("type") or "")
+            if not _is_valid_rendered_chat_text(str(record.get("text") or ""), record_type):
+                continue
         record_candidates.append(record)
 
     fragments: list[dict] = []
@@ -2435,10 +3098,14 @@ def _merge_history_data(existing: dict | None, incoming: dict, fragment_limit: i
             "fragments": len(incoming.get("fragments", [])),
             "marker_hit_count": incoming.get("marker_hit_count"),
             "windows": incoming.get("windows"),
+            "window_cache": incoming.get("window_cache"),
+            "state_window_cache": (incoming.get("chat_state") or {}).get("state_window_cache")
+            if isinstance(incoming.get("chat_state"), dict)
+            else None,
         }
     )
 
-    merged_records = _dedupe_record_dicts(record_candidates)
+    merged_records = _assign_history_seen_order(_dedupe_record_dicts(record_candidates), existing_records)
     chat_state = incoming.get("chat_state") if isinstance(incoming.get("chat_state"), dict) else existing.get("chat_state")
     if not isinstance(chat_state, dict):
         chat_state = _empty_chat_state()
@@ -2932,8 +3599,30 @@ def _scan_chat_state(
 ) -> dict[str, Any]:
     if getattr(args, "no_active_tab", False):
         return _empty_chat_state("disabled", "disabled")
+    out_dir = Path(args.out_dir or DEFAULT_OUT_DIR)
+    half_window = 8192
+    state_windows, state_cache = _load_cached_state_windows(args, out_dir, process_name, pid, regions)
+    if state_windows:
+        cached_candidates: list[dict[str, Any]] = []
+        for start, end in state_windows:
+            data = tracker._read(start, end - start)
+            if not data:
+                continue
+            source = f"{process_name}:{pid} chat_state 0x{start:X}-0x{end:X}"
+            for encoding, text, scale in _decode_texts(data):
+                base = start if encoding != "utf-16-le+1" else start + 1
+                candidate = _extract_chat_state_from_text(text, base, encoding, source, scale)
+                if candidate is not None:
+                    cached_candidates.append(candidate)
+        if cached_candidates:
+            state = _merge_chat_state_candidates(cached_candidates)
+            state["marker_hit_count"] = 0
+            state["state_window_cache"] = state_cache
+            return state
+
     markers = _encoded_markers(CHAT_STATE_MARKERS)
     marker_hits: list[int] = []
+    candidate_windows: list[tuple[int, int]] = []
     chunk_size = max(4096, args.chunk_mb * 1024 * 1024)
     overlap = max(len(marker) for marker in markers) - 1
     max_total_bytes = args.active_tab_max_total_mb * 1024 * 1024
@@ -2959,7 +3648,6 @@ def _scan_chat_state(
         marker_hits.extend(hits)
         scanned += size
 
-    half_window = 8192
     candidates: list[dict[str, Any]] = []
     for hit in marker_hits:
         for region_start, region_end in regions:
@@ -2976,12 +3664,25 @@ def _scan_chat_state(
                 candidate = _extract_chat_state_from_text(text, base, encoding, source, scale)
                 if candidate is not None:
                     candidates.append(candidate)
+                    candidate_windows.append((start, end))
             break
     if candidates:
         state = _merge_chat_state_candidates(candidates)
         state["marker_hit_count"] = len(marker_hits)
+        state["state_window_cache"] = state_cache
+        cache_pad = max(0, int(getattr(args, "state_window_cache_pad_kb", 0) or 0)) * 1024
+        _write_state_window_cache(
+            out_dir,
+            process_name,
+            pid,
+            _expand_windows(candidate_windows, regions, cache_pad),
+            marker_hit_count=len(marker_hits),
+            candidate_count=len(candidates),
+        )
         return state
-    return _empty_chat_state("memory", "unknown", len(marker_hits))
+    state = _empty_chat_state("memory", "unknown", len(marker_hits))
+    state["state_window_cache"] = state_cache
+    return state
 
 
 def _scan_active_tab(
@@ -3015,13 +3716,26 @@ def _scan_tracker_history(
     started = time.perf_counter()
     try:
         regions = _collect_search_regions(tracker, args.max_region_mb, args.max_total_mb)
-        markers = _marker_bytes()
+        is_gta = _is_gta_process(process_name, tracker.pid)
+        cef_state_only = _is_cef_state_only_scan(args, process_name, tracker.pid)
+        markers = _history_marker_bytes() if is_gta else _marker_bytes()
         marker_hits: list[int] = []
         raw_windows: list[tuple[int, int]] = []
+        cache_windows: list[tuple[int, int]] = []
+        window_cache_info: dict[str, Any] = {"cache": "disabled" if getattr(args, "no_window_cache", False) else "miss"}
         chunk_size = max(4096, args.chunk_mb * 1024 * 1024)
         overlap = max(len(marker) for marker in markers) - 1
         half_window = max(4096, args.window_kb * 1024 // 2)
         anchor_addrs: list[int] = []
+        if dump_root is None:
+            cache_windows, window_cache_info = _load_cached_chat_windows(
+                args,
+                Path(args.out_dir or DEFAULT_OUT_DIR),
+                process_name,
+                tracker.pid,
+                regions,
+            )
+            raw_windows.extend(cache_windows)
         for value in args.address or []:
             anchor_addrs.append(_parse_addr(value))
         if args.anchor_report:
@@ -3037,8 +3751,11 @@ def _scan_tracker_history(
                 if region_start <= addr < region_end:
                     raw_windows.append((max(region_start, addr - half_window), min(region_end, addr + half_window)))
                     break
+        marker_limit = 0 if cef_state_only else int(args.marker_hits)
+        if cache_windows:
+            marker_limit = max(0, int(getattr(args, "window_cache_refresh_hits", 0) or 0))
         for index, (start, end) in enumerate(regions, 1):
-            if len(marker_hits) >= args.marker_hits:
+            if len(marker_hits) >= marker_limit:
                 break
             hits = _scan_marker_offsets(
                 tracker._read,
@@ -3047,7 +3764,7 @@ def _scan_tracker_history(
                 markers,
                 chunk_size=chunk_size,
                 overlap=overlap,
-                limit=args.marker_hits - len(marker_hits),
+                limit=marker_limit - len(marker_hits),
             )
             marker_hits.extend(hits)
             raw_windows.extend((max(start, hit - half_window), min(end, hit + half_window)) for hit in hits)
@@ -3060,6 +3777,7 @@ def _scan_tracker_history(
         windows = _merge_windows(raw_windows)
         records: list[ChatRecord] = []
         fragments: list[TextFragment] = []
+        record_windows: list[tuple[int, int]] = []
         for start, end in windows:
             data = tracker._read(start, end - start)
             if not data:
@@ -3067,14 +3785,23 @@ def _scan_tracker_history(
             if not _has_chat_context(data):
                 continue
             source = f"{process_name}:{tracker.pid} 0x{start:X}-0x{end:X}"
+            window_records: list[ChatRecord] = []
+            window_fragments: list[TextFragment] = []
             for encoding, text, scale in _decode_texts(data):
                 base = start if encoding != "utf-16-le+1" else start + 1
-                records.extend(_extract_records_from_text(text, base, encoding, source, scale, process_name, tracker.pid))
-                records.extend(_extract_rendered_records_from_text(text, base, encoding, source, scale, process_name, tracker.pid))
-            fragments.extend(_extract_wide_fragments(data, start, source, args.min_fragment_chars, process_name, tracker.pid))
-            fragments.extend(_extract_chat_input_fragments(data, start, source, args.min_fragment_chars, process_name, tracker.pid))
+                window_records.extend(_extract_records_from_text(text, base, encoding, source, scale, process_name, tracker.pid))
+                window_records.extend(_extract_rendered_records_from_text(text, base, encoding, source, scale, process_name, tracker.pid))
+            window_fragments.extend(_extract_wide_fragments(data, start, source, args.min_fragment_chars, process_name, tracker.pid))
+            window_fragments.extend(_extract_chat_input_fragments(data, start, source, args.min_fragment_chars, process_name, tracker.pid))
+            if window_records or window_fragments:
+                record_windows.append((start, end))
+            records.extend(window_records)
+            fragments.extend(window_fragments)
 
-        chat_state = _scan_chat_state(tracker, args, process_name, tracker.pid, regions)
+        if is_gta:
+            chat_state = _empty_chat_state("memory", "disabled")
+        else:
+            chat_state = _scan_chat_state(tracker, args, process_name, tracker.pid, regions)
         active_tab = chat_state.get("active_tab")
         if not isinstance(active_tab, dict):
             active_tab = {
@@ -3084,6 +3811,20 @@ def _scan_tracker_history(
                 "confidence": chat_state.get("confidence") if chat_state.get("confidence") == "disabled" else "unknown",
                 "marker_hit_count": chat_state.get("marker_hit_count", 0),
             }
+        deduped_records = _dedupe_records(records)
+        deduped_fragments = _dedupe_fragments(fragments)
+        if dump_root is None and not cef_state_only and not getattr(args, "no_window_cache", False) and (deduped_records or deduped_fragments):
+            cache_pad = max(0, int(getattr(args, "window_cache_pad_kb", 0) or 0)) * 1024
+            cache_source_windows = record_windows or windows
+            cache_source_windows = _expand_windows(cache_source_windows, regions, cache_pad)
+            _write_chat_window_cache(
+                Path(args.out_dir or DEFAULT_OUT_DIR),
+                process_name,
+                tracker.pid,
+                cache_source_windows,
+                marker_hit_count=len(marker_hits),
+                record_count=len(deduped_records),
+            )
         return {
             "process": process_name,
             "pid": tracker.pid,
@@ -3091,11 +3832,12 @@ def _scan_tracker_history(
             "orphan_tail_bytes": tracker.info.get("orphan_tail_bytes") if hasattr(tracker, "info") else None,
             "marker_hit_count": len(marker_hits),
             "windows": len(windows),
+            "window_cache": window_cache_info,
             "elapsed_seconds": time.perf_counter() - started,
             "chat_state": chat_state,
             "active_tab": active_tab,
-            "records": _dedupe_records(records),
-            "fragments": _dedupe_fragments(fragments),
+            "records": deduped_records,
+            "fragments": deduped_fragments,
         }
     finally:
         tracker.stop()
@@ -3197,6 +3939,7 @@ def dump_history(args: argparse.Namespace) -> Path:
         "regions": sum(int(item["regions"]) for item in process_reports),
         "marker_hit_count": sum(int(item["marker_hit_count"]) for item in process_reports),
         "windows": sum(int(item["windows"]) for item in process_reports),
+        "window_cache": [item.get("window_cache") for item in process_reports if item.get("window_cache")],
         "elapsed_seconds": elapsed,
         "records": [asdict(record) for record in records],
         "fragments": [asdict(fragment) for fragment in fragments[: args.fragment_limit]],
@@ -3274,6 +4017,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auto-max-total-mb", type=int, default=1024, help="Memory budget for auto PID discovery. 0 scans all selected regions.")
     parser.add_argument("--auto-marker-hits", type=int, default=64, help="Stop PID discovery after this many chat marker hits per process.")
     parser.add_argument("--no-process-cache", action="store_true", help="Do not reuse the last validated chat process PID.")
+    parser.add_argument("--no-window-cache", action="store_true", help="Do not reuse previously discovered chat memory windows.")
+    parser.add_argument("--window-cache-max-age", type=float, default=300.0, help="Seconds before cached chat windows are considered stale. Use 0 to disable age checks.")
+    parser.add_argument("--window-cache-refresh-hits", type=int, default=0, help="Marker hits to collect even when cached windows are valid.")
+    parser.add_argument("--window-cache-pad-kb", type=int, default=32, help="Extra KB to keep around windows that yielded chat records.")
+    parser.add_argument("--no-state-window-cache", action="store_true", help="Do not reuse previously discovered chat state memory windows.")
+    parser.add_argument("--state-window-cache-max-age", type=float, default=300.0, help="Seconds before cached chat state windows are considered stale. Use 0 to disable age checks.")
+    parser.add_argument("--state-window-cache-pad-kb", type=int, default=16, help="Extra KB to keep around windows that yielded chat input state.")
     parser.add_argument("--allow-gta-fallback", action="store_true", help="Compatibility flag; GTA5.exe is included in auto discovery unless --cef-only is passed.")
     parser.add_argument("--cef-only", action="store_true", help="Only scan majestic-webengine.exe renderers during auto discovery.")
     parser.add_argument("--active-tab-max-total-mb", type=int, default=512, help="Memory budget for active chat tab probing. 0 scans all selected regions.")

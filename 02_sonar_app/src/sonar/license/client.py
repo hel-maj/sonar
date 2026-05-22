@@ -45,6 +45,7 @@ class LicenseStatus:
     expires_at: datetime | None = None
     latest_version: str = ""
     update_message: str = ""
+    role: str = "user"
     error: str = ""
     code: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
@@ -215,6 +216,7 @@ def parse_keygen_status(body: dict[str, Any], license_key: str = "", *, http_sta
         error = f"Сервер лицензий вернул HTTP {http_status}"
     expires_at = parse_keygen_datetime(attributes.get("expiry") or attributes.get("expires") or attributes.get("expiresAt"))
     latest_version, update_message = _version_fields(attributes)
+    role = _license_role(attributes)
     return LicenseStatus(
         valid=valid,
         license_key=key,
@@ -223,6 +225,7 @@ def parse_keygen_status(body: dict[str, Any], license_key: str = "", *, http_sta
         expires_at=expires_at,
         latest_version=latest_version,
         update_message=update_message,
+        role=role,
         error=error,
         code=code,
         raw=body,
@@ -274,6 +277,23 @@ def _version_fields(attributes: dict[str, Any]) -> tuple[str, str]:
         or ""
     )
     return latest_version, update_message
+
+
+def _license_role(attributes: dict[str, Any]) -> str:
+    metadata = attributes.get("metadata") if isinstance(attributes.get("metadata"), dict) else {}
+    raw_role = (
+        metadata.get("role")
+        or metadata.get("sonar_role")
+        or metadata.get("sonarRole")
+        or metadata.get("user_role")
+        or metadata.get("userRole")
+        or attributes.get("role")
+        or "user"
+    )
+    if metadata.get("admin") is True or metadata.get("is_admin") is True or metadata.get("isAdmin") is True:
+        raw_role = "admin"
+    role = str(raw_role or "user").strip().lower()
+    return role or "user"
 
 
 def _error_detail(errors: list[Any]) -> str:

@@ -22,6 +22,7 @@ class LicenseManager:
             license_id=settings.license_id,
             masked_key=mask_license_key(settings.license_key),
             expires_at=expires_at,
+            role=settings.role or "user",
         )
 
     def check_saved_license(self) -> LicenseStatus:
@@ -39,5 +40,6 @@ class LicenseManager:
             settings.license.license_id = status.license_id or settings.license.license_id
             settings.license.last_validated_at = datetime.now(timezone.utc).isoformat()
             settings.license.expires_at = status.expires_at.isoformat() if status.valid and status.expires_at else ""
+            settings.license.role = status.role or settings.license.role or "user"
             self.config_manager.save(settings)
         return status

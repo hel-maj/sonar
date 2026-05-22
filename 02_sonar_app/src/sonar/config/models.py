@@ -25,6 +25,7 @@ class FishingSettings:
     use_item_hotkey: str = "e"
     discard_key: str = "q"
     chat_hotkey: str = "t"
+    stream_snapshot_mode: bool = False
     start_stop_sound_enabled: bool = True
     garbage_settings: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_GARBAGE_SETTINGS))
     custom_fish_prices: dict[str, float] = field(default_factory=dict)
@@ -74,6 +75,7 @@ class FishingSettings:
             use_item_hotkey=str(data.get("use_item_hotkey", defaults.use_item_hotkey)),
             discard_key=str(data.get("discard_key", defaults.discard_key)),
             chat_hotkey=str(data.get("chat_hotkey", defaults.chat_hotkey)),
+            stream_snapshot_mode=bool(data.get("stream_snapshot_mode", defaults.stream_snapshot_mode)),
             start_stop_sound_enabled=bool(data.get("start_stop_sound_enabled", defaults.start_stop_sound_enabled)),
             garbage_settings=garbage_settings,
             custom_fish_prices=custom_fish_prices,
@@ -126,6 +128,7 @@ class LicenseSettings:
     license_id: str = ""
     last_validated_at: str = ""
     expires_at: str = ""
+    role: str = "user"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LicenseSettings":
@@ -135,6 +138,7 @@ class LicenseSettings:
             license_id=str(data.get("license_id", defaults.license_id)).strip(),
             last_validated_at=str(data.get("last_validated_at", defaults.last_validated_at)).strip(),
             expires_at=str(data.get("expires_at", defaults.expires_at)).strip(),
+            role=str(data.get("role", defaults.role)).strip() or defaults.role,
         )
 
     def to_dict(self) -> dict[str, Any]:
