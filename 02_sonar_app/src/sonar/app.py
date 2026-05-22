@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
             from sonar.ui import main_window as main_window_module
         except ImportError as exc:
             logging.getLogger("sonar").exception("Unable to import desktop UI")
-            print("PyQt6 is required for the desktop UI. Install dependencies with: python -m pip install -e .")
+            print("PySide6 is required for the desktop UI. Install dependencies with: python -m pip install -e .")
             print(f"Import error: {exc}")
             return 2
         apply_chat_wip_gate(
