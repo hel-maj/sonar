@@ -71,21 +71,6 @@ function Invoke-Python {
     & $PythonExe @PythonArgs @Arguments
 }
 
-function Convert-QtImportsForRelease {
-    param([string]$SourceRoot)
-
-    $MainWindowPath = Join-Path $SourceRoot "sonar\ui\main_window.py"
-    $MainWindowText = Get-Content -LiteralPath $MainWindowPath -Raw
-    $MainWindowText = $MainWindowText.Replace(
-        "from PyQt6.QtCore import QObject, QRegularExpression, QTimer, Qt, pyqtSignal",
-        "from PySide6.QtCore import QObject, QRegularExpression, QTimer, Qt, Signal"
-    )
-    $MainWindowText = $MainWindowText.Replace("from PyQt6.QtGui import", "from PySide6.QtGui import")
-    $MainWindowText = $MainWindowText.Replace("from PyQt6.QtWidgets import", "from PySide6.QtWidgets import")
-    $MainWindowText = $MainWindowText.Replace("pyqtSignal", "Signal")
-    Set-Content -LiteralPath $MainWindowPath -Value $MainWindowText -Encoding UTF8
-}
-
 Write-Host "Using Python: $PythonInfo"
 
 if (-not $SkipInstall) {
@@ -112,7 +97,6 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
 
     New-Item -ItemType Directory -Path $BuildRoot -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $Root "src") -Destination $BuildRoot -Recurse
-    Convert-QtImportsForRelease $SecureSrc
 
     Invoke-Python @(
         (Join-Path $Root "scripts\prepare_build_branding.py"),
