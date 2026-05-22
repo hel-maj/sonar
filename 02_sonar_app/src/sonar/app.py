@@ -5,6 +5,7 @@ import faulthandler
 import logging
 import os
 
+from sonar.chat_wip_gate import apply_chat_wip_gate, is_chat_wip_enabled
 from sonar.core.logging import configure_logging
 from sonar.paths import LOG_DIR, LOGS_ENABLED
 
@@ -14,7 +15,9 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv
     if "--debug" in argv:
         os.environ["SONAR_DEBUG_CAPTURE"] = "1"
+        os.environ["SONAR_DEBUG_MODE"] = "1"
     ui_argv = [arg for arg in argv if arg != "--debug"]
+    chat_wip_enabled = is_chat_wip_enabled(argv)
     fault_log = None
     if LOGS_ENABLED:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -22,13 +25,21 @@ def main(argv: list[str] | None = None) -> int:
         faulthandler.enable(file=fault_log, all_threads=True)
     try:
         try:
-            from sonar.ui.main_window import run_ui
+            import sonar.streaming.service as streaming_service_module
+            import sonar.telegram.notifier as notification_module
+            from sonar.ui import main_window as main_window_module
         except ImportError as exc:
             logging.getLogger("sonar").exception("Unable to import desktop UI")
             print("PyQt6 is required for the desktop UI. Install dependencies with: python -m pip install -e .")
             print(f"Import error: {exc}")
             return 2
-        return run_ui(ui_argv)
+        apply_chat_wip_gate(
+            main_window_module=main_window_module,
+            streaming_service_module=streaming_service_module,
+            notification_module=notification_module,
+            enabled=chat_wip_enabled,
+        )
+        return main_window_module.run_ui(ui_argv)
     finally:
         if "--smoke-test" in argv:
             try:

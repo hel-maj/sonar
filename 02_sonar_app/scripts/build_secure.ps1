@@ -45,6 +45,10 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
         --metadata-out "$BrandingInfoPath"
     if ($LASTEXITCODE -ne 0) { throw "Build branding failed" }
 
+    python (Join-Path $Root "scripts\prepare_release_sources.py") `
+        --source-root "$SecureSrc"
+    if ($LASTEXITCODE -ne 0) { throw "Release source preparation failed" }
+
     $Branding = Get-Content -LiteralPath $BrandingInfoPath -Raw | ConvertFrom-Json
     $AppName = [string]$Branding.app_name
     $OutputExeName = [string]$Branding.exe_name
