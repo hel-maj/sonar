@@ -17,19 +17,53 @@ $DistRoot = Join-Path $Root "dist"
 $IconAssets = Join-Path $Root "assets\game_icons"
 $PythonExe = $null
 $PythonArgs = @()
-$Python312Path = "C:\Python312\python.exe"
 
-if (Test-Path $Python312Path) {
-    $PythonExe = $Python312Path
-} else {
-    $PyLauncher = Get-Command py -ErrorAction SilentlyContinue
-    if ($PyLauncher) {
+function Test-Python312 {
+    param(
+        [string]$Exe,
+        [string[]]$PrefixArgs = @()
+    )
+
+    $Version = & $Exe @PrefixArgs -c "import sys; print(sys.executable + ' ' + sys.version.split()[0]); raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        return $Version
+    }
+    return $null
+}
+
+$PyLauncher = Get-Command py -ErrorAction SilentlyContinue
+if ($PyLauncher) {
+    $PythonInfo = Test-Python312 $PyLauncher.Source @("-3.12")
+    if ($PythonInfo) {
         $PythonExe = $PyLauncher.Source
         $PythonArgs = @("-3.12")
-    } else {
-        $Python = Get-Command python -ErrorAction Stop
-        $PythonExe = $Python.Source
     }
+}
+
+if (-not $PythonExe) {
+    $Python312Path = "C:\Python312\python.exe"
+    if (Test-Path $Python312Path) {
+        $PythonInfo = Test-Python312 $Python312Path
+        if ($PythonInfo) {
+            $PythonExe = $Python312Path
+            $PythonArgs = @()
+        }
+    }
+}
+
+if (-not $PythonExe) {
+    $Python = Get-Command python -ErrorAction SilentlyContinue
+    if ($Python) {
+        $PythonInfo = Test-Python312 $Python.Source
+        if ($PythonInfo) {
+            $PythonExe = $Python.Source
+            $PythonArgs = @()
+        }
+    }
+}
+
+if (-not $PythonExe) {
+    throw "Python 3.12 is required for secure build"
 }
 
 function Invoke-Python {
@@ -37,12 +71,7 @@ function Invoke-Python {
     & $PythonExe @PythonArgs @Arguments
 }
 
-$PythonInfo = Invoke-Python @("-c", "import sys; print(sys.executable + ' ' + sys.version.split()[0])")
-if ($LASTEXITCODE -ne 0) { throw "Failed to run Python" }
 Write-Host "Using Python: $PythonInfo"
-
-Invoke-Python @("-c", "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)")
-if ($LASTEXITCODE -ne 0) { throw "Python 3.12 is required for secure build" }
 
 if (-not $SkipInstall) {
     Invoke-Python @("-m", "pip", "install", "--upgrade", "-e", "${Root}[build]")
