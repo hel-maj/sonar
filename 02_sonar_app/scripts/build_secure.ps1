@@ -83,7 +83,7 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     python -m nuitka `
         --mode=onefile `
         --assume-yes-for-downloads `
-        --enable-plugin=pyqt6 `
+        --enable-plugin=pyside6 `
         --windows-uac-admin `
         --windows-console-mode=disable `
         --windows-icon-from-ico="$IconPath" `
@@ -92,6 +92,7 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
         --product-version="$WindowsVersion" `
         --file-version="$WindowsVersion" `
         --include-package=sonar `
+        --include-package=PyQt6 `
         --include-package=requests `
         --include-data-dir="$ResourcesPath=sonar/resources" `
         --include-data-files="$SecureWipePath=sonar/secure_wipe.ps1" `
