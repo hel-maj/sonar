@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from sonar.fishing.catch_quality import CATCH_SIZE_TYPES, UNKNOWN_CATCH_SIZE_KEY, UNKNOWN_CATCH_SIZE_LABEL, catch_size_key, catch_size_label
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
 from sonar.fishing.tackle_detection import TackleItemCount
 
@@ -103,6 +104,14 @@ class FishStatsRow:
     earned_max: float
 
 
+@dataclass(frozen=True)
+class CatchSizeStat:
+    key: str
+    label: str
+    count: int
+    percent: float
+
+
 class FishingSessionStats:
     def __init__(
         self,
@@ -114,6 +123,8 @@ class FishingSessionStats:
         self.default_prices = _coerce_price_catalog(default_prices or EMBEDDED_FISH_PRICES)
         self.custom_prices = _clean_custom_prices(custom_prices or {})
         self._fish: dict[str, FishStat] = {}
+        self._catch_sizes: dict[str, int] = {item.key: 0 for item in CATCH_SIZE_TYPES}
+        self._catch_sizes[UNKNOWN_CATCH_SIZE_KEY] = 0
         self._tackle_items: tuple[TackleItemCount, ...] = ()
         self._tackle_image_bytes: bytes | None = None
         self._tackle_scanned_at: datetime | None = None
@@ -125,6 +136,8 @@ class FishingSessionStats:
             if self._running_started_at is not None:
                 self._running_started_at = time.time()
             self._fish.clear()
+            self._catch_sizes = {item.key: 0 for item in CATCH_SIZE_TYPES}
+            self._catch_sizes[UNKNOWN_CATCH_SIZE_KEY] = 0
             self.clear_tackle_scan()
 
     def start_timer(self) -> None:
@@ -157,6 +170,7 @@ class FishingSessionStats:
         *,
         kept: bool,
         released: bool | None = None,
+        catch_size: str | None = None,
     ) -> None:
         key = fish_id or "unknown"
         name = fish_name or (fish_display_name(fish_id) if fish_id else "unknown")
@@ -170,6 +184,20 @@ class FishingSessionStats:
             if released:
                 stat.released_count += 1
                 stat.released_kg += weight
+            size_key = catch_size_key(catch_size)
+            self._catch_sizes[size_key] = self._catch_sizes.get(size_key, 0) + 1
+
+    def catch_size_rows(self) -> list[CatchSizeStat]:
+        with self._lock:
+            total = sum(self._catch_sizes.values())
+            rows: list[CatchSizeStat] = []
+            for item in CATCH_SIZE_TYPES:
+                count = self._catch_sizes.get(item.key, 0)
+                rows.append(CatchSizeStat(item.key, item.label, count, _percent(count, total)))
+            unknown_count = self._catch_sizes.get(UNKNOWN_CATCH_SIZE_KEY, 0)
+            if unknown_count:
+                rows.append(CatchSizeStat(UNKNOWN_CATCH_SIZE_KEY, UNKNOWN_CATCH_SIZE_LABEL, unknown_count, _percent(unknown_count, total)))
+            return rows
 
     def set_tackle_scan(
         self,
@@ -264,6 +292,12 @@ class FishingSessionStats:
         if self._running_started_at is None:
             return self._elapsed_seconds
         return self._elapsed_seconds + time.time() - self._running_started_at
+
+
+def _percent(count: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return count * 100.0 / total
 
 
 def parse_fish_prices_from_markdown(path: Path | None = None) -> dict[str, FishPrice]:

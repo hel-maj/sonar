@@ -10,7 +10,7 @@ from sonar.config.defaults import DEFAULT_FISH_SETTINGS, DEFAULT_GARBAGE_SETTING
 class FishingSettings:
     auto_meal: bool = True
     auto_change_bait: bool = True
-    store_in_backpack: bool = True
+    store_in_backpack: bool = False
     store_in_trunk: bool = True
     shutdown_on_overweight: bool = False
     overweight_action: str = "stop"
@@ -60,7 +60,7 @@ class FishingSettings:
         return cls(
             auto_meal=bool(data.get("auto_meal", defaults.auto_meal)),
             auto_change_bait=bool(data.get("auto_change_bait", defaults.auto_change_bait)),
-            store_in_backpack=bool(data.get("store_in_backpack", defaults.store_in_backpack)),
+            store_in_backpack=False,
             store_in_trunk=bool(data.get("store_in_trunk", defaults.store_in_trunk)),
             shutdown_on_overweight=bool(data.get("shutdown_on_overweight", overweight_action == "stop")),
             overweight_action=overweight_action,

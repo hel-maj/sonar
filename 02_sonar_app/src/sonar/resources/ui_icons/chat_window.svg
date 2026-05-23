@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-63.459 -44.422 868.064 555.845">
+  <defs>
+    <linearGradient id="chatBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" style="stop-color:#f8f9fc;stop-opacity:1"/>
+      <stop offset="1" style="stop-color:#f0f2f7;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="titleBarGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" style="stop-color:#f4f6fa;stop-opacity:1"/>
+      <stop offset="1" style="stop-color:#eaedf3;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="avatarGreen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" style="stop-color:#7ec8a0;stop-opacity:1"/>
+      <stop offset="1" style="stop-color:#5ab57f;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="avatarBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" style="stop-color:#5b9bff;stop-opacity:1"/>
+      <stop offset="1" style="stop-color:#3a7bff;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="avatarRed" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" style="stop-color:#ff9a9a;stop-opacity:1"/>
+      <stop offset="1" style="stop-color:#ff7a7a;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="bubbleLight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" style="stop-color:#e8eaf0;stop-opacity:1"/>
+      <stop offset="1" style="stop-color:#dde0e8;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="bubbleBlue1" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" style="stop-color:#93c5fd;stop-opacity:1"/>
+      <stop offset="1" style="stop-color:#60a5fa;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="bubbleBlue2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" style="stop-color:#6ba4f7;stop-opacity:1"/>
+      <stop offset="1" style="stop-color:#4a88e8;stop-opacity:1"/>
+    </linearGradient>
+    <filter id="glowGreen" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feFlood flood-color="#7ec8a0" flood-opacity="0.25" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glowBlue" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feFlood flood-color="#3a7bff" flood-opacity="0.3" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glowRed" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feFlood flood-color="#ff7a7a" flood-opacity="0.25" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="windowShadow" x="-5%" y="-5%" width="115%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="#b0b8c8" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <g filter="url(#windowShadow)" transform="matrix(1, 0, 0, 1, -78.571419, -46.233761)">
+    <rect x="40" y="30" width="820" height="500" rx="20" ry="20" fill="url(#chatBg)" stroke="#e0e4ec" stroke-width="1.5"/>
+    <rect x="40" y="30" width="820" height="60" rx="20" ry="20" fill="url(#titleBarGrad)" opacity="0.6"/>
+    <rect x="40" y="70" width="820" height="20" fill="url(#titleBarGrad)"/>
+    <rect x="750" y="50" width="28" height="28" rx="5" ry="5" fill="transparent"/>
+    <line x1="732.311" y1="63.107" x2="744.311" y2="63.107" stroke="#8899b0" stroke-width="2.5" stroke-linecap="round"/>
+    <rect x="790" y="50" width="28" height="28" rx="5" ry="5" fill="transparent"/>
+    <rect x="771.311" y="56.107" width="14" height="14" rx="2" ry="2" fill="none" stroke="#8899b0" stroke-width="2.2"/>
+    <rect x="830" y="50" width="28" height="28" rx="5" ry="5" fill="transparent"/>
+    <line x1="813.311" y1="56.107" x2="825.311" y2="68.107" stroke="#8899b0" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="825.311" y1="56.107" x2="813.311" y2="68.107" stroke="#8899b0" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+  <g transform="matrix(1, 0, 0, 1, -78.571419, -46.233761)">
+    <circle cx="100" cy="140" r="30" fill="url(#avatarGreen)" filter="url(#glowGreen)"/>
+    <circle cx="100" cy="133" r="10" fill="white" opacity="0.9"/>
+    <ellipse cx="100" cy="152" rx="14" ry="8" fill="white" opacity="0.9"/>
+    <rect x="155" y="115" width="380" height="52" rx="26" ry="26" fill="url(#bubbleLight)"/>
+  </g>
+  <g transform="matrix(1, 0, 0, 1, -78.571419, -46.233761)">
+    <circle cx="100" cy="245" r="30" fill="url(#avatarBlue)" filter="url(#glowBlue)"/>
+    <circle cx="100" cy="238" r="10" fill="white" opacity="0.9"/>
+    <ellipse cx="100" cy="257" rx="14" ry="8" fill="white" opacity="0.9"/>
+    <rect x="155" y="220" width="280" height="44" rx="22" ry="22" fill="url(#bubbleBlue1)"/>
+    <rect x="155" y="275" width="580" height="48" rx="24" ry="24" fill="url(#bubbleBlue2)"/>
+  </g>
+  <g transform="matrix(1, 0, 0, 1, -78.571419, -46.233761)">
+    <circle cx="100" cy="410" r="30" fill="url(#avatarRed)" filter="url(#glowRed)"/>
+    <circle cx="100" cy="403" r="10" fill="white" opacity="0.9"/>
+    <ellipse cx="100" cy="422" rx="14" ry="8" fill="white" opacity="0.9"/>
+    <rect x="155" y="385" width="260" height="44" rx="22" ry="22" fill="url(#bubbleLight)"/>
+    <rect x="155" y="440" width="420" height="48" rx="24" ry="24" fill="url(#bubbleLight)"/>
+  </g>
+</svg>

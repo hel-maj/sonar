@@ -56,12 +56,18 @@ class StreamQuality:
     name: str
     height: int
     bitrate: str
+    low_fps_bitrate: str
+
+    def bitrate_for_fps(self, fps: int) -> str:
+        if fps == LOW_FPS_STREAM_FPS:
+            return self.low_fps_bitrate
+        return self.bitrate
 
 
 STREAM_QUALITIES: dict[str, StreamQuality] = {
-    "480p": StreamQuality("480p", 480, "1400k"),
-    "720p": StreamQuality("720p", 720, "3200k"),
-    "1080p": StreamQuality("1080p", 1080, "5800k"),
+    "480p": StreamQuality("480p", 480, "1200k", "600k"),
+    "720p": StreamQuality("720p", 720, "2900k", "1500k"),
+    "1080p": StreamQuality("1080p", 1080, "5000k", "2300k"),
 }
 
 
@@ -2402,6 +2408,7 @@ class StreamingService:
         encoder = os.environ.get("SONAR_STREAM_ENCODER", "libx264").strip() or "libx264"
         hls_playlist = self._hls_dir / "live.m3u8"
         hls_segment = self._hls_dir / "seg_%05d.ts"
+        bitrate = quality.bitrate_for_fps(fps)
         return [
             str(executable),
             "-hide_banner",
@@ -2425,11 +2432,11 @@ class StreamingService:
             "-tune",
             "zerolatency",
             "-b:v",
-            quality.bitrate,
+            bitrate,
             "-maxrate",
-            quality.bitrate,
+            bitrate,
             "-bufsize",
-            self._double_bitrate(quality.bitrate),
+            self._double_bitrate(bitrate),
             "-pix_fmt",
             "yuv420p",
             "-g",

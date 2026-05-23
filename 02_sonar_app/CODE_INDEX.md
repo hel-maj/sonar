@@ -1,6 +1,6 @@
 # Sonar Code Index
 
-Дата актуализации: 2026-05-22
+Дата актуализации: 2026-05-23
 
 Этот файл — ручной кодовый индекс репозитория Sonar. Это не системный GitHub Code Search Index: такой индекс GitHub строит сам и его нельзя закоммитить как файл. Здесь хранится постоянная карта проекта, чтобы быстрее понимать, куда лезть при правках.
 
@@ -24,13 +24,13 @@ Sonar — desktop-приложение для автоматизации рыб�
 ```text
 02_sonar_app/
 ├─ src/sonar/              # основной Python-код приложения
-├─ scripts/                # сборка, подготовка release-кода, streaming binaries, branding
+├─ scripts/                # сборка, тестовый раннер, подготовка release-кода, streaming binaries, branding
 ├─ assets/game_icons/      # PNG-иконки для рандомизации имени/иконки exe
 ├─ config/                 # runtime-конфиги в dev/source режиме
 ├─ logs/                   # runtime-логи в dev/source режиме
 ├─ build/                  # временные файлы сборки
 ├─ dist/                   # результат сборки exe
-├─ pyproject.toml          # зависимости, entrypoint, package-data
+├─ pyproject.toml          # зависимости, test/build extras, pytest config, entrypoint, package-data
 └─ README.md               # запуск, сборка, диагностика, лицензирование
 ```
 
@@ -62,6 +62,19 @@ Build-зависимости:
 - Nuitka;
 - ordered-set;
 - zstandard.
+
+Test-зависимости:
+
+- pytest;
+- pytest-qt.
+
+Pytest-настройки в `pyproject.toml`:
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+```
 
 ### `src/sonar/__main__.py`
 
@@ -595,9 +608,12 @@ StreamingService
 ### Качества
 
 ```text
-480p  -> 1400k
-720p  -> 3200k
-1080p -> 5800k
+480p 30fps  -> 1200k
+720p 30fps  -> 2900k
+1080p 30fps -> 5000k
+480p 10fps  -> 600k
+720p 10fps  -> 1500k
+1080p 10fps -> 2300k
 ```
 
 ### Состояния стрима
@@ -922,6 +938,50 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 
 Готовит portable FFmpeg/cloudflared для стрима.
 
+### `scripts/run_tests.py`
+
+Основной тестовый раннер проекта.
+
+Делает:
+
+- запускает тесты по файлам;
+- при зависании или падении файла запускает его тесты по одному;
+- помогает не блокировать весь прогон из-за OCR/OpenCV/PySide6 native-кейса;
+- не подменяет и не пропускает UI-тесты.
+
+Команда:
+
+```powershell
+python scripts/run_tests.py
+```
+
+### `scripts/test.ps1`
+
+Windows-обёртка для полного тестового прогона.
+
+Делает:
+
+- включает `QT_QPA_PLATFORM=offscreen`;
+- ставит проект с test-зависимостями через `python -m pip install -e ".[test]"`;
+- запускает `scripts/run_tests.py`.
+
+Команда:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test.ps1
+```
+
+### `tests/conftest.py`
+
+Общая настройка тестового окружения.
+
+Делает:
+
+- задаёт `QT_QPA_PLATFORM=offscreen` для UI-тестов;
+- ограничивает потоки OpenCV/Tesseract/OpenBLAS;
+- отключает OpenCL у OpenCV;
+- снижает шанс зависаний native OCR/OpenCV-кейсов в полном pytest-прогоне.
+
 ## 18. Самоудаление
 
 ### `src/sonar/self_uninstall.py`
@@ -986,6 +1046,7 @@ sdelete.exe
 | Удаление WIP из exe | `scripts/prepare_release_sources.py` |
 | Branding exe | `scripts/prepare_build_branding.py` |
 | Portable FFmpeg/cloudflared | `scripts/prepare_streaming_binaries.py` |
+| Полный прогон тестов | `scripts/run_tests.py`, `scripts/test.ps1`, `tests/conftest.py` |
 | Самоудаление | `self_uninstall.py`, `secure_wipe.ps1` |
 
 ## 20. Зоны риска
@@ -1037,9 +1098,18 @@ sdelete.exe
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
-python -m pytest -q
+python -m pip install -e ".[test]"
+python scripts/run_tests.py
 python -m sonar --smoke-test
 ```
+
+На Windows можно использовать готовую обёртку:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test.ps1
+```
+
+`python -m pytest -q` оставлен только как низкоуровневая быстрая команда для локальной проверки. Для полноценного прогона, включая UI-тесты с `PySide6`, использовать `python scripts/run_tests.py`.
 
 Для сборки:
 
