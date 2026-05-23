@@ -34,6 +34,14 @@ def ensure_bgr(image: np.ndarray) -> np.ndarray:
     return image
 
 
+def ensure_gray(image: np.ndarray) -> np.ndarray:
+    if image.ndim == 2:
+        return image
+    if image.shape[2] == 4:
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+
 class TemplateMatcher:
     def __init__(self, threshold: float = 0.8) -> None:
         self.threshold = threshold
@@ -48,7 +56,7 @@ class TemplateMatcher:
         search_area, offset_x, offset_y = self._search_area(screenshot, roi)
         if search_area.size == 0:
             return None
-        result = cv2.matchTemplate(ensure_bgr(search_area), ensure_bgr(template), cv2.TM_CCOEFF_NORMED)
+        result = cv2.matchTemplate(ensure_gray(search_area), ensure_gray(template), cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
         if max_val < self.threshold:
             return None
@@ -72,7 +80,7 @@ class TemplateMatcher:
         search_area, offset_x, offset_y = self._search_area(screenshot, roi)
         if search_area.size == 0:
             return []
-        result = cv2.matchTemplate(ensure_bgr(search_area), ensure_bgr(template), cv2.TM_CCOEFF_NORMED)
+        result = cv2.matchTemplate(ensure_gray(search_area), ensure_gray(template), cv2.TM_CCOEFF_NORMED)
         ys, xs = np.where(result >= self.threshold)
         h, w = template.shape[:2]
         matches = [
@@ -97,14 +105,23 @@ class TemplateMatcher:
         scales: tuple[float, ...] = (1.0,),
     ) -> TemplateMatch | None:
         best: TemplateMatch | None = None
-        for scale in scales:
+        for scale in self._prioritize_scales(scales):
             scaled = resize_template(template, scale)
             if scaled is None:
                 continue
             match = self.find_best(screenshot, scaled, roi=roi, name=name)
             if match and (best is None or match.confidence > best.confidence):
                 best = match
+                if match.confidence >= 0.98:
+                    return match
         return best
+
+    @staticmethod
+    def _prioritize_scales(scales: tuple[float, ...]) -> tuple[float, ...]:
+        if not scales:
+            return scales
+        base = scales[len(scales) // 2]
+        return tuple(sorted(scales, key=lambda scale: (abs(scale - base), scale)))
 
     @staticmethod
     def _search_area(screenshot: np.ndarray, roi: Rect | None) -> tuple[np.ndarray, int, int]:

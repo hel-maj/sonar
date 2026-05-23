@@ -263,6 +263,63 @@ def test_low_fps_mode_uses_ffmpeg_hls_at_ten_fps(tmp_path):
     assert "gdigrab" in command
 
 
+def test_stream_quality_bitrates_match_resolution_and_fps_profiles():
+    profiles = {
+        "480p": ("1200k", "600k"),
+        "720p": ("2900k", "1500k"),
+        "1080p": ("5000k", "2300k"),
+    }
+
+    for quality_name, (default_bitrate, low_fps_bitrate) in profiles.items():
+        quality = stream_service.STREAM_QUALITIES[quality_name]
+
+        assert quality.bitrate_for_fps(stream_service.DEFAULT_STREAM_FPS) == default_bitrate
+        assert quality.bitrate_for_fps(stream_service.LOW_FPS_STREAM_FPS) == low_fps_bitrate
+
+
+def test_ffmpeg_command_uses_profile_bitrate_for_default_fps(tmp_path):
+    expected_bitrates = {
+        "480p": "1200k",
+        "720p": "2900k",
+        "1080p": "5000k",
+    }
+
+    for quality_name, bitrate in expected_bitrates.items():
+        service = StreamingService(temp_root=tmp_path / quality_name, prewarm_binaries=False)
+        service._quality = quality_name
+        service._temp_dir = tmp_path / quality_name / "session"
+        service._hls_dir = service._temp_dir / "hls"
+        service._hls_dir.mkdir(parents=True)
+
+        command = service._build_ffmpeg_command(Path("ffmpeg.exe"))
+
+        assert command[command.index("-b:v") + 1] == bitrate
+        assert command[command.index("-maxrate") + 1] == bitrate
+        assert command[command.index("-bufsize") + 1] == service._double_bitrate(bitrate)
+
+
+def test_ffmpeg_command_uses_profile_bitrate_for_low_fps(tmp_path):
+    expected_bitrates = {
+        "480p": "600k",
+        "720p": "1500k",
+        "1080p": "2300k",
+    }
+
+    for quality_name, bitrate in expected_bitrates.items():
+        service = StreamingService(temp_root=tmp_path / quality_name, prewarm_binaries=False)
+        service._quality = quality_name
+        service._snapshot_mode_enabled = True
+        service._temp_dir = tmp_path / quality_name / "session"
+        service._hls_dir = service._temp_dir / "hls"
+        service._hls_dir.mkdir(parents=True)
+
+        command = service._build_ffmpeg_command(Path("ffmpeg.exe"))
+
+        assert command[command.index("-b:v") + 1] == bitrate
+        assert command[command.index("-maxrate") + 1] == bitrate
+        assert command[command.index("-bufsize") + 1] == service._double_bitrate(bitrate)
+
+
 def test_hls_playlist_ready_requires_segment_file(tmp_path):
     hls_dir = tmp_path / "hls"
     hls_dir.mkdir()

@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from sonar.fishing.catch_quality import normalize_catch_size
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
 from sonar.fishing.fish_recognition import FishRecognition
 from sonar.paths import FISHING_RESOURCE_DIR, RESOURCE_DIR
@@ -232,7 +233,7 @@ class CatchScreenDetector:
         ]
         for candidate in candidates:
             try:
-                text = pytesseract.image_to_string(candidate, lang=lang, config=config)
+                text = pytesseract.image_to_string(candidate, lang=lang, config=config, timeout=5)
             except Exception:
                 continue
             text = " ".join(text.replace("\n", " ").split())
@@ -242,18 +243,17 @@ class CatchScreenDetector:
 
     @classmethod
     def _read_weight_text(cls, frame: np.ndarray, panel: Rect) -> str | None:
-        candidates: list[tuple[str, float]] = []
+        fallback: str | None = None
         for roi in cls._fish_weight_number_rois(panel):
             text = cls._read_text(frame, roi, digits=True)
             weight = cls._parse_weight(text)
-            if text and weight is not None:
-                candidates.append((text, weight))
-        if not candidates:
-            return None
-        for text, weight in candidates:
+            if not text or weight is None:
+                continue
+            if fallback is None:
+                fallback = text
             if 0.01 <= weight < 15.0:
                 return text
-        return candidates[0][0]
+        return fallback
 
     @staticmethod
     def _configure_tesseract(pytesseract_module) -> None:
@@ -284,18 +284,7 @@ class CatchScreenDetector:
 
     @staticmethod
     def _normalize_quality(text: str | None) -> str | None:
-        if not text:
-            return None
-        normalized = re.sub(r"[^0-9a-zа-яё]+", "", text.lower())
-        if "скром" in normalized:
-            return "Скромный улов"
-        if "хорош" in normalized:
-            return "Хороший улов"
-        if "рекорд" in normalized:
-            return "Рекордный улов"
-        if "троф" in normalized:
-            return "Трофейная"
-        return " ".join(text.split())
+        return normalize_catch_size(text)
 
     @staticmethod
     def _parse_xp(text: str | None) -> tuple[bool, int | None, int | None]:

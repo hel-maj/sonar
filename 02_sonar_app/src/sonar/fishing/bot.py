@@ -23,6 +23,7 @@ from sonar.config.manager import ConfigManager
 from sonar.config.models import FishingSettings, TelegramSettings
 from sonar.core.logging import CallbackLogger, LogCallback, debug_log
 from sonar.core.sounds import play_sound
+from sonar.core.events import UiEventMessage, event_bus
 from sonar.core.state import BotPhase, BotState
 from sonar.fishing.catch_screen import CatchScreenDetector, CatchScreenResult
 from sonar.fishing.constants import BOT_DELAYS, TRIGGER_ROIS_FHD, resolution_name
@@ -36,7 +37,7 @@ from sonar.fishing.hooking import TemplateMonitor, create_monitor_for_frame as c
 from sonar.fishing.inventory_stage import InventoryStageDetector
 from sonar.fishing.meal_system import MealSystem
 from sonar.fishing.memory_reeling import MemoryReelingTracker
-from sonar.fishing.statistics import FishingSessionStats, parse_fish_prices_from_markdown
+from sonar.fishing.statistics import FishingSessionStats, format_money_range, format_weight, parse_fish_prices_from_markdown
 from sonar.fishing.store_fish import FishStorer
 from sonar.fishing.tackle_detection import TackleDetector, TackleScanResult, format_tackle_items
 from sonar.fishing.trigger_monitor import TriggerMonitor
@@ -265,6 +266,7 @@ class FishingBot:
         self._brain_thread.start()
         self._kickstart_requested = True
         self._log("Fishing bot started")
+        self._publish_ui_event("Рыбалка запущена", event_type="success", icon="play.svg")
         if self.settings.start_stop_sound_enabled:
             play_sound("bot_start.wav", volume=START_STOP_SOUND_VOLUME)
         self.notification_manager.notify_fishing_started(self.session_stats.totals(), self.session_stats.has_catches())
@@ -301,6 +303,8 @@ class FishingBot:
         if was_running:
             self.session_stats.stop_timer()
         self._log(f"Fishing bot stopped: {reason}")
+        if was_running:
+            self._publish_ui_event("Рыбалка остановлена", event_type="warning", icon="stop.svg", detail=reason)
         if was_running:
             if self.settings.start_stop_sound_enabled:
                 play_sound("bot_stop.wav", volume=START_STOP_SOUND_VOLUME)
@@ -1009,6 +1013,14 @@ class FishingBot:
             fish_label,
             result.weight_kg,
             kept=keep_fish,
+            catch_size=quality,
+        )
+        self._publish_catch_ui_event(
+            fish_id=fish_name,
+            fish_label=fish_label,
+            weight_kg=result.weight_kg,
+            catch_size=quality,
+            kept=keep_fish,
         )
         self.notification_manager.notify_caught_fish(
             fish_label,
@@ -1293,6 +1305,7 @@ class FishingBot:
         used_any = bool(result.get("irp") or result.get("donuts") or result.get("cocktails"))
         if used_any:
             self.notification_manager.notify_meal_eaten()
+            self._publish_ui_event("Питание использовано", event_type="meal", icon="food.svg")
             self._log("Еда/вода использована, жду завершения анимации")
             self._sleep(MEAL_ANIMATION_WAIT_SECONDS)
             self._inventory_retry_after = 0.0
@@ -1616,8 +1629,20 @@ class FishingBot:
             if item.count > 0:
                 continue
             if item.key == "hook" and self.settings.fish_without_leader:
+                self._publish_ui_event(
+                    "Закончились крючки/поводки",
+                    event_type="warning",
+                    icon="leader.png",
+                    detail="Бот продолжит работу по настройке",
+                )
                 self._log("Снаряжение: Закончились крючки/поводки, продолжаю по настройке")
             if item.key == "net" and self.settings.fish_without_net:
+                self._publish_ui_event(
+                    "Подсак закончился",
+                    event_type="warning",
+                    icon="landing_net.png",
+                    detail="Бот продолжит работу по настройке",
+                )
                 self._log("Снаряжение: Подсак закончился, продолжаю по настройке")
         depletion = self._find_tackle_depletion(scan)
         if depletion is None:
@@ -1627,6 +1652,7 @@ class FishingBot:
         return True
 
     def _perform_tackle_depleted_action(self, action: str, reason: str) -> None:
+        self._publish_ui_event("Снаряжение закончилось", event_type="danger", icon="warning.svg", detail=reason)
         self._log(f"Снаряжение закончилось: {reason}")
         if action == "exit_game":
             self._shutdown_game()
@@ -1925,6 +1951,55 @@ class FishingBot:
 
     def _get_fish_name_ru(self, fish_name_eng: str) -> str:
         return self._load_fish_names().get(fish_name_eng, fish_name_eng)
+
+    def _publish_ui_event(
+        self,
+        text: str,
+        *,
+        event_type: str = "info",
+        icon: str = "",
+        detail: str = "",
+        extra_green: str = "",
+        extra_red: str = "",
+    ) -> None:
+        event_bus.publish_ui_event(
+            UiEventMessage(
+                text=text,
+                event_type=event_type,
+                icon=icon,
+                detail=detail,
+                extra_green=extra_green,
+                extra_red=extra_red,
+            )
+        )
+
+    def _publish_catch_ui_event(
+        self,
+        *,
+        fish_id: str | None,
+        fish_label: str,
+        weight_kg: float | None,
+        catch_size: str,
+        kept: bool,
+    ) -> None:
+        details: list[str] = []
+        if weight_kg is not None:
+            details.append(format_weight(weight_kg))
+        if catch_size and catch_size != "unknown":
+            details.append(catch_size)
+        price_text = ""
+        if fish_id and weight_kg is not None:
+            price_min, price_max = self.session_stats.effective_price_range_for(fish_id)
+            if price_min > 0 or price_max > 0:
+                price_text = "+ " + format_money_range(weight_kg * price_min, weight_kg * price_max)
+        self._publish_ui_event(
+            f"Поймана рыба: {fish_label}",
+            event_type="fish",
+            icon="fish.svg",
+            detail=" · ".join(details),
+            extra_green=price_text if kept else "",
+            extra_red="отпущена" if not kept else "",
+        )
 
     def _log(self, msg: str) -> None:
         self.logger.write(msg)

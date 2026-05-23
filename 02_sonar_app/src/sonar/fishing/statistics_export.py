@@ -41,6 +41,11 @@ def write_stats_csv(path: Path, stats: FishingSessionStats, *, app_name: str, bu
         writer.writerow(["Доход", format_money_range(totals.earned_min, totals.earned_max)])
         writer.writerow(["Доход в час", format_money_range(totals.earned_per_hour_min, totals.earned_per_hour_max)])
         writer.writerow([])
+        writer.writerow(["Размер улова"])
+        writer.writerow(["Размер", "Количество", "Доля"])
+        for item in stats.catch_size_rows():
+            writer.writerow([item.label, item.count, f"{item.percent:.1f}%"])
+        writer.writerow([])
         writer.writerow(["Статистика по рыбе"])
         writer.writerow(["Рыба", "Поймано", "Отпущено", "Цена", "Своя цена за 1000", "Доход"])
         for row in rows:

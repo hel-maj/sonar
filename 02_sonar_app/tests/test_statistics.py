@@ -86,3 +86,27 @@ def test_money_and_price_ranges_collapse_equal_values():
     assert format_money_range(1200, 1200) == "1 200 $"
     assert format_money_range(1200, 1500) == "от 1 200 $ до 1 500 $"
     assert format_base_price(FishPrice(1.0, 1.0, 1000.0, 1000.0)) == "1 $/шт · 1000 $/1000"
+
+
+def test_session_tracks_catch_size_distribution():
+    stats = FishingSessionStats(default_prices={"marlin": FishPrice(0.67, 0.73, 670.0, 730.0)})
+
+    stats.record_catch("marlin", "Марлин", 3.1, kept=True, catch_size="Скромный улов")
+    stats.record_catch("marlin", "Марлин", 4.0, kept=True, catch_size="Рекордный улов")
+    stats.record_catch("marlin", "Марлин", 2.0, kept=False, catch_size="Рекордный улов")
+
+    rows = {row.label: row for row in stats.catch_size_rows()}
+
+    assert rows["Скромный улов"].count == 1
+    assert rows["Скромный улов"].percent == pytest.approx(33.333, abs=0.01)
+    assert rows["Рекордный улов"].count == 2
+    assert rows["Рекордный улов"].percent == pytest.approx(66.667, abs=0.01)
+
+
+def test_session_resets_catch_size_distribution():
+    stats = FishingSessionStats(default_prices={"marlin": FishPrice(0.67, 0.73, 670.0, 730.0)})
+    stats.record_catch("marlin", "Марлин", 3.1, kept=True, catch_size="Хороший улов")
+
+    stats.reset()
+
+    assert all(row.count == 0 for row in stats.catch_size_rows())

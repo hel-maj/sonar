@@ -177,8 +177,8 @@ class NotificationManager:
             self.send_message("🍽 Эффект еды закончился")
 
     def notify_backpack_stored(self, count: int) -> None:
-        if count > 0 and self.settings.notify_inventory_full:
-            self.send_message(f"🎒 Рыба переложена в рюкзак: {count} шт")
+        del count
+        return
 
     def notify_inventory_full(self) -> None:
         if self.settings.notify_inventory_full:

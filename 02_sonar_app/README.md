@@ -121,7 +121,18 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 
 ## Проверки
 
+Перед полным прогоном тестов установи проект с test-зависимостями. Это важно для UI-тестов: `PySide6` должен быть установлен в окружение, иначе проверка интерфейса не будет полноценной.
+
 ```powershell
-python -m pytest -q
+python -m pip install -e ".[test]"
+python scripts/run_tests.py
 python -m sonar --smoke-test
 ```
+
+На Windows можно запускать тем же способом через готовый скрипт:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test.ps1
+```
+
+`python -m pytest -q` можно использовать для локальной быстрой проверки, но основной командой считается `python scripts/run_tests.py`: он изолирует зависающие OCR/OpenCV/UI-кейсы и не пропускает UI-тесты из-за отсутствия `PySide6`.

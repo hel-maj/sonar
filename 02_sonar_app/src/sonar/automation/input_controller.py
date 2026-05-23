@@ -204,6 +204,10 @@ class InputController:
             type=INPUT_KEYBOARD,
             union=InputUnion(ki=KeyBdInput(0, scan, flags, 0, ctypes.pointer(extra))),
         )
+        if not hasattr(ctypes, "windll"):
+            return
+        if not hasattr(ctypes, "windll"):
+            return
         sent = ctypes.windll.user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(event))
         if sent != 1:
             raise ctypes.WinError()

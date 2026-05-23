@@ -20,6 +20,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+]
+
 build = [
     "Nuitka>=2.7",
     "ordered-set>=4.1",
@@ -37,3 +42,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 sonar = ["resources/**/*", "secure_wipe.ps1", "sdelete.exe"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
