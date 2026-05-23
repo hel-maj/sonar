@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
             import sonar.streaming.service as streaming_service_module
             import sonar.telegram.notifier as notification_module
             from sonar.ui import main_window as main_window_module
-            from sonar.ui.overview_redesign_fix import apply as apply_overview_redesign
+            from sonar.ui.overview_redesign_fix2 import apply as apply_overview_redesign
         except ImportError as exc:
             logging.getLogger("sonar").exception("Unable to import desktop UI")
             print("PySide6 is required for the desktop UI. Install dependencies with: python -m pip install -e .")
