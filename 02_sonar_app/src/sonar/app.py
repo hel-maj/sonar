@@ -28,11 +28,13 @@ def main(argv: list[str] | None = None) -> int:
             import sonar.streaming.service as streaming_service_module
             import sonar.telegram.notifier as notification_module
             from sonar.ui import main_window as main_window_module
+            from sonar.ui.overview_redesign import apply as apply_overview_redesign
         except ImportError as exc:
             logging.getLogger("sonar").exception("Unable to import desktop UI")
             print("PySide6 is required for the desktop UI. Install dependencies with: python -m pip install -e .")
             print(f"Import error: {exc}")
             return 2
+        apply_overview_redesign(main_window_module)
         apply_chat_wip_gate(
             main_window_module=main_window_module,
             streaming_service_module=streaming_service_module,
