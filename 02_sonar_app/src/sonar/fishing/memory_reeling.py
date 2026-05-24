@@ -358,12 +358,12 @@ class MemoryReelingTracker:
             return ReelingState(active=True, action="input_blocked", fish_addr=self.fish_addr, player_addr=self.player_addr)
         if self.player_addr is None:
             self._retry_find_targets()
-            return ReelingState(active=True, action="target_search")
+            return ReelingState(active=True, action="target_search", fish_addr=self.fish_addr)
         if self.fish_addr is None:
             self._retry_find_fish()
             return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
         if self.player_addr is None or self.fish_addr is None:
-            return ReelingState(active=True, action="target_search")
+            return ReelingState(active=True, action="target_search", fish_addr=self.fish_addr, player_addr=self.player_addr)
 
         self._ensure_direction_tracking_target()
         direction_item = self._read_fish_direction(
@@ -419,7 +419,6 @@ class MemoryReelingTracker:
 
         player_item = self._read_pos_at_offsets(self.player_addr, POS_OFFSETS)
         if player_item is None:
-            self.fish_addr = None
             return ReelingState(active=True, action="position_unreadable", player_addr=self.player_addr, fish_addr=self.fish_addr)
         fish_item = self._read_fish_pos_relative(self.fish_addr, player_item[0])
         using_stale_fish_pos = False
@@ -432,6 +431,8 @@ class MemoryReelingTracker:
                 fish_item = self.last_fish_pos, self.last_fish_pos_offset
                 using_stale_fish_pos = True
             else:
+                if self._fish_confirmed_hash:
+                    return ReelingState(active=True, action="position_unreadable", player_addr=self.player_addr, fish_addr=self.fish_addr)
                 if self._should_reject_unreadable(now):
                     self._reject_current_fish("position unreadable")
                     return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
@@ -452,7 +453,12 @@ class MemoryReelingTracker:
         px, py, pz = control_player_pos
         x, y, z = fish_pos
         distance = math.sqrt((x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2)
-        if self._is_stationary_wrong_target(now, fish_pos, distance, using_stale_fish_pos or using_local_fish_frame):
+        if not self._fish_confirmed_hash and self._is_stationary_wrong_target(
+            now,
+            fish_pos,
+            distance,
+            using_stale_fish_pos or using_local_fish_frame,
+        ):
             self._reject_current_fish("stationary target", fish_pos, distance)
             return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
         if self.last_fish_xy and self.last_time and not using_stale_fish_pos:
@@ -791,6 +797,8 @@ class MemoryReelingTracker:
             self._log(f"Memory reeling resolver failed: {exc}")
 
     def _retry_find_fish(self) -> None:
+        if self.fish_addr is not None:
+            return
         now = time.time()
         if now - self._last_fish_search_at < FISH_FAST_RETRY_SECONDS:
             return
@@ -820,7 +828,8 @@ class MemoryReelingTracker:
                 self.replay_interface = self._find_replay_interface_global()
             self.player_addr = self._find_cped()
             if self.player_addr:
-                self.fish_addr = self._find_fish_addr_replay() or self._find_fish_addr()
+                if self.fish_addr is None:
+                    self.fish_addr = self._find_fish_addr_replay() or self._find_fish_addr()
                 self._log(
                     "Memory reeling targets retry: "
                     f"replay={self._fmt_addr(self.replay_interface)} "
