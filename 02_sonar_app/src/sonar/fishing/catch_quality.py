@@ -15,7 +15,7 @@ CATCH_SIZE_TYPES: tuple[CatchSizeType, ...] = (
     CatchSizeType("modest", "Скромный улов", ("скром",)),
     CatchSizeType("good", "Хороший улов", ("хорош",)),
     CatchSizeType("record", "Рекордный улов", ("рекорд",)),
-    CatchSizeType("trophy", "Трофейный улов", ("троф",)),
+    CatchSizeType("trophy", "Трофейная", ("троф",)),
 )
 
 CATCH_SIZE_BY_LABEL: dict[str, CatchSizeType] = {item.label: item for item in CATCH_SIZE_TYPES}
@@ -24,7 +24,7 @@ CATCH_SIZE_COLORS_BY_LABEL: dict[str, str] = {
     "Скромный улов": "#242424",
     "Хороший улов": "#275277",
     "Рекордный улов": "#8C1D2C",
-    "Трофейный улов": "#1D8667",
+    "Трофейная": "#1D8667",
 }
 CATCH_SIZE_COLORS_BY_KEY: dict[str, str] = {item.key: CATCH_SIZE_COLORS_BY_LABEL[item.label] for item in CATCH_SIZE_TYPES}
 UNKNOWN_CATCH_SIZE_KEY = "unknown"
