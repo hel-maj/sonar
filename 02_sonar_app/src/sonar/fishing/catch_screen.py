@@ -169,11 +169,11 @@ class CatchScreenDetector:
     @classmethod
     def _fish_weight_number_rois(cls, panel: Rect) -> tuple[Rect, ...]:
         return (
+            cls._fish_weight_roi(panel),
+            cls._relative_roi(panel, 0.730, 0.535, 0.135, 0.10),
             cls._relative_roi(panel, 0.745, 0.55, 0.105, 0.09),
             cls._relative_roi(panel, 0.765, 0.55, 0.095, 0.09),
             cls._relative_roi(panel, 0.780, 0.56, 0.085, 0.08),
-            cls._relative_roi(panel, 0.730, 0.535, 0.135, 0.10),
-            cls._fish_weight_roi(panel),
         )
 
     @classmethod
@@ -244,6 +244,7 @@ class CatchScreenDetector:
     @classmethod
     def _read_weight_text(cls, frame: np.ndarray, panel: Rect) -> str | None:
         fallback: str | None = None
+        valid: list[tuple[str, float]] = []
         for roi in cls._fish_weight_number_rois(panel):
             text = cls._read_text(frame, roi, digits=True)
             weight = cls._parse_weight(text)
@@ -251,8 +252,13 @@ class CatchScreenDetector:
                 continue
             if fallback is None:
                 fallback = text
-            if 0.01 <= weight < 15.0:
+            if not 0.01 <= weight < 15.0:
+                continue
+            if "." in text or "," in text:
                 return text
+            valid.append((text, weight))
+        if valid:
+            return min(valid, key=lambda item: item[1])[0]
         return fallback
 
     @staticmethod
@@ -278,7 +284,11 @@ class CatchScreenDetector:
         try:
             if "." not in raw and "," not in raw and raw.isdigit() and len(raw) >= 3:
                 return float(raw) / 100.0
-            return float(raw.replace(",", "."))
+            normalized = raw.replace(",", ".")
+            if "." in normalized:
+                whole, fraction = normalized.split(".", 1)
+                normalized = f"{whole}.{fraction[:2]}"
+            return float(normalized)
         except ValueError:
             return None
 
