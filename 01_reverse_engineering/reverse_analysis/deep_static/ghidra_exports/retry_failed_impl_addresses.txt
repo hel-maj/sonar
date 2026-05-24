@@ -1,1 +1,0 @@
-23e7280f0,workers.fishing.fishing_bot:FishingBot._get_triggers

@@ -1,8 +1,0 @@
-Name: main.dll
-Executable path: /P:/projects/Majestic/Sonar/01_reverse_engineering/kortexworker.exe_extracted_noskip/main.dll
-Language: x86:LE:64:default
-Compiler: windows
-Image base: 23a330000
-Min address: 23a330000
-Max address: 23fed49ff
-Function count: 23348
