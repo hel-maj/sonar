@@ -14,10 +14,18 @@ from sonar.fishing.constants import resolution_name
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gameplay"
+TACKLE_FIXTURES = Path(__file__).parent / "fixtures" / "tackle"
 
 
 def load_frame(name: str):
     path = FIXTURES / name
+    frame = cv2.imread(str(path))
+    assert frame is not None, f"Fixture is not readable: {path}"
+    return frame
+
+
+def load_tackle_frame(name: str):
+    path = TACKLE_FIXTURES / name
     frame = cv2.imread(str(path))
     assert frame is not None, f"Fixture is not readable: {path}"
     return frame
@@ -166,6 +174,21 @@ def test_waiting_screen_does_not_press_space_before_hook_trigger(fixture):
 
     result = create_monitor_for_frame(frame, input_controller).check_and_act(frame)
 
+    assert result.pressed is False
+    assert input_controller.keys == []
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    ["no_line_bait_net.jpg", "counts_line998_hook0_bait1.jpg", "counts_line900_hook0_bait1.jpg"],
+)
+def test_hook_trigger_ignores_gray_bar_matches_without_red_stage(fixture):
+    frame = load_tackle_frame(fixture)
+    input_controller = DummyInput()
+
+    result = create_monitor_for_frame(frame, input_controller).check_and_act(frame)
+
+    assert result.red_detected is False
     assert result.pressed is False
     assert input_controller.keys == []
 
