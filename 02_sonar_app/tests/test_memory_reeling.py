@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import time
 
+from sonar.fishing import memory_reeling as reeling_module
 from sonar.fishing.memory_reeling import (
     DIRECTION_STALE_SECONDS,
     FISH_MODEL_HASH,
@@ -42,7 +43,7 @@ def make_tracker(
     direction: float | None,
     direction_offset: int = 0x300,
     extra_directions: dict[int, float] | None = None,
-    fish_pos: tuple[float, float, float] = (3.0, 4.0, 0.0),
+    fish_pos: tuple[float, float, float] | None = (3.0, 4.0, 0.0),
     player_pos: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> MemoryReelingTracker:
     tracker = MemoryReelingTracker.__new__(MemoryReelingTracker)
@@ -78,6 +79,11 @@ def make_tracker(
     tracker._last_lateral_fish_addr = None
     tracker._lateral_velocity = 0.0
     tracker._last_line_vector = None
+    tracker._stable_move_sign = None
+    tracker._last_stable_move_at = 0.0
+    tracker._pending_move_sign = None
+    tracker._pending_move_since = 0.0
+    tracker._pending_move_count = 0
     tracker._last_fish_search_at = 0.0
     tracker._last_deep_fish_search_at = 0.0
     tracker.last_fish_pos_offset = None
@@ -98,10 +104,13 @@ def make_tracker(
             PLAYER + 0x50: player_pos[0],
             PLAYER + 0x54: player_pos[1],
             PLAYER + 0x58: player_pos[2],
-            FISH + 0x130: fish_pos[0],
-            FISH + 0x134: fish_pos[1],
-            FISH + 0x138: fish_pos[2],
         }
+        if fish_pos is not None:
+            fish_values.update({
+                FISH + 0x130: fish_pos[0],
+                FISH + 0x134: fish_pos[1],
+                FISH + 0x138: fish_pos[2],
+            })
         for offset, value in (extra_directions or {}).items():
             fish_values[FISH + offset] = value
         if direction is not None:
@@ -182,6 +191,65 @@ def test_confirmed_hash_fish_does_not_recalibrate_on_stable_direction() -> None:
     assert tracker._blocked_direction_offsets == set()
 
 
+def test_live_68_direction_is_preferred_before_stale_heading_fields() -> None:
+    tracker = make_tracker(
+        entity_hash=FISH_MODEL_HASH,
+        direction=-0.75,
+        direction_offset=0x300,
+        extra_directions={0x68: 0.003},
+    )
+
+    assert tracker._read_fish_direction(FISH, FISH_PRIMARY_DIRECTION_OFFSETS) == (1.0, 0x68, 0.003)
+
+
+def test_live_304_direction_is_preferred_for_current_fish_profile() -> None:
+    tracker = make_tracker(
+        entity_hash=FISH_MODEL_HASH,
+        direction=-0.75,
+        direction_offset=0x300,
+        extra_directions={0x68: 0.003, 0x304: -0.25},
+    )
+
+    assert tracker._read_fish_direction(FISH, FISH_PRIMARY_DIRECTION_OFFSETS) == (-1.0, 0x304, -0.25)
+
+
+def test_positive_move_presses_reeling_key() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=0.75)
+    input_controller = tracker.input_controller
+
+    state = tracker.step()
+
+    assert state.move_val == 1.0
+    assert state.action == "hold_d"
+    assert tracker.held_key == "d"
+    assert input_controller.key_downs == ["d"]
+    assert input_controller.key_ups == []
+
+
+def test_negative_move_holds_opposite_reeling_key() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=-0.75)
+    tracker.held_key = "a"
+
+    state = tracker.step()
+
+    assert state.move_val == -1.0
+    assert state.action == "hold_a"
+
+
+def test_negative_move_switches_reeling_key() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=-0.75)
+    tracker.held_key = "d"
+    input_controller = tracker.input_controller
+
+    state = tracker.step()
+
+    assert state.move_val == -1.0
+    assert state.action == "hold_a"
+    assert tracker.held_key == "a"
+    assert input_controller.key_ups == ["d"]
+    assert input_controller.key_downs == ["a"]
+
+
 def test_confirmed_hash_local_position_without_direction_keeps_target() -> None:
     tracker = make_tracker(
         entity_hash=FISH_MODEL_HASH,
@@ -258,3 +326,121 @@ def test_replay_broad_rejects_sentinel_local_position_and_huge_direction() -> No
     tracker = make_tracker(entity_hash=12345, direction=100000.0, fish_pos=(-1.0, -1.0, -1.0))
 
     assert tracker._find_fish_addr_replay_broad(P_IFACE, (0.0, 0.0, 0.0)) is None
+
+
+def test_reeling_key_switch_waits_like_manual_input(monkeypatch) -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=-0.75)
+    tracker.held_key = "d"
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(reeling_module.random, "uniform", lambda start, end: 0.123)
+    monkeypatch.setattr(reeling_module.time, "sleep", sleep_calls.append)
+
+    state = tracker.step()
+
+    assert state.action == "hold_a"
+    assert tracker.held_key == "a"
+    assert sleep_calls == [0.123]
+
+
+def test_reeling_initial_press_has_no_artificial_sleep(monkeypatch) -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=0.75)
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(reeling_module.time, "sleep", sleep_calls.append)
+
+    state = tracker.step()
+
+    assert state.action == "hold_d"
+    assert tracker.held_key == "d"
+    assert sleep_calls == []
+
+
+def test_missing_fresh_fish_position_keeps_last_stable_input_briefly() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=None, fish_pos=None)
+    tracker.held_key = "d"
+    tracker._stable_move_sign = 1
+    tracker._last_stable_move_at = time.time()
+    tracker.last_fish_pos = (3.0, 4.0, 0.0)
+    tracker.last_fish_pos_offset = 0x130
+    tracker.last_good_fish_at = time.time()
+    input_controller = tracker.input_controller
+
+    state = tracker.step()
+
+    assert state.action == "hold_d_wait_fresh_position"
+    assert state.move_val == 1.0
+    assert tracker.held_key == "d"
+    assert input_controller.key_ups == []
+
+
+def test_missing_fresh_fish_position_releases_key_after_stable_input_grace() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=None, fish_pos=None)
+    tracker.held_key = "d"
+    tracker._stable_move_sign = 1
+    tracker._last_stable_move_at = time.time() - reeling_module.STALE_REELING_INPUT_HOLD_SECONDS - 0.1
+    tracker.last_fish_pos = (3.0, 4.0, 0.0)
+    tracker.last_fish_pos_offset = 0x130
+    tracker.last_good_fish_at = time.time()
+    input_controller = tracker.input_controller
+
+    state = tracker.step()
+
+    assert state.action == "wait_fresh_position"
+    assert tracker.held_key is None
+    assert input_controller.key_ups == ["d"]
+
+
+def test_lateral_velocity_switches_before_large_delta_accumulates() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=None)
+    tracker._last_lateral = 1.0
+    tracker._last_lateral_at = 10.0
+    tracker._last_lateral_fish_addr = FISH
+    tracker._last_line_vector = (6.0, 0.0)
+    tracker.held_key = "d"
+
+    move_val, source, _ = tracker._movement_from_lateral(
+        lateral=1.08,
+        velocity_along=0.0,
+        now=10.05,
+        fish_addr=FISH,
+        using_stale_fish_pos=False,
+        player_pos=(0.0, 0.0, 0.0),
+        fish_pos=(6.0, 0.0, 0.0),
+    )
+
+    assert move_val == 1.0
+    assert source == "lateral_velocity"
+
+
+def test_reeling_direction_ignores_single_opposite_jitter() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=-0.75)
+    tracker.held_key = "d"
+    tracker._stable_move_sign = 1
+
+    state = tracker.step()
+
+    assert state.move_val == 1.0
+    assert state.action == "hold_d"
+    assert tracker.held_key == "d"
+    assert tracker.input_controller.key_downs == []
+    assert tracker.input_controller.key_ups == []
+    assert tracker._pending_move_sign == -1
+    assert tracker._pending_move_count == 1
+
+
+def test_reeling_direction_switches_after_confirmed_opposite_samples() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=-0.75)
+    tracker.held_key = "d"
+    tracker._stable_move_sign = 1
+    tracker._last_stable_move_at = time.time()
+    tracker._pending_move_sign = -1
+    tracker._pending_move_count = reeling_module.DIRECTION_SWITCH_CONFIRM_SAMPLES - 1
+    tracker._pending_move_since = time.time() - reeling_module.DIRECTION_SWITCH_CONFIRM_SECONDS - 0.01
+    input_controller = tracker.input_controller
+
+    state = tracker.step()
+
+    assert state.move_val == -1.0
+    assert state.action == "hold_a"
+    assert tracker.held_key == "a"
+    assert input_controller.key_ups == ["d"]
+    assert input_controller.key_downs == ["a"]

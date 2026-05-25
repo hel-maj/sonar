@@ -249,6 +249,38 @@ def test_ffmpeg_hls_window_is_tuned_for_lower_latency(tmp_path):
     assert "independent_segments" in command[command.index("-hls_flags") + 1]
 
 
+def test_ffmpeg_command_captures_system_audio_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("SONAR_STREAM_AUDIO_ENABLED", raising=False)
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._temp_dir = tmp_path / "session"
+    service._hls_dir = service._temp_dir / "hls"
+    service._hls_dir.mkdir(parents=True)
+
+    command = service._build_ffmpeg_command(Path("ffmpeg.exe"))
+
+    assert "-an" not in command
+    assert "wasapi" in command
+    assert "-loopback" in command
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert command[command.index("-b:a") + 1] == "128k"
+    assert command[command.index("-map") + 1] == "0:v:0"
+    assert "1:a:0" in command
+
+
+def test_ffmpeg_command_can_disable_stream_audio(tmp_path, monkeypatch):
+    monkeypatch.setenv("SONAR_STREAM_AUDIO_ENABLED", "0")
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._temp_dir = tmp_path / "session"
+    service._hls_dir = service._temp_dir / "hls"
+    service._hls_dir.mkdir(parents=True)
+
+    command = service._build_ffmpeg_command(Path("ffmpeg.exe"))
+
+    assert "-an" in command
+    assert "wasapi" not in command
+    assert "-c:a" not in command
+
+
 def test_low_fps_mode_uses_ffmpeg_hls_at_ten_fps(tmp_path):
     service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
     service._snapshot_mode_enabled = True

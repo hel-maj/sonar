@@ -1,19 +1,32 @@
 from __future__ import annotations
 
+import html
+import random
+import re
 import threading
 import time
 import urllib.error
 import urllib.request
-import re
+from io import BytesIO
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
 
 import requests
+from PIL import Image, ImageFilter, ImageOps
 
 from sonar.config.models import TelegramSettings
-from sonar.fishing.statistics import FishStatsRow, SessionTotals, format_catch_summary, format_duration, format_money_range, format_weight
+from sonar.fishing.item_info import ItemInfo
+from sonar.fishing.statistics import FishStatsRow, SessionTotals, format_catch_summary, format_duration, format_money, format_money_range, format_weight
 from sonar.fishing.tackle_detection import TackleItemCount, format_tackle_items
+
+
+def _h(value: object) -> str:
+    return html.escape(str(value), quote=False)
+
+
+def _non_empty(value: str | None) -> str:
+    return (value or "").strip()
 
 
 STREAM_MENU_REFRESH_INTERVAL_SECONDS = 15.0
@@ -151,6 +164,8 @@ class NotificationManager:
         if not self.settings.notify_catch:
             return
         message = self._format_catch_message(fish_name, weight_kg, quality_text, xp_current, xp_total, totals)
+        if image_bytes is not None:
+            image_bytes = self._decorate_catch_photo(image_bytes)
         if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message):
             return
         self.send_message(message)
@@ -159,7 +174,7 @@ class NotificationManager:
         if not self.settings.notify_start_stop:
             return
         if not has_stats:
-            self.send_message("🚤 Рыбалка началась!\n\n🎣 Удочка закинута, ждём улов...")
+            self.send_message("🚤 <b>Рыбалка началась!</b>\n\n🎣 Удочка закинута, ждём улов...")
             return
         self.send_message(self._format_session_stats_message("🚤 Рыбалка началась!", "📊 Текущая сессия", totals))
 
@@ -168,13 +183,15 @@ class NotificationManager:
             return
         self.send_message(self._format_session_stats_message("🛑 Рыбалка остановлена!", "📊 Статистика сессии", totals, reason=reason))
 
-    def notify_meal_eaten(self) -> None:
-        if self.settings.notify_meal:
-            self.send_message("🍔 Голод утолён!")
+    def notify_meal_eaten(self, item_name: str = "", *, image_bytes: bytes | None = None, item_info: ItemInfo | None = None) -> None:
+        del image_bytes
+        if not self.settings.notify_meal:
+            return
+        self.send_message(self._format_meal_message(item_name, item_info))
 
     def notify_meal_ended(self) -> None:
         if self.settings.notify_meal:
-            self.send_message("🍽 Эффект еды закончился")
+            self.send_message("🍽 <b>Эффект еды закончился</b>")
 
     def notify_backpack_stored(self, count: int) -> None:
         del count
@@ -182,32 +199,36 @@ class NotificationManager:
 
     def notify_inventory_full(self) -> None:
         if self.settings.notify_inventory_full:
-            self.send_message("📦 Закончилось место!")
+            self.send_message("📦 <b>Закончилось место!</b>")
+
+    def notify_bait_tired(self) -> None:
+        if self.settings.notify_bait_tired:
+            self.send_message("<b>Рыба устала от приманки</b>\nИсправляем")
 
     def notify_focus_lost(self) -> None:
         if self.settings.notify_focus_lost:
             self.send_message(
-                "⚠️🎮 Фокус ушёл с игры\n\n"
+                "⚠️🎮 <b>Фокус ушёл с игры</b>\n\n"
                 "Ввод поставлен на паузу, чтобы клавиши не нажимались в другом окне. "
                 "Откройте меню Telegram и нажмите «Вернуть фокус игре»."
             )
 
     def notify_fishing_failed(self) -> None:
         if self.settings.notify_start_stop:
-            self.send_message("⚠️ Не удалось восстановить рыбалку")
+            self.send_message("⚠️ <b>Не удалось восстановить рыбалку</b>")
 
     def notify_fishing_restored(self) -> None:
         if self.settings.notify_start_stop:
-            self.send_message("✅ Рыбалка восстановлена")
+            self.send_message("✅ <b>Рыбалка восстановлена</b>")
 
     def notify_app_started(self) -> None:
-        self.send_message("Sonar запущен")
+        self.send_message("<b>Sonar запущен</b>")
         for chat_id in list(self.settings.admin_ids):
             self._send_menu(chat_id)
 
     def notify_app_stopped(self) -> None:
         self._delete_stream_link_messages()
-        self.send_message("Sonar выключен")
+        self.send_message("<b>Sonar выключен</b>")
 
     def send_message(self, text: str, *, chat_id: int | None = None, reply_markup: dict[str, Any] | None = None) -> bool:
         if self.sink:
@@ -217,7 +238,7 @@ class NotificationManager:
         chat_ids = [chat_id] if chat_id is not None else list(self.settings.admin_ids)
         if not chat_ids:
             return False
-        payload_base: dict[str, Any] = {"text": text}
+        payload_base: dict[str, Any] = {"text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         if reply_markup is not None:
             payload_base["reply_markup"] = reply_markup
         ok = True
@@ -231,7 +252,7 @@ class NotificationManager:
     def send_photo(self, chat_id: int, image_bytes: bytes, caption: str = "📸 Скриншот игры") -> bool:
         response = self._api_post(
             "sendPhoto",
-            data={"chat_id": chat_id, "caption": caption},
+            data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
             files={"photo": ("screen.png", image_bytes, "image/png")},
         )
         return bool(response and response.ok)
@@ -445,6 +466,7 @@ class NotificationManager:
             ("notify_start_stop", "Запуск/Остановка"),
             ("notify_meal", "Питание"),
             ("notify_inventory_full", "Закончилось место"),
+            ("notify_bait_tired", "Устала от приманки"),
         ]
         items.append(("notify_focus_lost", "Потеря фокуса игры"))
         keyboard = []
@@ -489,6 +511,7 @@ class NotificationManager:
             "notify_start_stop",
             "notify_meal",
             "notify_inventory_full",
+            "notify_bait_tired",
             "notify_focus_lost",
         }:
             return
@@ -743,7 +766,7 @@ class NotificationManager:
             return self.send_message(text, chat_id=chat_id, reply_markup=reply_markup)
         if self.sink:
             self.sink(text)
-        payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text}
+        payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         response = self._api_post("editMessageText", json=payload)
@@ -770,6 +793,69 @@ class NotificationManager:
             return None
 
     @staticmethod
+    def _decorate_catch_photo(image_bytes: bytes) -> bytes:
+        try:
+            with Image.open(BytesIO(image_bytes)) as image:
+                original = ImageOps.exif_transpose(image).convert("RGBA")
+                width, height = original.size
+                if width <= 0 or height <= 0:
+                    return image_bytes
+                canvas_width = max(width, int(round(width * 1.35)))
+                canvas_height = max(height, int(round(height * 1.35)))
+                sample = original.convert("RGB").resize((24, 24), Image.Resampling.BILINEAR)
+                colors = list(sample.get_flattened_data())
+                random.SystemRandom().shuffle(colors)
+                background_seed = Image.new("RGB", sample.size)
+                background_seed.putdata(colors)
+                background = background_seed.resize((canvas_width, canvas_height), Image.Resampling.BICUBIC)
+                background = background.filter(ImageFilter.GaussianBlur(radius=max(18, max(canvas_width, canvas_height) // 14)))
+                max_foreground_width = int(canvas_width * 0.82)
+                max_foreground_height = int(canvas_height * 0.82)
+                foreground = original.copy()
+                foreground.thumbnail((max_foreground_width, max_foreground_height), Image.Resampling.LANCZOS)
+                x = (canvas_width - foreground.width) // 2
+                y = (canvas_height - foreground.height) // 2
+                background = background.convert("RGBA")
+                background.alpha_composite(foreground, (x, y))
+                output = BytesIO()
+                background.save(output, format="PNG")
+                return output.getvalue()
+        except Exception:
+            return image_bytes
+
+    @staticmethod
+    def _format_meal_message(item_name: str, item_info: ItemInfo | None) -> str:
+        title = _non_empty(item_info.item_name if item_info else "") or _non_empty(item_info.title if item_info else "") or item_name.strip() or "еда"
+        lines = ["🍽 <b>Питание использовано!</b>", "", f"🥪 <b>Съедено:</b> {_h(title)}"]
+        if item_info is not None:
+            if item_info.weight:
+                lines.append(f"⚖️ <b>Вес:</b> {_h(item_info.weight)} кг")
+            if item_info.satiety_change:
+                lines.append(f"🍗 <b>Сытость:</b> {_h(item_info.satiety_change)}")
+            if item_info.thirst_change:
+                lines.append(f"💧 <b>Жажда:</b> {_h(item_info.thirst_change)}")
+            if item_info.condition_percent:
+                lines.append(f"🛡 <b>Состояние:</b> {_h(item_info.condition_percent)}%")
+            if item_info.poison_chance:
+                lines.append(f"🧪 <b>Шанс отравления:</b> {_h(item_info.poison_chance)}")
+            if item_info.strength:
+                lines.append(f"🧰 <b>Прочность:</b> {_h(item_info.strength)}")
+            if item_info.effects:
+                lines.extend(["", "✨ <b>Эффекты</b>"])
+                for effect in item_info.effects:
+                    duration = f" — ⏳ {_h(effect.duration)}" if effect.duration else ""
+                    lines.append(f"• <b>{_h(effect.name)}</b>{duration}")
+                    if effect.description:
+                        lines.append(f"  <i>{_h(effect.description)}</i>")
+                    for modification in effect.parameter_modifications:
+                        lines.append(f"  <code>{_h(modification)}</code>")
+            elif item_info.parameter_modifications:
+                lines.extend(["", "🧩 <b>Модификации параметров</b>"])
+                for modification in item_info.parameter_modifications:
+                    lines.append(f"• <code>{_h(modification)}</code>")
+        return "\n".join(lines)
+
+    @staticmethod
     def _format_catch_message(
         fish_name: str,
         weight_kg: float | None,
@@ -781,16 +867,16 @@ class NotificationManager:
         trophy = quality_text and any(marker in quality_text.lower() for marker in ("троф", "рекорд"))
         lines = []
         if trophy:
-            lines.append("🏆 Трофейный улов!")
+            lines.append("🏆 <b>Трофейный улов!</b>")
             lines.append("")
-        lines.append(f"🐟 {fish_name} — {format_weight(weight_kg or 0.0)}")
+        lines.append(f"🐟 <b>{_h(fish_name)}</b> — {_h(format_weight(weight_kg or 0.0))}")
         lines.append("")
-        lines.append(f"📦 Всего: {format_weight(totals.caught_kg)} · {totals.caught_count} выловов")
-        lines.append(f"💰 Доход: {format_money_range(totals.earned_min, totals.earned_max)}")
+        lines.append(f"📦 <b>Всего:</b> {_h(format_weight(totals.caught_kg))} · {totals.caught_count} выловов")
+        lines.append(f"💰 <b>Доход:</b> от {_h(format_money(totals.earned_min))}")
         if xp_current is not None and xp_total is not None:
-            lines.append(f"⭐ Опыт: {xp_current} / {xp_total}")
+            lines.append(f"⭐ <b>Опыт:</b> {xp_current} / {xp_total}")
         elif xp_current is not None:
-            lines.append(f"⭐ Опыт: {xp_current}")
+            lines.append(f"⭐ <b>Опыт:</b> {xp_current}")
         return "\n".join(lines)
 
     @staticmethod
@@ -803,13 +889,13 @@ class NotificationManager:
         rows: list[FishStatsRow] | None = None,
     ) -> str:
         lines = [
-            title,
+            f"<b>{_h(title)}</b>",
             "",
-            subtitle,
+            f"<b>{_h(subtitle)}</b>",
             "",
         ]
         if reason:
-            lines.extend([f"Причина остановки: {reason}", ""])
+            lines.extend([f"<b>Причина остановки:</b> {_h(reason)}", ""])
         lines.extend(
             [
                 f"⏱ Длительность: {format_duration(totals.duration_seconds)}",
@@ -826,7 +912,7 @@ class NotificationManager:
                 stat = row.stat
                 lines.extend(
                     [
-                        f"• {stat.name}",
+                        f"• <b>{_h(stat.name)}</b>",
                         f"  🎣 Поймано: {format_catch_summary(stat.caught_count, stat.caught_kg)}",
                         f"  🌊 Отпущено: {format_catch_summary(stat.released_count, stat.released_kg)}",
                         f"  💰 Доход: {format_money_range(row.earned_min, row.earned_max)}",

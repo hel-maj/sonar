@@ -803,32 +803,39 @@ class MainWindow(QMainWindow):
 
         self.auto_meal_check = ToggleSwitch("Включено")
         settings_grid.addWidget(self._switch_card("Авто-питание", "Автоматически использовать еду и воду при признаках голода/жажды.", ui_icon("food.svg"), self.auto_meal_check), 0, 0)
+        self.food_depleted_action_combo = NonScrollingComboBox()
+        self.food_depleted_action_combo.addItem("Продолжать рыбалку", "continue")
+        self.food_depleted_action_combo.addItem("Остановить рыбалку", "stop")
+        self.food_depleted_action_combo.addItem("Выключить игру", "exit_game")
+        self.food_depleted_action_combo.addItem("Выключить компьютер", "shutdown_pc")
+        self.food_depleted_action_card = self._combo_card("Действия, если закончилась еда", "Что делать, если голод/жажда остались, а еды нет.", ui_icon("food.svg"), self.food_depleted_action_combo)
+        settings_grid.addWidget(self.food_depleted_action_card, 0, 1)
         self.auto_change_bait_check = ToggleSwitch("Включено")
-        settings_grid.addWidget(self._switch_card("Авто-смена наживки", "Менять наживку, когда игра показывает необходимость замены.", ui_icon("bait.png"), self.auto_change_bait_check), 0, 1)
+        settings_grid.addWidget(self._switch_card("Авто-смена наживки", "Менять наживку, когда игра показывает необходимость замены.", ui_icon("bait.png"), self.auto_change_bait_check), 1, 0)
         self.store_trunk_check = ToggleSwitch("Включено")
-        settings_grid.addWidget(self._switch_card("Складывать в багажник", "Автоматически складывать рыбу в багажник.", ui_icon("trunk.svg"), self.store_trunk_check), 1, 0)
+        settings_grid.addWidget(self._switch_card("Складывать в багажник", "Автоматически складывать рыбу в багажник.", ui_icon("trunk.svg"), self.store_trunk_check), 1, 1)
         self.start_stop_sound_check = ToggleSwitch("Включено")
-        settings_grid.addWidget(self._switch_card("Звук запуска и остановки", "Воспроизводить нейтральный звук при старте и остановке.", ui_icon("sound.svg"), self.start_stop_sound_check), 1, 1)
+        settings_grid.addWidget(self._switch_card("Звук запуска и остановки", "Воспроизводить нейтральный звук при старте и остановке.", ui_icon("sound.svg"), self.start_stop_sound_check), 2, 0)
 
         self.overweight_action_combo = NonScrollingComboBox()
         self.overweight_action_combo.addItem("Отпускать рыбу", "release")
         self.overweight_action_combo.addItem("Остановить рыбалку", "stop")
         self.overweight_action_combo.addItem("Закрыть игру", "exit_game")
-        settings_grid.addWidget(self._combo_card("Действия при перевесе", "Что делать, если инвентарь перегружен.", ui_icon("scales.svg"), self.overweight_action_combo), 2, 0)
+        settings_grid.addWidget(self._combo_card("Действия при перевесе", "Что делать, если инвентарь перегружен.", ui_icon("scales.svg"), self.overweight_action_combo), 2, 1)
 
         self.fish_without_leader_check = ToggleSwitch("Продолжать без поводка")
         self.leader_depleted_action_combo = NonScrollingComboBox()
         self.leader_depleted_action_combo.addItem("Рыбалка остановится", "stop")
         self.leader_depleted_action_combo.addItem("Закроется игра", "exit_game")
         leader_card = self._switch_combo_card("Рыбалка без поводка", "Если поводки закончились.", ui_icon("leader.png"), self.fish_without_leader_check, self.leader_depleted_action_combo)
-        settings_grid.addWidget(leader_card, 2, 1)
+        settings_grid.addWidget(leader_card, 3, 0)
 
         self.fish_without_net_check = ToggleSwitch("Продолжать без подсака")
         self.net_depleted_action_combo = NonScrollingComboBox()
         self.net_depleted_action_combo.addItem("Рыбалка остановится", "stop")
         self.net_depleted_action_combo.addItem("Закроется игра", "exit_game")
         net_card = self._switch_combo_card("Рыбалка без подсака", "Если подсак закончился или сломался.", ui_icon("landing_net.png"), self.fish_without_net_check, self.net_depleted_action_combo)
-        settings_grid.addWidget(net_card, 3, 0)
+        settings_grid.addWidget(net_card, 3, 1)
 
         self.equipment_depleted_action_combo = NonScrollingComboBox()
         self.equipment_depleted_action_combo.addItem("Остановить бота", "stop")
@@ -836,6 +843,7 @@ class MainWindow(QMainWindow):
         self.equipment_depleted_action_combo.addItem("Выключить компьютер", "shutdown_pc")
         settings_grid.addWidget(self._combo_card("Если закончилось снаряжение", "Общее действие при отсутствии нужных снастей.", ui_icon("settings.svg"), self.equipment_depleted_action_combo), 4, 0, 1, 2)
 
+        self.auto_meal_check.stateChanged.connect(self._refresh_meal_action_controls)
         self.fish_without_leader_check.stateChanged.connect(self._refresh_tackle_action_controls)
         self.fish_without_net_check.stateChanged.connect(self._refresh_tackle_action_controls)
         left.addLayout(settings_grid)
@@ -883,12 +891,14 @@ class MainWindow(QMainWindow):
         self.hotkey_input = HotkeyButton()
         self.inventory_hotkey_input = HotkeyButton()
         self.use_item_hotkey_input = HotkeyButton()
+        self.backpack_move_hotkey_input = HotkeyButton()
         self.discard_key_input = HotkeyButton()
         self.chat_hotkey_input = HotkeyButton()
         self._hotkey_inputs = [
             self.hotkey_input,
             self.inventory_hotkey_input,
             self.use_item_hotkey_input,
+            self.backpack_move_hotkey_input,
             self.discard_key_input,
             self.chat_hotkey_input,
         ]
@@ -899,6 +909,7 @@ class MainWindow(QMainWindow):
             ("Старт / Стоп", self.hotkey_input),
             ("Инвентарь", self.inventory_hotkey_input),
             ("Использование", self.use_item_hotkey_input),
+            ("Положить/поднять в рюкзак", self.backpack_move_hotkey_input),
             ("Выброс", self.discard_key_input),
             ("Чат", self.chat_hotkey_input),
         ):
@@ -932,6 +943,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(main)
         self._refresh_uninstall_button()
         return page
+
+
+    def _refresh_meal_action_controls(self) -> None:
+        if hasattr(self, "food_depleted_action_card"):
+            self.food_depleted_action_card.setEnabled(self.auto_meal_check.isChecked())
 
     def _fish_keep_card(self, fish_id: str, title: str) -> tuple[QWidget, QCheckBox]:
         card = QFrame()
@@ -1092,6 +1108,7 @@ class MainWindow(QMainWindow):
         self.telegram_notify_start_stop_check = ToggleSwitch("Запуск / остановка")
         self.telegram_notify_meal_check = ToggleSwitch("Питание")
         self.telegram_notify_inventory_full_check = ToggleSwitch("Закончилось место")
+        self.telegram_notify_bait_tired_check = ToggleSwitch("Рыба устала от приманки")
         self.telegram_notify_focus_lost_check = ToggleSwitch("Потеря фокуса игры")
         notify_layout.addWidget(notify_title)
         for checkbox in (
@@ -1099,6 +1116,7 @@ class MainWindow(QMainWindow):
             self.telegram_notify_start_stop_check,
             self.telegram_notify_meal_check,
             self.telegram_notify_inventory_full_check,
+            self.telegram_notify_bait_tired_check,
             self.telegram_notify_focus_lost_check,
         ):
             notify_layout.addWidget(checkbox)
@@ -1214,10 +1232,14 @@ class MainWindow(QMainWindow):
         self.net_depleted_action_combo.setCurrentIndex(max(index, 0))
         index = self.equipment_depleted_action_combo.findData(fishing.equipment_depleted_action)
         self.equipment_depleted_action_combo.setCurrentIndex(max(index, 0))
+        index = self.food_depleted_action_combo.findData(fishing.food_depleted_action)
+        self.food_depleted_action_combo.setCurrentIndex(max(index, 0))
         self._refresh_tackle_action_controls()
+        self._refresh_meal_action_controls()
         self.hotkey_input.set_hotkey(fishing.hotkey)
         self.inventory_hotkey_input.set_hotkey(fishing.inventory_hotkey)
         self.use_item_hotkey_input.set_hotkey(fishing.use_item_hotkey)
+        self.backpack_move_hotkey_input.set_hotkey(fishing.backpack_move_hotkey)
         self.discard_key_input.set_hotkey(fishing.discard_key)
         self.chat_hotkey_input.set_hotkey(fishing.chat_hotkey)
         for badge in getattr(self, "_hotkey_badges", []):
@@ -1246,6 +1268,7 @@ class MainWindow(QMainWindow):
             self.telegram_notify_start_stop_check,
             self.telegram_notify_meal_check,
             self.telegram_notify_inventory_full_check,
+            self.telegram_notify_bait_tired_check,
             self.telegram_notify_focus_lost_check,
         )
         old_states = [widget.blockSignals(True) for widget in widgets]
@@ -1257,6 +1280,7 @@ class MainWindow(QMainWindow):
             self.telegram_notify_start_stop_check.setChecked(telegram.notify_start_stop)
             self.telegram_notify_meal_check.setChecked(telegram.notify_meal)
             self.telegram_notify_inventory_full_check.setChecked(telegram.notify_inventory_full)
+            self.telegram_notify_bait_tired_check.setChecked(telegram.notify_bait_tired)
             self.telegram_notify_focus_lost_check.setChecked(telegram.notify_focus_lost)
         finally:
             for widget, old_state in zip(widgets, old_states):
@@ -1451,9 +1475,11 @@ class MainWindow(QMainWindow):
         fishing.fish_without_net = self.fish_without_net_check.isChecked()
         fishing.net_depleted_action = str(self.net_depleted_action_combo.currentData() or "stop")
         fishing.equipment_depleted_action = str(self.equipment_depleted_action_combo.currentData() or "stop")
+        fishing.food_depleted_action = str(self.food_depleted_action_combo.currentData() or "continue")
         fishing.hotkey = self.hotkey_input.hotkey() or "F9"
         fishing.inventory_hotkey = self.inventory_hotkey_input.hotkey() or "i"
         fishing.use_item_hotkey = self.use_item_hotkey_input.hotkey() or "e"
+        fishing.backpack_move_hotkey = self.backpack_move_hotkey_input.hotkey() or "r"
         fishing.discard_key = self.discard_key_input.hotkey() or "q"
         fishing.chat_hotkey = self.chat_hotkey_input.hotkey() or "t"
         if hasattr(self, "stream_snapshot_mode_check"):
@@ -1470,6 +1496,7 @@ class MainWindow(QMainWindow):
         telegram.notify_start_stop = self.telegram_notify_start_stop_check.isChecked()
         telegram.notify_meal = self.telegram_notify_meal_check.isChecked()
         telegram.notify_inventory_full = self.telegram_notify_inventory_full_check.isChecked()
+        telegram.notify_bait_tired = self.telegram_notify_bait_tired_check.isChecked()
         telegram.notify_focus_lost = self.telegram_notify_focus_lost_check.isChecked()
         return settings
 

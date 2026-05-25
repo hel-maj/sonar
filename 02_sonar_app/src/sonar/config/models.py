@@ -19,10 +19,12 @@ class FishingSettings:
     fish_without_net: bool = True
     net_depleted_action: str = "stop"
     equipment_depleted_action: str = "stop"
+    food_depleted_action: str = "continue"
     fish_settings: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_FISH_SETTINGS))
     hotkey: str = "F9"
     inventory_hotkey: str = "i"
     use_item_hotkey: str = "e"
+    backpack_move_hotkey: str = "r"
     discard_key: str = "q"
     chat_hotkey: str = "t"
     stream_snapshot_mode: bool = False
@@ -57,6 +59,9 @@ class FishingSettings:
         equipment_depleted_action = str(data.get("equipment_depleted_action", defaults.equipment_depleted_action))
         if equipment_depleted_action not in {"stop", "exit_game", "shutdown_pc"}:
             equipment_depleted_action = defaults.equipment_depleted_action
+        food_depleted_action = str(data.get("food_depleted_action", defaults.food_depleted_action))
+        if food_depleted_action not in {"continue", "stop", "exit_game", "shutdown_pc"}:
+            food_depleted_action = defaults.food_depleted_action
         return cls(
             auto_meal=bool(data.get("auto_meal", defaults.auto_meal)),
             auto_change_bait=bool(data.get("auto_change_bait", defaults.auto_change_bait)),
@@ -69,10 +74,12 @@ class FishingSettings:
             fish_without_net=bool(data.get("fish_without_net", defaults.fish_without_net)),
             net_depleted_action=net_depleted_action,
             equipment_depleted_action=equipment_depleted_action,
+            food_depleted_action=food_depleted_action,
             fish_settings=fish_settings,
             hotkey=str(data.get("hotkey", defaults.hotkey)),
             inventory_hotkey=str(data.get("inventory_hotkey", defaults.inventory_hotkey)),
             use_item_hotkey=str(data.get("use_item_hotkey", defaults.use_item_hotkey)),
+            backpack_move_hotkey=str(data.get("backpack_move_hotkey", defaults.backpack_move_hotkey)),
             discard_key=str(data.get("discard_key", defaults.discard_key)),
             chat_hotkey=str(data.get("chat_hotkey", defaults.chat_hotkey)),
             stream_snapshot_mode=bool(data.get("stream_snapshot_mode", defaults.stream_snapshot_mode)),
@@ -94,6 +101,7 @@ class TelegramSettings:
     notify_start_stop: bool = True
     notify_meal: bool = True
     notify_inventory_full: bool = True
+    notify_bait_tired: bool = True
     notify_focus_lost: bool = False
 
     @classmethod
@@ -115,6 +123,7 @@ class TelegramSettings:
             notify_start_stop=bool(data.get("notify_start_stop", True)),
             notify_meal=bool(data.get("notify_meal", True)),
             notify_inventory_full=bool(data.get("notify_inventory_full", True)),
+            notify_bait_tired=bool(data.get("notify_bait_tired", True)),
             notify_focus_lost=bool(data.get("notify_focus_lost", False)),
         )
 

@@ -201,10 +201,8 @@ def test_hook_trigger_ignores_gray_bar_matches_without_red_stage(fixture):
         "inventory_477.jpg",
         "inventory_irp_481.jpg",
         "inventory_irp_482.jpg",
-        "inventory_irp_483.jpg",
         "inventory_irp_484.jpg",
         "inventory_irp_485.jpg",
-        "inventory_487.jpg",
         "inventory_irp_489.jpg",
         "inventory_490.jpg",
     ],
@@ -224,3 +222,27 @@ def test_irp_absence_is_detected_in_inventory(fixture):
     meal.load_templates(resolution_name(frame.shape[1], frame.shape[0]))
 
     assert meal.find_item_in_inventory(frame, "irp") is None
+
+
+@pytest.mark.parametrize("fixture", ["inventory_487.jpg", "inventory_irp_482.jpg", "inventory_irp_483.jpg"])
+def test_irp_is_detected_in_backpack(fixture):
+    frame = load_frame(fixture)
+    meal = MealSystem()
+    meal.load_templates(resolution_name(frame.shape[1], frame.shape[0]))
+
+    match = meal.find_food_in_backpack(frame)
+
+    assert match is not None
+    assert match.key == "irp"
+    assert match.source == "backpack"
+
+
+def test_inventory_and_backpack_regions_do_not_overlap():
+    frame = load_frame("inventory_irp_482.jpg")
+
+    inventory_roi = MealSystem.inventory_items_roi(frame)
+    backpack_roi = MealSystem.backpack_items_roi(frame)
+
+    assert inventory_roi.x >= frame.shape[1] // 2
+    assert backpack_roi.right <= frame.shape[1] // 2
+    assert backpack_roi.y >= frame.shape[0] // 2

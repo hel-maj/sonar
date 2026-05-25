@@ -33,14 +33,17 @@ MOVE_EPS = 0.5
 VELOCITY_MOVE_EPS = 0.15
 HEADING_MOVE_EPS = 0.08
 VELOCITY_MAX_ABS = 8.0
-KEY_SWITCH_MIN_SECONDS = 0.02
+KEY_SWITCH_MIN_SECONDS = 0.0
+KEY_SWITCH_DELAY_RANGE = (0.10, 0.16)
 REEL_CONTROL_INTERVAL_SECONDS = 0.005
 REEL_DEBUG_INTERVAL_SECONDS = 0.10
-KEY_INITIAL_PRESS_DELAY_RANGE = (0.10, 0.20)
-KEY_SWITCH_DELAY_RANGE = (0.10, 0.20)
-LATERAL_DELTA_EPS = 0.35
-LATERAL_VELOCITY_EPS = 1.2
+STALE_FISH_POSITION_SECONDS = 0.25
+STALE_REELING_INPUT_HOLD_SECONDS = 0.55
+LATERAL_DELTA_EPS = 0.18
+LATERAL_VELOCITY_EPS = 0.65
 LINE_TURN_EPS = 0.025
+DIRECTION_SWITCH_CONFIRM_SECONDS = 0.055
+DIRECTION_SWITCH_CONFIRM_SAMPLES = 4
 DIRECTION_MOVE = 1.0
 DIRECTION_EPS = 0.5
 FISH_FAST_RETRY_SECONDS = 0.12
@@ -57,14 +60,15 @@ FISH_LOCAL_X_RANGE = (1.5, 45.0)
 FISH_LOCAL_Y_RANGE = (1.0, 12.0)
 FISH_LOCAL_Z_RANGE = (-0.75, 0.75)
 FISH_DIRECTION_MAX_ABS = 4.0
-FISH_PRIMARY_DIRECTION_OFFSETS = frozenset({0x300, 0x68, 0x70})
-FISH_DIRECTION_SOURCE_RANK = {0x300: 0, 0x68: 1, 0x70: 2}
+FISH_PRIMARY_DIRECTION_OFFSETS = frozenset({0x304, 0x68, 0x300, 0x70})
+FISH_DIRECTION_SOURCE_RANK = {0x304: 0, 0x68: 1, 0x300: 2, 0x70: 3}
 ALLOW_UNKNOWN_FISH_CANDIDATES = False
 DIRECTION_STALE_EPS = 0.01
 DIRECTION_STALE_SECONDS = 1.6
 FISH_DIRECTION_FIELDS = (
-    (0x300, 0.08, 1.0),
+    (0x304, 0.08, 1.0),
     (0x68, 0.0012, 1.0),
+    (0x300, 0.08, 1.0),
     (0x70, 0.08, 1.0),
     (0x80, 0.08, -1.0),
     (0x64, 0.08, -1.0),
@@ -226,6 +230,11 @@ class MemoryReelingTracker:
         self._last_lateral_fish_addr: int | None = None
         self._lateral_velocity = 0.0
         self._last_line_vector: tuple[float, float] | None = None
+        self._stable_move_sign: int | None = None
+        self._last_stable_move_at = 0.0
+        self._pending_move_sign: int | None = None
+        self._pending_move_since = 0.0
+        self._pending_move_count = 0
         self._latest_state = ReelingState(active=False)
         self._state_lock = threading.Lock()
         self._control_thread: threading.Thread | None = None
@@ -263,6 +272,7 @@ class MemoryReelingTracker:
         self._unreadable_since = 0.0
         self._unreadable_count = 0
         self._reset_lateral_tracking()
+        self._reset_move_stabilizer()
         self._last_input_allowed_check_at = 0.0
         self._input_allowed_cached = True
         self._set_latest_state(ReelingState(active=True, action="starting"))
@@ -399,6 +409,7 @@ class MemoryReelingTracker:
                     player_addr=self.player_addr,
                     fish_pos_offset=direction_offset,
                 )
+            move_val, stable_source = self._stabilize_move(move_val, DIRECTION_EPS, now)
             action = self._apply_move(move_val, DIRECTION_EPS)
             if now - self._last_step_debug_at >= REEL_DEBUG_INTERVAL_SECONDS:
                 self._last_step_debug_at = now
@@ -406,7 +417,7 @@ class MemoryReelingTracker:
                     "REEL_STEP "
                     f"player={self._fmt_addr(self.player_addr)} fish={self._fmt_addr(self.fish_addr)} "
                     f"direction_offset=0x{direction_offset:X} raw={raw_value:.5f} move={move_val:.3f} "
-                    f"source=fish_direction_field"
+                    f"source=fish_direction_field/{stable_source}"
                 )
             return ReelingState(
                 True,
@@ -419,6 +430,11 @@ class MemoryReelingTracker:
 
         player_item = self._read_pos_at_offsets(self.player_addr, POS_OFFSETS)
         if player_item is None:
+            stale_state = self._hold_last_stable_move(now, "position_unreadable")
+            if stale_state is not None:
+                return stale_state
+            if self.held_key:
+                self._release_key(self.held_key)
             return ReelingState(active=True, action="position_unreadable", player_addr=self.player_addr, fish_addr=self.fish_addr)
         fish_item = self._read_fish_pos_relative(self.fish_addr, player_item[0])
         using_stale_fish_pos = False
@@ -426,17 +442,27 @@ class MemoryReelingTracker:
             if (
                 self.last_fish_pos is not None
                 and self.last_fish_pos_offset is not None
-                and now - self.last_good_fish_at <= 3.0
+                and now - self.last_good_fish_at <= STALE_FISH_POSITION_SECONDS
             ):
-                fish_item = self.last_fish_pos, self.last_fish_pos_offset
-                using_stale_fish_pos = True
-            else:
-                if self._fish_confirmed_hash:
-                    return ReelingState(active=True, action="position_unreadable", player_addr=self.player_addr, fish_addr=self.fish_addr)
-                if self._should_reject_unreadable(now):
-                    self._reject_current_fish("position unreadable")
-                    return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
+                stale_state = self._hold_last_stable_move(now, "wait_fresh_position")
+                if stale_state is not None:
+                    return stale_state
+                if self.held_key:
+                    self._release_key(self.held_key)
+                return ReelingState(active=True, action="wait_fresh_position", player_addr=self.player_addr, fish_addr=self.fish_addr)
+            if self._fish_confirmed_hash:
+                stale_state = self._hold_last_stable_move(now, "position_unreadable")
+                if stale_state is not None:
+                    return stale_state
+                if self.held_key:
+                    self._release_key(self.held_key)
                 return ReelingState(active=True, action="position_unreadable", player_addr=self.player_addr, fish_addr=self.fish_addr)
+            if self._should_reject_unreadable(now):
+                self._reject_current_fish("position unreadable")
+                return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
+            if self.held_key:
+                self._release_key(self.held_key)
+            return ReelingState(active=True, action="position_unreadable", player_addr=self.player_addr, fish_addr=self.fish_addr)
 
         player_pos, player_pos_offset = player_item
         fish_pos, fish_pos_offset = fish_item
@@ -491,6 +517,7 @@ class MemoryReelingTracker:
             player_pos=control_player_pos,
             fish_pos=fish_pos,
         )
+        move_val, stable_source = self._stabilize_move(move_val, action_eps, now)
         fish_heading_x: float | None = None
         if now - self._last_step_debug_at >= REEL_DEBUG_INTERVAL_SECONDS:
             self._last_step_debug_at = now
@@ -504,7 +531,7 @@ class MemoryReelingTracker:
                 f"vel=({self.velocity_xy[0]:.4f},{self.velocity_xy[1]:.4f}) dist={distance:.3f} "
                 f"heading={fish_heading_x} "
                 f"lateral={lateral:.4f} move={move_val:.4f} eps={action_eps:.4f} "
-                f"source={move_source} lateral_vel={self._lateral_velocity:.4f} stale={using_stale_fish_pos} "
+                f"source={move_source}/{stable_source} lateral_vel={self._lateral_velocity:.4f} stale={using_stale_fish_pos} "
                 f"player_candidates={self._format_pos_candidates(self.player_addr)} "
                 f"fish_candidates={self._format_pos_candidates(self.fish_addr)}"
             )
@@ -593,6 +620,24 @@ class MemoryReelingTracker:
             parts.append(f"0x{offset:X}{blocked}={value:.5f}/{value * polarity:.5f}")
         return ",".join(parts)
 
+    def _hold_last_stable_move(self, now: float, reason: str) -> ReelingState | None:
+        if self._stable_move_sign is None:
+            return None
+        if self._last_stable_move_at <= 0.0:
+            return None
+        if now - self._last_stable_move_at > STALE_REELING_INPUT_HOLD_SECONDS:
+            return None
+        move_val = self._stable_move_sign * DIRECTION_MOVE
+        action = self._apply_move(move_val, DIRECTION_EPS)
+        return ReelingState(
+            active=True,
+            action=f"{action}_{reason}",
+            fish_addr=self.fish_addr,
+            player_addr=self.player_addr,
+            move_val=move_val,
+            fish_pos_offset=self.last_fish_pos_offset,
+        )
+
     def _apply_move(self, move_val: float, action_eps: float) -> str:
         if move_val > action_eps:
             if self._hold_key("d"):
@@ -634,6 +679,58 @@ class MemoryReelingTracker:
         self._lateral_velocity = 0.0
         self._last_line_vector = None
 
+    def _reset_move_stabilizer(self) -> None:
+        self._stable_move_sign = None
+        self._last_stable_move_at = 0.0
+        self._pending_move_sign = None
+        self._pending_move_since = 0.0
+        self._pending_move_count = 0
+
+    def _stabilize_move(self, move_val: float, action_eps: float, now: float) -> tuple[float, str]:
+        sign = self._move_sign(move_val, action_eps)
+        if sign == 0:
+            self._pending_move_sign = None
+            self._pending_move_count = 0
+            if self._stable_move_sign is None:
+                return 0.0, "stable_center"
+            return self._stable_move_sign * DIRECTION_MOVE, "hold_stable_center"
+        if self._stable_move_sign is None:
+            self._stable_move_sign = sign
+            self._last_stable_move_at = now
+            self._pending_move_sign = None
+            self._pending_move_count = 0
+            return sign * DIRECTION_MOVE, "stable_initial"
+        if sign == self._stable_move_sign:
+            self._last_stable_move_at = now
+            self._pending_move_sign = None
+            self._pending_move_count = 0
+            return sign * DIRECTION_MOVE, "stable_same"
+        if sign != self._pending_move_sign:
+            self._pending_move_sign = sign
+            self._pending_move_since = now
+            self._pending_move_count = 1
+            return self._stable_move_sign * DIRECTION_MOVE, "switch_pending"
+        self._pending_move_count += 1
+        pending_age = now - self._pending_move_since
+        if (
+            self._pending_move_count >= DIRECTION_SWITCH_CONFIRM_SAMPLES
+            and pending_age >= DIRECTION_SWITCH_CONFIRM_SECONDS
+        ):
+            self._stable_move_sign = sign
+            self._last_stable_move_at = now
+            self._pending_move_sign = None
+            self._pending_move_count = 0
+            return sign * DIRECTION_MOVE, "switch_confirmed"
+        return self._stable_move_sign * DIRECTION_MOVE, "switch_pending"
+
+    @staticmethod
+    def _move_sign(move_val: float, action_eps: float) -> int:
+        if move_val > action_eps:
+            return 1
+        if move_val < -action_eps:
+            return -1
+        return 0
+
     def _movement_from_lateral(
         self,
         lateral: float,
@@ -645,10 +742,6 @@ class MemoryReelingTracker:
         fish_pos: tuple[float, float, float],
     ) -> tuple[float, str, float]:
         if using_stale_fish_pos:
-            if self.held_key == "a":
-                return -DIRECTION_MOVE, "hold_previous_stale", DIRECTION_EPS
-            if self.held_key == "d":
-                return DIRECTION_MOVE, "hold_previous_stale", DIRECTION_EPS
             return 0.0, "wait_fresh_position", DIRECTION_EPS
 
         current_vector = (fish_pos[0] - player_pos[0], fish_pos[1] - player_pos[1])
@@ -687,6 +780,8 @@ class MemoryReelingTracker:
             if turn < -LINE_TURN_EPS:
                 return -DIRECTION_MOVE, "line_right", DIRECTION_EPS
 
+        if abs(self._lateral_velocity) >= LATERAL_VELOCITY_EPS:
+            return (DIRECTION_MOVE if self._lateral_velocity > 0 else -DIRECTION_MOVE), "lateral_velocity", DIRECTION_EPS
         if abs(delta) >= LATERAL_DELTA_EPS:
             return (DIRECTION_MOVE if delta > 0 else -DIRECTION_MOVE), "lateral_delta", DIRECTION_EPS
         if self.held_key == "a":
@@ -725,6 +820,7 @@ class MemoryReelingTracker:
         self._motion_stationary_since = 0.0
         self._reset_unreadable_tracking()
         self._reset_lateral_tracking()
+        self._reset_move_stabilizer()
         self._last_fish_search_at = 0.0
         self._last_deep_fish_search_at = 0.0
 
@@ -746,8 +842,6 @@ class MemoryReelingTracker:
             self.input_controller.key_up(self.held_key)
             self.held_key = None
             time.sleep(random.uniform(*KEY_SWITCH_DELAY_RANGE))
-        elif self.held_key is None:
-            time.sleep(random.uniform(*KEY_INITIAL_PRESS_DELAY_RANGE))
         if self.input_controller.key_down(key) is False:
             self._last_key_switch_at = time.time()
             return False

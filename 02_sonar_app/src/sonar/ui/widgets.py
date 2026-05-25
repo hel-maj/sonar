@@ -273,29 +273,61 @@ QScrollArea#pageScrollArea, QScrollArea#pageScrollArea > QWidget, QScrollArea#pa
 QWidget#pageScrollViewport, QWidget#scrollPageContent {
     background: transparent;
 }
-QScrollBar:vertical {
-    width: 10px;
-    margin: 6px 2px 6px 2px;
+QAbstractScrollArea::corner {
     background: transparent;
+    border: none;
+}
+QScrollBar:vertical {
+    width: 12px;
+    margin: 0;
+    background: #edf3fb;
+    border: none;
+    border-radius: 6px;
 }
 QScrollBar::handle:vertical {
     background: #b9c7dc;
     min-height: 34px;
-    border-radius: 5px;
+    border-radius: 4px;
+    margin: 2px;
 }
 QScrollBar::handle:vertical:hover {
     background: #94a8c5;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    width: 0;
     height: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+    border: none;
 }
 QScrollBar:horizontal {
-    height: 10px;
-    background: transparent;
+    height: 12px;
+    margin: 0;
+    background: #edf3fb;
+    border: none;
+    border-radius: 6px;
 }
 QScrollBar::handle:horizontal {
     background: #b9c7dc;
-    border-radius: 5px;
+    min-width: 34px;
+    border-radius: 4px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: #94a8c5;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+    height: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: transparent;
+    border: none;
 }
 QScrollArea#fishKeepScroll {
     background: #ffffff;

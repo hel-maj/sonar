@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import threading
 import time
+from io import BytesIO
 from types import SimpleNamespace
 
+from PIL import Image
+
 from sonar.config.models import TelegramSettings
+from sonar.fishing.item_info import ItemEffect, ItemInfo
 from sonar.fishing.statistics import FishPrice, FishingSessionStats, SessionTotals
 from sonar.fishing.tackle_detection import TackleItemCount
 import sonar.telegram.notifier as notifier_module
 from sonar.telegram.notifier import NotificationManager
+from sonar.vision.geometry import Rect
 
 
 class Response:
@@ -38,7 +43,7 @@ def test_notification_menu_edits_callback_message_and_uses_two_columns(monkeypat
 
     assert calls[0][0] == "editMessageText"
     keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
-    assert [len(row) for row in keyboard] == [2, 2, 1, 1]
+    assert [len(row) for row in keyboard] == [2, 2, 2, 1]
 
 
 def test_main_menu_contains_stream_entry(monkeypatch):
@@ -65,9 +70,9 @@ def test_app_lifecycle_notification_sends_started_before_menu():
     manager.notify_app_started()
     manager.notify_app_stopped()
 
-    assert messages[0] == "Sonar запущен"
+    assert "Sonar запущен" in messages[0]
     assert "Меню" in messages[1]
-    assert messages[-1] == "Sonar выключен"
+    assert "Sonar выключен" in messages[-1]
 
 
 def test_stream_menu_shows_active_link_and_area_switch(monkeypatch):
@@ -459,7 +464,7 @@ def test_stats_menu_message_includes_fish_rows():
     manager._send_stats(1)
 
     assert "🐟 Улов по видам" in messages[0]
-    assert "• Рустер" in messages[0]
+    assert "Рустер" in messages[0]
     assert "🎣 Поймано: 2 шт · 4 кг" in messages[0]
     assert "🌊 Отпущено: 1 шт · 1 кг" in messages[0]
     assert "💰 Доход: от 3 000 $ до 6 000 $" in messages[0]
@@ -477,9 +482,9 @@ def test_caught_fish_notification_sends_photo_with_caption(monkeypatch):
 
     manager.notify_caught_fish("Рустер", 2.17, "Хороший улов", 10, None, SessionTotals(0, 1, 2.17, 0, 0, 100, 100), image_bytes=b"png")
 
-    assert calls[0][0] == "sendPhoto"
-    assert calls[0][1]["files"]["photo"][1] == b"png"
-    assert "Рустер" in calls[0][1]["data"]["caption"]
+    photo_call = next(call for call in calls if call[0] == "sendPhoto")
+    assert photo_call[1]["files"]["photo"][1] == b"png"
+    assert "Рустер" in photo_call[1]["data"]["caption"]
 
 
 def test_tackle_menu_sends_last_scan_photo_with_counts(monkeypatch):
@@ -505,3 +510,102 @@ def test_tackle_menu_sends_last_scan_photo_with_counts(monkeypatch):
     assert calls[0][1]["files"]["photo"][1] == b"png"
     assert "Снаряжение" in calls[0][1]["data"]["caption"]
     assert "Крючки/поводки: 3шт." in calls[0][1]["data"]["caption"]
+
+
+def test_bait_tired_notification_respects_toggle():
+    messages: list[str] = []
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=False, notify_bait_tired=False),
+        sink=messages.append,
+    )
+
+    manager.notify_bait_tired()
+    assert messages == []
+
+    manager.settings.notify_bait_tired = True
+    manager.notify_bait_tired()
+    assert "Рыба устала от приманки" in messages[0]
+    assert "Исправляем" in messages[0]
+
+
+def test_meal_notification_sends_text_without_item_photo(monkeypatch):
+    calls = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1], notify_meal=True))
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_meal_eaten("ИРП Армии США", image_bytes=b"png")
+
+    assert calls[0][0] == "sendMessage"
+    assert "ИРП Армии США" in calls[0][1]["json"]["text"]
+    assert "🍽" in calls[0][1]["json"]["text"]
+    assert "Проверяю голод и жажду дальше" not in calls[0][1]["json"]["text"]
+
+
+def test_caught_fish_notification_decorates_valid_photo_with_blurred_background(monkeypatch):
+    calls = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+
+    source = BytesIO()
+    Image.new("RGBA", (40, 20), (120, 40, 20, 255)).save(source, format="PNG")
+    source_bytes = source.getvalue()
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_caught_fish("Рустер", 2.17, "Хороший улов", 10, None, SessionTotals(0, 1, 2.17, 0, 0, 100, 150), image_bytes=source_bytes)
+
+    photo_call = next(call for call in calls if call[0] == "sendPhoto")
+    sent_bytes = photo_call[1]["files"]["photo"][1]
+    decorated = Image.open(BytesIO(sent_bytes))
+    assert sent_bytes != source_bytes
+    assert decorated.width > 40
+    assert decorated.height > 20
+    assert "Доход:</b> от 100 $" in photo_call[1]["data"]["caption"]
+    assert "до 150 $" not in photo_call[1]["data"]["caption"]
+
+
+def test_meal_notification_includes_item_effect_details(monkeypatch):
+    calls = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1], notify_meal=True))
+    item_info = ItemInfo(
+        rect=Rect(0, 0, 1, 1),
+        title="Энергетик",
+        item_name="Энергетик",
+        weight="0.45",
+        thirst_change="+50",
+        condition_percent="75",
+        effects=(
+            ItemEffect(
+                name="Ускорение",
+                duration="15 м.",
+                description="Ускорение скорости передвижения.",
+                parameter_modifications=("+10% к скорости бега", "+100 к выносливости"),
+            ),
+        ),
+    )
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_meal_eaten("Энергетик", item_info=item_info)
+
+    text = calls[0][1]["json"]["text"]
+    assert calls[0][0] == "sendMessage"
+    assert "<b>Питание использовано!</b>" in text
+    assert "Жажда:</b> +50" in text
+    assert "Состояние:</b> 75%" in text
+    assert "Ускорение" in text
+    assert "15 м." in text
+    assert "+10% к скорости бега" in text
+    assert "+100 к выносливости" in text

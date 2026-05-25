@@ -75,7 +75,7 @@ class CatchScreenDetector:
         quality_text = self._normalize_quality(self._read_text(frame, self._quality_roi(panel_rect)))
         weight_text = self._read_weight_text(frame, panel_rect)
         weight_kg = self._parse_weight(weight_text)
-        xp_text = self._read_text(frame, self._xp_roi(panel_rect))
+        xp_text = self._read_xp_text(frame, panel_rect)
         is_max_level, xp_current, xp_total = self._parse_xp(xp_text)
         if not self._has_valid_catch_content(fish_id, fish_text, weight_kg):
             return CatchScreenResult(False, keep_button=keep, release_button=release)
@@ -185,6 +185,16 @@ class CatchScreenDetector:
         return cls._relative_roi(panel, 0.06, 0.70, 0.88, 0.08)
 
     @classmethod
+    def _xp_number_rois(cls, panel: Rect) -> tuple[Rect, ...]:
+        return (
+            cls._relative_roi(panel, 0.58, 0.69, 0.36, 0.09),
+            cls._relative_roi(panel, 0.68, 0.69, 0.27, 0.09),
+            cls._relative_roi(panel, 0.72, 0.69, 0.21, 0.09),
+            cls._relative_roi(panel, 0.76, 0.69, 0.18, 0.09),
+            cls._relative_roi(panel, 0.80, 0.69, 0.15, 0.09),
+        )
+
+    @classmethod
     def _panel_rect(cls, keep: TemplateMatch, release: TemplateMatch, width: int, height: int) -> Rect:
         left, right, button_y, scale = cls._panel_metrics(keep, release)
         return Rect(
@@ -261,6 +271,37 @@ class CatchScreenDetector:
             return min(valid, key=lambda item: item[1])[0]
         return fallback
 
+    @classmethod
+    def _read_xp_text(cls, frame: np.ndarray, panel: Rect) -> str | None:
+        base_text = cls._read_text(frame, cls._xp_roi(panel))
+        is_max_level, xp_current, xp_total = cls._parse_xp(base_text)
+        if base_text and xp_total is not None:
+            return base_text
+        if base_text and (not is_max_level or (xp_current is not None and xp_current >= 10000)):
+            return base_text
+        number_texts: list[str] = []
+        for roi in cls._xp_number_rois(panel):
+            text = cls._read_text(frame, roi, digits=True)
+            if text and re.search(r"\d", text):
+                number_texts.append(text)
+        best_number = cls._best_digit_text(number_texts)
+        if not best_number:
+            return base_text
+        if not base_text:
+            return best_number
+        base_numbers = re.findall(r"\d+", base_text)
+        if best_number in base_numbers:
+            return base_text
+        return f"{base_text} {best_number}"
+
+    @staticmethod
+    def _best_digit_text(values: list[str]) -> str | None:
+        numbers = [re.sub(r"\D+", "", value) for value in values]
+        numbers = [number for number in numbers if number]
+        if not numbers:
+            return None
+        return max(numbers, key=lambda number: (len(number), int(number)))
+
     @staticmethod
     def _configure_tesseract(pytesseract_module) -> None:
         if shutil.which("tesseract"):
@@ -306,5 +347,8 @@ class CatchScreenDetector:
             return False, int(slash_match.group(1)), int(slash_match.group(2))
         numbers = [int(value) for value in re.findall(r"\d+", text)]
         if "максимальныйуровень" in normalized or "максималь" in normalized:
-            return True, numbers[-1] if numbers else None, None
+            if not numbers:
+                return True, None, None
+            xp = max(numbers, key=lambda value: (len(str(value)), value))
+            return True, xp, None
         return False, numbers[0] if numbers else None, None

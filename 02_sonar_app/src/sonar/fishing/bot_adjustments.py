@@ -105,6 +105,7 @@ def _do_change_bait(self) -> bool:
         return False
     if "changed_bait" not in self._last_triggers and "gear" not in self._last_triggers:
         return False
+    self._notify_bait_tired()
     self.state.phase = BotPhase.RECOVERY
     self._log("Смена наживки: выхожу из режима рыбалки")
     self.input_controller.press_key("esc")
@@ -278,7 +279,20 @@ def _wrap_press_fishing_start(original):
 
 
 def _wrap_save_debug_catch_snapshots(original, bot_module):
-    def patched(self, *, result, fish_id, fish_label, weight, quality, xp, confidence, stage_log_line, catch_log_line) -> None:
+    def patched(
+        self,
+        *,
+        result,
+        fish_id,
+        fish_label,
+        weight,
+        quality,
+        xp,
+        confidence,
+        stage_log_line,
+        catch_log_line,
+        crop=None,
+    ) -> None:
         original(
             self,
             result=result,
@@ -290,6 +304,7 @@ def _wrap_save_debug_catch_snapshots(original, bot_module):
             confidence=confidence,
             stage_log_line=stage_log_line,
             catch_log_line=catch_log_line,
+            crop=crop,
         )
         if fish_id != "roach_vobla":
             return

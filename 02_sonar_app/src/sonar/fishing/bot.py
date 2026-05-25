@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 import io
@@ -35,7 +35,7 @@ from sonar.fishing.game_menu import GameMenuDetector
 from sonar.fishing.inventory_memory import InventoryMemoryDetector
 from sonar.fishing.hooking import TemplateMonitor, create_monitor_for_frame as create_hooking_monitor
 from sonar.fishing.inventory_stage import InventoryStageDetector
-from sonar.fishing.meal_system import MealSystem
+from sonar.fishing.meal_system import MealItemSnapshot, MealSystem
 from sonar.fishing.memory_reeling import MemoryReelingTracker
 from sonar.fishing.statistics import FishingSessionStats, format_money_range, format_weight, parse_fish_prices_from_markdown
 from sonar.fishing.store_fish import FishStorer
@@ -67,6 +67,12 @@ REEL_CATCH_SCREEN_TIMEOUT_SECONDS = 3.0
 CATCH_SCREEN_CURRENT_TIMEOUT_SECONDS = 1.2
 CATCH_SCREEN_POLL_SECONDS = 0.05
 MEAL_ANIMATION_WAIT_SECONDS = 6.0
+MEAL_POST_USE_HUD_CHECK_TIMEOUT_SECONDS = 6.0
+MEAL_MISSING_HUD_CHECK_TIMEOUT_SECONDS = 2.0
+MEAL_HUD_CHECK_POLL_SECONDS = 0.5
+MEAL_CLEAR_CONFIRM_POLLS = 2
+MEAL_BACKPACK_MOVE_MAX_ATTEMPTS = 5
+MEAL_MISSING_RETRY_SECONDS = 45.0
 PREPARE_START_POLL_SECONDS = 0.05
 RANDOM_DELAY_JITTER_SECONDS = 0.6
 TACKLE_ACTION_DELAY_SECONDS = 0.5
@@ -78,6 +84,12 @@ CHAT_STAGE_EXIT_ESC_INTERVAL_SECONDS = 0.65
 REELING_WALKING_GUARD_INTERVAL_SECONDS = 0.5
 REELING_IDLE_RETURN_TIMEOUT_SECONDS = 2.0
 REELING_IDLE_RETURN_POLL_SECONDS = 0.1
+REELING_STAGE_CHECK_INTERVAL_SECONDS = 0.35
+REELING_ACTION_LOG_INTERVAL_SECONDS = 1.0
+REELING_ACTION_CHANGE_LOG_INTERVAL_SECONDS = 0.08
+REELING_FOCUS_RETRY_SECONDS = 1.0
+POST_HOOK_STAGE_CONFIRM_TIMEOUT_SECONDS = 3.0
+POST_HOOK_STAGE_POLL_SECONDS = 0.08
 START_MENU_OPEN_DELAY_SECONDS = 0.65
 STORAGE_SELECTION_RETRY_SECONDS = 0.75
 STORAGE_SELECTION_GIVE_UP_SECONDS = 3.0
@@ -165,6 +177,7 @@ class FishingBot:
         self._no_stage_since: float | None = None
         self._start_attempt_since: float | None = None
         self._inventory_retry_after = 0.0
+        self._meal_search_disabled_until_restart = False
         self.inventory_full = False
         self.settings: FishingSettings = self.config_manager.load().fishing
         self._configure_notifications()
@@ -255,6 +268,7 @@ class FishingBot:
         self.state.detected_stage = "Свободно"
         self.inventory_full = False
         self._inventory_retry_after = 0.0
+        self._meal_search_disabled_until_restart = False
         self._last_catch_result = None
         self._no_stage_since = None
         self._start_attempt_since = None
@@ -466,7 +480,7 @@ class FishingBot:
             stage = self._detect_stage(triggers)
             self._publish_stage(self._stage_label(stage))
             try:
-                needs_meal = "hunger" in triggers or "thirst" in triggers
+                needs_meal = ("hunger" in triggers or "thirst" in triggers) and not self._meal_search_disabled_until_restart
                 if self._stop_if_no_stage_timed_out(stage, needs_meal):
                     break
                 if stage != "ad" and self._close_game_menu_if_open():
@@ -568,14 +582,25 @@ class FishingBot:
 
     def _run_reeling_module(self) -> tuple[str | None, float]:
         self.state.phase = BotPhase.REELING
+        self._refresh_triggers()
+        stage = self._detect_stage(self._last_triggers)
+        if stage != "ad":
+            if self._has_pending_catch() or self._probe_catch_screen():
+                return None, 0.0
+            label = self._stage_label(stage) if stage is not None else "Свободно"
+            self._publish_stage(label)
+            self._log(f"Вываживание не запущено: текущая стадия {label}")
+            return None, 0.0
         self._publish_stage("Вываживание")
+        last_reeling_focus_attempt_at = self._restore_reeling_focus(0.0)
         self.reeling_tracker.start()
         self.reeling_tracker.start_control_loop()
         last_recognition_at = 0.0
         last_trigger_check_at = 0.0
         last_walking_guard_at = 0.0
         last_action_log_at = 0.0
-        seen_ad_stage = False
+        last_action_log_signature: tuple[str, int | None] | None = None
+        seen_ad_stage = True
         started_at = time.time()
         ad_missing_since: float | None = None
         last_reeling_menu_log_at = 0.0
@@ -583,7 +608,7 @@ class FishingBot:
         while time.time() < deadline and not self._stop_event.is_set():
             self._update_focus_state_notification()
             now = time.time()
-            if now - last_trigger_check_at >= 0.15:
+            if now - last_trigger_check_at >= REELING_STAGE_CHECK_INTERVAL_SECONDS:
                 last_trigger_check_at = now
                 frame = self.capture.capture()
                 if self.game_menu_detector.is_open(frame):
@@ -604,20 +629,37 @@ class FishingBot:
                     break
                 self._last_trigger_matches = self.trigger_monitor.find_detections(frame)
                 self._last_triggers = {name: match.confidence for name, match in self._last_trigger_matches.items()}
-                if "ad" in self._last_triggers:
+                current_stage = self._detect_stage(self._last_triggers)
+                if current_stage == "ad":
                     seen_ad_stage = True
                     ad_missing_since = None
+                elif current_stage is not None:
+                    label = self._stage_label(current_stage)
+                    self._publish_stage(label)
+                    self._log(f"Вываживание: обнаружена другая стадия {label}, останавливаю вываживание")
+                    break
+                elif any(name in self._last_triggers for name in ("changed_bait", "gear", "pereves", "thirst", "hunger")):
+                    state_name = next(name for name in ("changed_bait", "gear", "pereves", "thirst", "hunger") if name in self._last_triggers)
+                    self._log(f"Вываживание: обнаружено состояние {state_name}, останавливаю вываживание")
+                    break
                 elif seen_ad_stage:
                     ad_missing_since = ad_missing_since or now
                     if now - ad_missing_since >= 1.5:
                         self._log("Вываживание: стадия закончилась")
                         break
             state = self.reeling_tracker.latest_state()
+            if state.action == "input_blocked":
+                last_reeling_focus_attempt_at = self._restore_reeling_focus(last_reeling_focus_attempt_at, now)
             if seen_ad_stage and now - last_walking_guard_at >= REELING_WALKING_GUARD_INTERVAL_SECONDS:
                 last_walking_guard_at = now
                 if self._check_reeling_walking_guard(state.action):
                     break
-            if now - last_action_log_at >= 1.0:
+            move_sign = self._reeling_move_sign(state.move_val)
+            action_log_signature = (state.action, move_sign)
+            action_changed = action_log_signature != last_action_log_signature
+            action_log_due = now - last_action_log_at >= REELING_ACTION_LOG_INTERVAL_SECONDS
+            action_change_due = action_changed and now - last_action_log_at >= REELING_ACTION_CHANGE_LOG_INTERVAL_SECONDS
+            if action_log_due or action_change_due:
                 details = f", distance={state.distance:.2f}" if state.distance is not None else ""
                 if state.move_val is not None:
                     if state.lateral is not None:
@@ -627,6 +669,7 @@ class FishingBot:
                     details += f", pos_offsets=0x{state.player_pos_offset:X}/0x{state.fish_pos_offset:X}"
                 self._log(f"Вываживание: {state.action}{details}")
                 last_action_log_at = now
+                last_action_log_signature = action_log_signature
             if state.action == "target_search":
                 if not seen_ad_stage and now - started_at >= 20.0:
                     break
@@ -647,6 +690,23 @@ class FishingBot:
         if fish_name:
             return fish_name, confidence
         return None, 0.0
+
+    def _restore_reeling_focus(self, last_attempt_at: float, now: float | None = None) -> float:
+        current_time = time.time() if now is None else now
+        if current_time - last_attempt_at < REELING_FOCUS_RETRY_SECONDS:
+            return last_attempt_at
+        self._force_focus_game()
+        return current_time
+
+    @staticmethod
+    def _reeling_move_sign(move_val: float | None) -> int | None:
+        if move_val is None:
+            return None
+        if move_val > 0:
+            return 1
+        if move_val < 0:
+            return -1
+        return 0
 
     def _check_reeling_walking_guard(self, reeling_action: str) -> bool:
         if not self._should_stop_for_reeling_walking_guard(reeling_action):
@@ -903,7 +963,7 @@ class FishingBot:
                 return False
             frame = self.capture.capture()
             if self.hooking_monitor is None:
-                self.hooking_monitor = create_hooking_monitor(frame, self.input_controller)
+                self.hooking_monitor = create_hooking_monitor(frame, self.input_controller, self._force_focus_game)
             result = self.hooking_monitor.check_and_act(frame)
             if time.time() - last_debug_at >= 2.0:
                 self._log(f"Подсечка: red={result.red_confidence:.2f} bubbles={result.bubles_confidence:.2f}")
@@ -924,13 +984,44 @@ class FishingBot:
         hooked = self._do_hooking()
         if not hooked or self._stop_event.is_set():
             return
-        transition = self._wait_for_stage_transition(("start2", "wait_tension"), ("ad",), timeout=2.0, return_on_old_gone=True)
-        if transition != "ad":
-            self._log("Стадия: Вываживание -> запускаю после успешной подсечки")
-        if not self._stop_event.is_set():
+        stage = self._confirm_stage_after_hook()
+        self._continue_after_hook(stage)
+
+    def _confirm_stage_after_hook(self) -> str | None:
+        deadline = time.time() + POST_HOOK_STAGE_CONFIRM_TIMEOUT_SECONDS
+        while time.time() < deadline and not self._stop_event.is_set():
+            if self._has_pending_catch() or self._probe_catch_screen():
+                return "catch"
+            self._refresh_triggers()
+            stage = self._detect_stage(self._last_triggers)
+            if stage is not None:
+                self._publish_stage(self._stage_label(stage))
+                return stage
+            self._sleep(POST_HOOK_STAGE_POLL_SECONDS)
+        self._log("Подсечка: после Space стадия не подтвердилась, возвращаюсь к общему определению стадии")
+        return None
+
+    def _continue_after_hook(self, stage: str | None) -> None:
+        if self._stop_event.is_set():
+            return
+        if stage == "catch":
+            self._do_fish_catch()
+            return
+        if stage == "ad":
+            self._log("Стадия: Вываживание подтверждена после подсечки")
             fish_name, confidence = self._run_reeling_module()
             if fish_name or self._has_pending_catch():
                 self._do_fish_catch(fish_name, confidence)
+            return
+        if stage == "start2":
+            self._last_start2_handled_at = 0.0
+            self._log("Подсечка: стадия осталась ожиданием поклёвки, вываживание не запускаю")
+            return
+        if stage in {"start", "start1"}:
+            self._log(f"Подсечка: после Space найдена стадия {self._stage_label(stage)}, продолжаю по ней")
+            self._do_casting()
+            return
+        self._log("Подсечка: текущая стадия не найдена, вываживание не запускаю")
 
     def _wait_for_stage_transition(
         self,
@@ -960,8 +1051,9 @@ class FishingBot:
         if result is None:
             self._log("Экран улова не распознан; клик Забрать/Отпустить не отправлен")
             return
-        fish_name = fish_name or result.fish_id or fish_id_from_display(result.fish_text)
-        confidence = max(confidence, result.fish_confidence)
+        catch_fish_name = result.fish_id or fish_id_from_display(result.fish_text)
+        fish_name = catch_fish_name or fish_name
+        confidence = result.fish_confidence if catch_fish_name else max(confidence, result.fish_confidence)
         fish_label = fish_display_name(fish_name) if fish_name else result.fish_text or "unknown"
         weight = f"{result.weight_kg:.2f}" if result.weight_kg is not None else result.weight_text or "unknown"
         quality = result.quality_text or "unknown"
@@ -1294,25 +1386,138 @@ class FishingBot:
         if do_meal:
             self._do_meal_actions()
         if do_backpack:
-            self._do_backpack_actions()
+            if not self._is_inventory_open() and not self._open_inventory():
+                self._log("Инвентарь закрыт; складывание в рюкзак пропущено")
+            else:
+                self._do_backpack_actions()
+        if not self._is_inventory_open() and self.config_manager.get_garbage_to_eject():
+            self._open_inventory()
         self._do_garbage()
         if self.settings.store_in_trunk:
             self._log("Store trunk routine skipped: exact original path is not restored yet")
         self._return_to_fishing()
 
     def _do_meal_actions(self) -> bool:
-        result = self.meal_system.run(use_key=self.settings.use_item_hotkey)
-        used_any = bool(result.get("irp") or result.get("donuts") or result.get("cocktails"))
-        if used_any:
-            self.notification_manager.notify_meal_eaten()
-            self._publish_ui_event("Питание использовано", event_type="meal", icon="food.svg")
-            self._log("Еда/вода использована, жду завершения анимации")
-            self._sleep(MEAL_ANIMATION_WAIT_SECONDS)
+        consumed: list[MealItemSnapshot] = []
+        moved_from_backpack_attempts = 0
+        self._prepare_meal_system()
+        while not self._stop_event.is_set():
+            frame = self.capture.capture()
+            if not self.meal_system.check_needs_meal(frame):
+                if self._meal_trigger_active_after_inventory_close():
+                    if self._open_inventory():
+                        continue
+                    self._inventory_retry_after = time.time() + MEAL_MISSING_RETRY_SECONDS
+                break
+            inventory_food = self.meal_system.find_food_in_inventory(frame)
+            if inventory_food is not None:
+                snapshot = self.meal_system.consume_item(
+                    inventory_food.match.x,
+                    inventory_food.match.y,
+                    inventory_food.key,
+                    use_key=self.settings.use_item_hotkey,
+                )
+                consumed.append(snapshot)
+                moved_from_backpack_attempts = 0
+                self._notify_meal_consumed(snapshot)
+                self._publish_ui_event("Питание использовано", event_type="meal", icon="food.svg", detail=snapshot.item_title)
+                self._log(f"Еда/вода использована: {snapshot.item_title or snapshot.display_name}, жду завершения анимации")
+                self._sleep(MEAL_ANIMATION_WAIT_SECONDS)
+                self._inventory_retry_after = 0.0
+                if not self._confirm_still_needs_meal_after_consumption():
+                    break
+                if self._open_inventory():
+                    continue
+                self._inventory_retry_after = time.time() + MEAL_MISSING_RETRY_SECONDS
+                break
+            backpack_food = self.meal_system.find_food_in_backpack(frame)
+            if backpack_food is not None and moved_from_backpack_attempts < MEAL_BACKPACK_MOVE_MAX_ATTEMPTS:
+                moved_from_backpack_attempts += 1
+                self._log(
+                    "Питание: еды в инвентаре нет, перекладываю из рюкзака "
+                    f"({moved_from_backpack_attempts}/{MEAL_BACKPACK_MOVE_MAX_ATTEMPTS})"
+                )
+                self.meal_system.move_item_from_backpack(backpack_food, move_key=self.settings.backpack_move_hotkey)
+                continue
+            if self._confirm_still_needs_meal_without_food():
+                self._handle_food_depleted()
+            break
+        if consumed:
             self._inventory_retry_after = 0.0
         else:
-            self._inventory_retry_after = time.time() + 45.0
-        self._log(f"Meal routine: irp={result.get('irp')} donuts={result.get('donuts')} cocktails={result.get('cocktails')}")
-        return used_any
+            self._inventory_retry_after = time.time() + MEAL_MISSING_RETRY_SECONDS
+        self._log(f"Meal routine: consumed={len(consumed)} backpack_attempts={moved_from_backpack_attempts}")
+        return bool(consumed)
+
+    def _prepare_meal_system(self) -> None:
+        width, height = self.capture.get_window_size()
+        if not self.meal_system.templates:
+            self.meal_system.load_templates(resolution_name(width, height))
+
+    def _meal_trigger_active_after_inventory_close(self) -> bool:
+        return self._confirm_still_needs_meal_outside_inventory(MEAL_MISSING_HUD_CHECK_TIMEOUT_SECONDS)
+
+    def _confirm_still_needs_meal_after_consumption(self) -> bool:
+        still_needs_meal = self._confirm_still_needs_meal_outside_inventory(MEAL_POST_USE_HUD_CHECK_TIMEOUT_SECONDS)
+        if still_needs_meal:
+            self._log("Питание: голод/жажда всё ещё активны, продолжаю поиск еды")
+        return still_needs_meal
+
+    def _confirm_still_needs_meal_without_food(self) -> bool:
+        return self._confirm_still_needs_meal_outside_inventory(MEAL_MISSING_HUD_CHECK_TIMEOUT_SECONDS)
+
+    def _confirm_still_needs_meal_outside_inventory(self, timeout: float) -> bool:
+        inventory_closed = self._close_inventory_for_meal_check()
+        if self._stop_event.is_set():
+            return False
+        if not inventory_closed:
+            self._log("Питание: инвентарь не закрылся для проверки, считаю голод/жажду активными")
+            return True
+        clear_polls = 0
+        deadline = time.time() + timeout
+        while time.time() < deadline and not self._stop_event.is_set():
+            self._refresh_triggers()
+            needs_meal = "hunger" in self._last_triggers or "thirst" in self._last_triggers
+            if needs_meal:
+                clear_polls = 0
+            else:
+                clear_polls += 1
+                if clear_polls >= MEAL_CLEAR_CONFIRM_POLLS:
+                    return False
+            self._sleep(MEAL_HUD_CHECK_POLL_SECONDS)
+        return True
+
+    def _close_inventory_for_meal_check(self) -> bool:
+        self._focus_game()
+        deadline = time.time() + 4.0
+        next_toggle_at = 0.0
+        while time.time() < deadline and not self._stop_event.is_set():
+            if not self._is_inventory_open():
+                return True
+            if time.time() >= next_toggle_at:
+                self.input_controller.press_key(self.settings.inventory_hotkey)
+                self._log(f"Питание: закрываю инвентарь клавишей {self.settings.inventory_hotkey} для контрольной проверки")
+                next_toggle_at = time.time() + 1.0
+            self._sleep(0.15)
+        return False
+
+    def _notify_meal_consumed(self, snapshot: MealItemSnapshot) -> None:
+        self.notification_manager.notify_meal_eaten(snapshot.item_title or snapshot.display_name, item_info=snapshot.item_info)
+
+    def _handle_food_depleted(self) -> None:
+        self._publish_ui_event("Закончилась еда", event_type="danger", icon="food.svg")
+        self._log("Закончилась еда")
+        action = self.settings.food_depleted_action
+        if action == "continue":
+            self._meal_search_disabled_until_restart = True
+            self._inventory_retry_after = float("inf")
+            self._log("Питание: поиск еды отключён до следующего ручного перезапуска рыбалки")
+            return
+        if action == "exit_game":
+            self._shutdown_game()
+        self._stop_from_brain("Закончилась еда")
+        if action == "shutdown_pc":
+            self._shutdown_pc()
 
     def _do_backpack_actions(self) -> None:
         fish_to_keep = self.config_manager.get_fish_to_keep()
@@ -1349,6 +1554,7 @@ class FishingBot:
             return False
         if "changed_bait" not in self._last_triggers and "gear" not in self._last_triggers:
             return False
+        self._notify_bait_tired()
         self.state.phase = BotPhase.RECOVERY
         self._log("Смена наживки: выхожу из режима рыбалки")
         self.input_controller.press_key("esc")
@@ -1373,6 +1579,19 @@ class FishingBot:
         self._kickstart_requested = True
         self._sleep(0.3)
         return True
+
+    def _notify_bait_tired(self) -> None:
+        try:
+            self._publish_ui_event(
+                "Рыба устала от приманки, исправляем",
+                event_type="warning",
+                icon="bait.png",
+            )
+        except AttributeError:
+            pass
+        notify = getattr(getattr(self, "notification_manager", None), "notify_bait_tired", None)
+        if callable(notify):
+            notify()
 
     def _do_store_trunk(self) -> bool:
         if not self.settings.store_in_trunk:

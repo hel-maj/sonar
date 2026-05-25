@@ -116,6 +116,28 @@ STREAM_PAGE_HTML = r"""<!doctype html>
       color: #f4f7fb;
     }
     * { box-sizing: border-box; }
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(154, 174, 205, 0.86) rgba(237, 243, 251, 0.12);
+    }
+    *::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    *::-webkit-scrollbar-track {
+      background: rgba(237, 243, 251, 0.12);
+      border-radius: 999px;
+    }
+    *::-webkit-scrollbar-thumb {
+      background: rgba(154, 174, 205, 0.86);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    *::-webkit-scrollbar-thumb:hover {
+      background: rgba(184, 201, 228, 0.95);
+      background-clip: padding-box;
+    }
     body {
       margin: 0;
       min-height: 100vh;
@@ -1356,6 +1378,7 @@ class StreamingService:
         self._server_thread: threading.Thread | None = None
         self._ffmpeg_process: subprocess.Popen | None = None
         self._cloudflared_process: subprocess.Popen | None = None
+        self._audio_fallback_video_only = False
         self._monitor_thread: threading.Thread | None = None
         self._start_thread: threading.Thread | None = None
         self._tunnel_thread: threading.Thread | None = None
@@ -1943,6 +1966,7 @@ class StreamingService:
         self._chat_recent_sends = []
         self._chat_confirm_process = None
         self._chat_confirm_scan_running = False
+        self._audio_fallback_video_only = False
         self._started_at = None
         self._last_viewer_activity_at = None
         self._local_url = None
@@ -2009,7 +2033,23 @@ class StreamingService:
                 else:
                     self._log("Стрим: ожидаю первые HLS-сегменты")
                 self._start_ffmpeg_process_locked(ffmpeg)
-            self._wait_for_hls_ready(token)
+            try:
+                self._wait_for_hls_ready(token)
+            except RuntimeError:
+                if not self._audio_capture_args():
+                    raise
+                with self._lock:
+                    if token != self._runtime_token or self._status != "starting":
+                        return
+                    self._log("Стрим: звук не запустился, продолжаю без аудио")
+                    self._audio_fallback_video_only = True
+                    self._terminate_process(self._ffmpeg_process)
+                    self._ffmpeg_process = None
+                    if self._hls_dir is not None:
+                        shutil.rmtree(self._hls_dir, ignore_errors=True)
+                        self._hls_dir.mkdir(parents=True, exist_ok=True)
+                    self._start_ffmpeg_process_locked(ffmpeg)
+                self._wait_for_hls_ready(token)
             with self._lock:
                 if token != self._runtime_token or self._status != "starting":
                     return
@@ -2123,7 +2163,7 @@ class StreamingService:
         if self._hls_dir is None:
             raise RuntimeError("HLS папка не подготовлена")
         log_file = self._open_log_file_locked("ffmpeg.log")
-        command = self._build_ffmpeg_command(ffmpeg)
+        command = self._build_ffmpeg_command(ffmpeg, include_audio=not self._audio_fallback_video_only)
         self._ffmpeg_process = self._popen(command, stdout=log_file, stderr=subprocess.STDOUT)
 
     def _start_cloudflared_locked(self) -> None:
@@ -2399,17 +2439,18 @@ class StreamingService:
             return None
         return f"{base.rstrip('/')}/live/"
 
-    def _build_ffmpeg_command(self, executable: Path) -> list[str]:
+    def _build_ffmpeg_command(self, executable: Path, *, include_audio: bool = True) -> list[str]:
         if self._hls_dir is None:
             raise RuntimeError("HLS папка не подготовлена")
         quality = STREAM_QUALITIES[self._quality]
         capture_args = self._capture_args()
+        audio_args = self._audio_capture_args() if include_audio else []
         fps = LOW_FPS_STREAM_FPS if self._snapshot_mode_enabled else DEFAULT_STREAM_FPS
         encoder = os.environ.get("SONAR_STREAM_ENCODER", "libx264").strip() or "libx264"
         hls_playlist = self._hls_dir / "live.m3u8"
         hls_segment = self._hls_dir / "seg_%05d.ts"
         bitrate = quality.bitrate_for_fps(fps)
-        return [
+        command = [
             str(executable),
             "-hide_banner",
             "-nostdin",
@@ -2422,7 +2463,18 @@ class StreamingService:
             *capture_args,
             "-i",
             "desktop",
-            "-an",
+            *audio_args,
+            "-map",
+            "0:v:0",
+        ]
+        if audio_args:
+            command.extend([
+                "-map",
+                "1:a:0",
+            ])
+        else:
+            command.append("-an")
+        command.extend([
             "-vf",
             f"scale=-2:{quality.height}:flags=lanczos",
             "-c:v",
@@ -2441,6 +2493,19 @@ class StreamingService:
             "yuv420p",
             "-g",
             str(fps),
+        ])
+        if audio_args:
+            command.extend([
+                "-c:a",
+                "aac",
+                "-b:a",
+                os.environ.get("SONAR_STREAM_AUDIO_BITRATE", "128k").strip() or "128k",
+                "-ac",
+                "2",
+                "-ar",
+                "48000",
+            ])
+        command.extend([
             "-f",
             "hls",
             "-hls_time",
@@ -2454,7 +2519,23 @@ class StreamingService:
             "-hls_segment_filename",
             str(hls_segment),
             str(hls_playlist),
-        ]
+        ])
+        return command
+
+    @staticmethod
+    def _audio_capture_args() -> list[str]:
+        enabled = os.environ.get("SONAR_STREAM_AUDIO_ENABLED", "1").strip().lower()
+        if enabled in {"0", "false", "no", "off"}:
+            return []
+        driver = os.environ.get("SONAR_STREAM_AUDIO_DRIVER", "wasapi").strip().lower() or "wasapi"
+        source = (
+            os.environ.get("SONAR_STREAM_AUDIO_DEVICE")
+            or os.environ.get("SONAR_STREAM_AUDIO_INPUT")
+            or "default"
+        ).strip() or "default"
+        if driver == "dshow":
+            return ["-thread_queue_size", "1024", "-f", "dshow", "-i", f"audio={source}"]
+        return ["-thread_queue_size", "1024", "-f", "wasapi", "-loopback", "1", "-i", source]
 
     def _capture_args(self) -> list[str]:
         x, y, width, height = self._capture_rect()

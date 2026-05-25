@@ -41,6 +41,20 @@ def test_fishing_settings_accepts_tackle_depletion_options():
     assert settings.equipment_depleted_action == "shutdown_pc"
 
 
+
+
+def test_fishing_settings_accepts_food_depleted_and_backpack_move_options():
+    settings = FishingSettings.from_dict({"food_depleted_action": "shutdown_pc", "backpack_move_hotkey": "R"})
+
+    assert settings.food_depleted_action == "shutdown_pc"
+    assert settings.backpack_move_hotkey == "R"
+
+
+def test_fishing_settings_rejects_unknown_food_depleted_action():
+    settings = FishingSettings.from_dict({"food_depleted_action": "loop_forever"})
+
+    assert settings.food_depleted_action == "continue"
+
 def test_telegram_settings_accepts_comma_separated_ids():
     settings = TelegramSettings.from_dict({"enabled": True, "admin_ids": "1, 2, bad"})
 

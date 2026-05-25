@@ -14,10 +14,11 @@ from sonar.fishing.constants import (
     resolution_name,
     thirst_check_roi_for_resolution,
 )
+from sonar.fishing.item_info import ItemInfo, ItemInfoDetector
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.capture import WindowCapture
 from sonar.vision.geometry import Rect
-from sonar.vision.matching import TemplateMatcher, load_template
+from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
 
 
 MEAL_FILES = {
@@ -26,6 +27,41 @@ MEAL_FILES = {
     "irp": {"fullhd": "irp.png", "2k": "irp2k.png"},
     "full_indicator": {"fullhd": "100%.png", "2k": "100%_2k.png"},
 }
+
+MEAL_DISPLAY_NAMES = {
+    "irp": "ИРП Армии США",
+    "donut": "Пончик",
+    "cocktail": "Коктейль",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class MealItemMatch:
+    key: str
+    match: TemplateMatch
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class MealItemSnapshot:
+    key: str
+    display_name: str
+    item_title: str
+    item_weight: str
+    image: np.ndarray | None = None
+    item_info: ItemInfo | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MealRunResult:
+    consumed: tuple[MealItemSnapshot, ...] = ()
+    moved_from_backpack: int = 0
+    food_missing: bool = False
+    still_needs_meal: bool = False
+
+    @property
+    def used_any(self) -> bool:
+        return bool(self.consumed)
 
 
 @dataclass
@@ -39,6 +75,7 @@ class MealSystem:
     def __post_init__(self) -> None:
         self.capture = WindowCapture(self.process_name)
         self.matcher = TemplateMatcher(self.threshold)
+        self.item_info_detector = ItemInfoDetector()
 
     def initialize(self) -> bool:
         if not self.capture.find_window_by_process():
@@ -64,27 +101,57 @@ class MealSystem:
         template = self.templates.get("full_indicator")
         return bool(template is not None and self.find_template(screenshot, template, thirst_check_roi_for_resolution(width, height)))
 
+    def check_needs_meal(self, screenshot: np.ndarray) -> bool:
+        return not (self.check_food_full(screenshot) and self.check_thirst_full(screenshot))
+
     def find_item_in_inventory(self, screenshot: np.ndarray, item_key: str):
-        height, width = screenshot.shape[:2]
         template = self.templates.get(item_key)
         if template is None:
             return None
-        return self.find_template(screenshot, template, inventory_roi_for_resolution(width, height))
+        return self.find_template(screenshot, template, self.inventory_items_roi(screenshot))
+
+    def find_item_in_backpack(self, screenshot: np.ndarray, item_key: str):
+        template = self.templates.get(item_key)
+        if template is None:
+            return None
+        return self.find_template(screenshot, template, self.backpack_items_roi(screenshot))
 
     def find_food(self, screenshot: np.ndarray) -> str | None:
-        for name in ("irp", "donut", "cocktail"):
-            template = self.templates.get(name)
-            height, width = screenshot.shape[:2]
-            if template is not None and self.matcher.find_best(screenshot, template, roi=inventory_roi_for_resolution(width, height), name=name):
-                return name
-        return None
+        match = self.find_food_in_inventory(screenshot)
+        return None if match is None else match.key
 
-    def consume_item(self, x: int, y: int, item_name: str, use_key: str = "e") -> bool:
+    def find_food_in_inventory(self, screenshot: np.ndarray) -> MealItemMatch | None:
+        return self._find_food_in_area(screenshot, self.inventory_items_roi(screenshot), "inventory")
+
+    def find_food_in_backpack(self, screenshot: np.ndarray) -> MealItemMatch | None:
+        return self._find_food_in_area(screenshot, self.backpack_items_roi(screenshot), "backpack")
+
+    def consume_item(self, x: int, y: int, item_name: str, use_key: str = "e") -> MealItemSnapshot:
         screen_x, screen_y = self.capture.client_to_screen(x, y)
         self.input_controller.move_to(screen_x, screen_y)
-        self.input_controller.sleep(1.0)
+        self.input_controller.sleep(0.35)
+        snapshot_frame = self.capture.capture()
+        item_info = self.item_info_detector.detect(snapshot_frame)
+        image = self.item_info_detector.crop(snapshot_frame, item_info) if item_info is not None else None
+        title = item_info.title if item_info and item_info.title else MEAL_DISPLAY_NAMES.get(item_name, item_name)
+        weight = item_info.weight if item_info else ""
         self.input_controller.press_key(use_key)
         self.input_controller.sleep(0.1)
+        return MealItemSnapshot(
+            key=item_name,
+            display_name=MEAL_DISPLAY_NAMES.get(item_name, item_name),
+            item_title=title,
+            item_weight=weight,
+            image=image,
+            item_info=item_info,
+        )
+
+    def move_item_from_backpack(self, match: MealItemMatch, move_key: str = "r") -> bool:
+        screen_x, screen_y = self.capture.client_to_screen(match.match.x, match.match.y)
+        self.input_controller.move_to(screen_x, screen_y)
+        self.input_controller.sleep(0.35)
+        self.input_controller.press_key(move_key)
+        self.input_controller.sleep(1.0)
         return True
 
     def consume_irp(self, use_key: str = "e") -> bool:
@@ -92,7 +159,8 @@ class MealSystem:
         match = self.find_item_in_inventory(screenshot, "irp")
         if match is None:
             return False
-        return self.consume_item(match.x, match.y, "irp", use_key=use_key)
+        self.consume_item(match.x, match.y, "irp", use_key=use_key)
+        return True
 
     def consume_donuts_until_full(self, use_key: str = "e") -> int:
         consumed_count = 0
@@ -130,3 +198,33 @@ class MealSystem:
         donuts = self.consume_donuts_until_full(use_key=use_key)
         cocktails = self.consume_cocktails_until_full(use_key=use_key)
         return {"irp": irp_used, "donuts": donuts, "cocktails": cocktails}
+
+    def _find_food_in_area(self, screenshot: np.ndarray, roi: Rect, source: str) -> MealItemMatch | None:
+        for name in ("irp", "donut", "cocktail"):
+            template = self.templates.get(name)
+            if template is None:
+                continue
+            match = self.matcher.find_best(screenshot, template, roi=roi, name=name)
+            if match is not None:
+                return MealItemMatch(name, match, source)
+        return None
+
+    @staticmethod
+    def inventory_items_roi(screenshot: np.ndarray) -> Rect:
+        height, width = screenshot.shape[:2]
+        right_half = Rect(width // 2, 0, width - width // 2, height)
+        return MealSystem._intersect(inventory_roi_for_resolution(width, height), right_half).clamp(width, height)
+
+    @staticmethod
+    def backpack_items_roi(screenshot: np.ndarray) -> Rect:
+        height, width = screenshot.shape[:2]
+        left_lower = Rect(0, height // 2, width // 2, height - height // 2)
+        return MealSystem._intersect(inventory_roi_for_resolution(width, height), left_lower).clamp(width, height)
+
+    @staticmethod
+    def _intersect(first: Rect, second: Rect) -> Rect:
+        x1 = max(first.x, second.x)
+        y1 = max(first.y, second.y)
+        x2 = min(first.right, second.right)
+        y2 = min(first.bottom, second.bottom)
+        return Rect(x1, y1, max(0, x2 - x1), max(0, y2 - y1))

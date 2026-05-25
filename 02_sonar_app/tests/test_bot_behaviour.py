@@ -10,9 +10,11 @@ import sonar.fishing.bot as bot_module
 from sonar.config.models import FishingSettings
 from sonar.core.state import BotState
 from sonar.fishing.bot import FishingBot
+from sonar.fishing.meal_system import MealItemMatch, MealItemSnapshot
 from sonar.fishing.catch_screen import CatchScreenResult
 from sonar.fishing.tackle_detection import TACKLE_SLOTS, TackleItemCount, TackleScanResult
 from sonar.vision.geometry import Rect
+from sonar.vision.matching import TemplateMatch
 
 
 class DummyInput:
@@ -33,6 +35,55 @@ class DummyCapture:
 
 class DummyMatch:
     confidence = 1.0
+
+
+
+
+class FakeMealSystem:
+    def __init__(self) -> None:
+        self.frames_seen = 0
+        self.backpack_moves = 0
+        self.inventory_checks = 0
+
+    def check_needs_meal(self, _frame) -> bool:
+        return True
+
+    def find_food_in_inventory(self, _frame):
+        self.inventory_checks += 1
+        if self.inventory_checks == 1:
+            return None
+        return MealItemMatch("irp", TemplateMatch(20, 30, 1.0, 10, 10, "irp"), "inventory")
+
+    def find_food_in_backpack(self, _frame):
+        return MealItemMatch("irp", TemplateMatch(5, 6, 1.0, 10, 10, "irp"), "backpack")
+
+    def move_item_from_backpack(self, _match, move_key: str = "r") -> bool:
+        del move_key
+        self.backpack_moves += 1
+        return True
+
+    def consume_item(self, _x: int, _y: int, item_name: str, use_key: str = "e") -> MealItemSnapshot:
+        del use_key
+        return MealItemSnapshot(item_name, "ИРП Армии США", "ИРП Армии США", "1.0")
+
+
+def make_meal_loop_bot(meal_system: FakeMealSystem):
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings()
+    bot._stop_event = threading.Event()
+    bot.meal_system = meal_system
+    bot.capture = DummyCapture()
+    bot._prepare_meal_system = lambda: None
+    bot._inventory_retry_after = 0.0
+    bot._log_messages = []
+    bot._ui_events = []
+    bot._notifications = []
+    bot._log = bot._log_messages.append
+    bot._sleep = lambda _seconds: None
+    bot._open_inventory = lambda: True
+    bot._notify_meal_consumed = lambda snapshot: bot._notifications.append(snapshot.item_title)
+    bot._publish_ui_event = lambda title, **kwargs: bot._ui_events.append((title, kwargs))
+    return bot
 
 
 class SequenceTriggerMonitor:
@@ -96,7 +147,7 @@ def make_change_bait_bot(trigger_steps: list[dict[str, float]], *, auto_change_b
 
 
 def test_auto_change_bait_restarts_fishing_from_waiting_state():
-    bot = make_change_bait_bot([{"changed_bait": 1.0, "start2": 1.0}, {}])
+    bot = make_change_bait_bot([{"changed_bait": 1.0, "start2": 1.0}, {}, {"start2": 1.0}])
 
     assert bot._do_change_bait() is True
     assert bot.input_controller.keys == ["esc", "e"]
@@ -113,6 +164,7 @@ def test_auto_change_bait_never_exits_reeling():
 def test_prepare_start_does_not_treat_bait_notice_as_active_stage():
     bot = FishingBot.__new__(FishingBot)
     bot.input_controller = DummyInput()
+    bot.settings = FishingSettings()
     bot.capture = DummyCapture()
     bot.trigger_monitor = SequenceTriggerMonitor(
         [
@@ -317,6 +369,24 @@ def test_reeling_walking_guard_stops_when_no_state_and_idle_cannot_return():
     assert reasons == [bot_module.STOP_REASON_WALKING_GUARD]
 
 
+def test_restore_reeling_focus_uses_force_focus_while_bot_is_running():
+    bot = FishingBot.__new__(FishingBot)
+    calls: list[str] = []
+    bot._force_focus_game = lambda: calls.append("focus") or True
+
+    assert bot._restore_reeling_focus(8.0, now=10.0) == 10.0
+    assert calls == ["focus"]
+
+
+def test_restore_reeling_focus_is_throttled():
+    bot = FishingBot.__new__(FishingBot)
+    calls: list[str] = []
+    bot._force_focus_game = lambda: calls.append("focus") or True
+
+    assert bot._restore_reeling_focus(9.5, now=10.0) == 9.5
+    assert calls == []
+
+
 def test_reeling_idle_return_presses_e_and_accepts_new_fishing_stage():
     bot = FishingBot.__new__(FishingBot)
     bot.capture = DummyCapture()
@@ -448,8 +518,8 @@ def test_generic_equipment_action_can_close_game():
 def test_debug_capture_writes_only_when_debug_enabled(tmp_path, monkeypatch):
     bot = FishingBot.__new__(FishingBot)
     bot.capture = DummyCapture()
-    bot.catch_detector = DummyCatchDetector()
     bot.capture.capture = lambda: np.zeros((32, 32, 3), dtype=np.uint8)
+    bot.catch_detector = DummyCatchDetector()
     monkeypatch.setattr(bot_module, "DEBUG_CAPTURE_UNEXPECTED_FISH_DIR", tmp_path / "unexpected")
     monkeypatch.setattr(bot_module, "DEBUG_CAPTURE_OVER_15KG_DIR", tmp_path / "over_15")
     monkeypatch.setattr(bot_module, "DEBUG_CAPTURE_TROPHY_DIR", tmp_path / "trophy")
@@ -475,7 +545,7 @@ def test_debug_capture_writes_only_when_debug_enabled(tmp_path, monkeypatch):
         fish_id="albula",
         fish_label="Albula",
         weight="1.00",
-        quality="Рекордный улов",
+        quality="Трофейная",
         xp="unknown",
         confidence=0.95,
         stage_log_line="stage",
@@ -487,3 +557,262 @@ def test_debug_capture_writes_only_when_debug_enabled(tmp_path, monkeypatch):
     assert len(list((tmp_path / "all").glob("*.png"))) == 1
     assert (tmp_path / "all" / "metadata.csv").exists()
     assert (tmp_path / "unexpected" / "metadata.csv").exists()
+
+
+def test_catch_screen_text_overrides_reeling_image_guess():
+    bot = FishingBot.__new__(FishingBot)
+    logs: list[str] = []
+    clicks: list[object] = []
+    records: list[tuple[str | None, str, float | None, bool, str]] = []
+    release_button = object()
+    result = CatchScreenResult(
+        True,
+        release_button=release_button,
+        fish_id="ruster",
+        fish_confidence=0.95,
+        fish_text="Рустер",
+        quality_text="Хороший улов",
+        weight_kg=2.29,
+        weight_text="2.29",
+        xp_current=11136,
+        is_max_level=True,
+    )
+
+    class Config:
+        def get_fish_to_keep(self):
+            return set()
+
+    class Stats:
+        def totals(self):
+            return {}
+
+        def record_catch(self, fish_id, fish_label, weight_kg, *, kept, catch_size):
+            records.append((fish_id, fish_label, weight_kg, kept, catch_size))
+
+    class Notifications:
+        def notify_caught_fish(self, *args, **kwargs):
+            return None
+
+    bot.config_manager = Config()
+    bot.session_stats = Stats()
+    bot.notification_manager = Notifications()
+    bot.state = BotState()
+    bot.inventory_full = False
+    bot._last_catch_result = None
+    bot._current_catch_result = lambda timeout: result
+    bot._sleep_random = lambda minimum, extra: None
+    bot._click_match = clicks.append
+    bot._log = logs.append
+    bot._capture_catch_panel = lambda catch_result: None
+    bot._encode_png_bytes = lambda image: None
+    bot._save_debug_catch_snapshots = lambda **kwargs: None
+    bot._publish_catch_ui_event = lambda **kwargs: None
+
+    bot._do_fish_catch("krasny_gorbyl", 0.99)
+
+    assert clicks == [release_button]
+    assert records == [("ruster", "Рустер", 2.29, False, "Хороший улов")]
+    assert any("Улов: рыба=Рустер id=ruster вес=2.29" in log for log in logs)
+    assert not any("Улов: рыба=Красный горбыль" in log for log in logs)
+
+
+def test_catch_snapshot_wrapper_accepts_crop_before_result_click(monkeypatch):
+    bot = FishingBot.__new__(FishingBot)
+    clicks: list[object] = []
+    keep_button = object()
+    result = CatchScreenResult(
+        True,
+        keep_button=keep_button,
+        fish_id="krasny_gorbyl",
+        fish_confidence=0.95,
+        fish_text="Красный горбыль",
+        quality_text="Трофейная",
+        weight_kg=7.21,
+        weight_text="7.21",
+        xp_current=11138,
+    )
+
+    class Config:
+        def get_fish_to_keep(self):
+            return {"krasny_gorbyl"}
+
+    class Stats:
+        def totals(self):
+            return {}
+
+        def record_catch(self, *args, **kwargs):
+            return None
+
+    class Notifications:
+        def notify_caught_fish(self, *args, **kwargs):
+            return None
+
+    bot.config_manager = Config()
+    bot.session_stats = Stats()
+    bot.notification_manager = Notifications()
+    bot.capture = DummyCapture()
+    bot.capture.capture = lambda: np.zeros((32, 32, 3), dtype=np.uint8)
+    bot.catch_detector = DummyCatchDetector()
+    bot.state = BotState()
+    bot.inventory_full = False
+    bot._last_catch_result = None
+    bot._current_catch_result = lambda timeout: result
+    bot._sleep_random = lambda minimum, extra: None
+    bot._click_match = clicks.append
+    bot._log = lambda message: None
+    bot._publish_catch_ui_event = lambda **kwargs: None
+    bot._wait_for_pereves = lambda timeout: False
+    monkeypatch.delenv("SONAR_DEBUG_CAPTURE", raising=False)
+
+    bot._do_fish_catch(None, 0.0)
+
+    assert clicks == [keep_button]
+
+
+def test_continue_after_hook_does_not_start_reeling_without_confirmed_stage():
+    bot = FishingBot.__new__(FishingBot)
+    bot._stop_event = threading.Event()
+    bot._log = lambda message: None
+    reeling_calls: list[bool] = []
+    bot._run_reeling_module = lambda: reeling_calls.append(True) or (None, 0.0)
+
+    bot._continue_after_hook(None)
+
+    assert reeling_calls == []
+
+
+def test_continue_after_hook_starts_reeling_only_for_confirmed_reeling_stage():
+    bot = FishingBot.__new__(FishingBot)
+    bot._stop_event = threading.Event()
+    bot._has_pending_catch = lambda: False
+    bot._do_fish_catch = lambda *args: None
+    bot._log = lambda message: None
+    reeling_calls: list[bool] = []
+    bot._run_reeling_module = lambda: reeling_calls.append(True) or (None, 0.0)
+
+    bot._continue_after_hook("ad")
+
+    assert reeling_calls == [True]
+
+
+def test_change_bait_publishes_local_event_and_telegram_notification():
+    bot = make_change_bait_bot([{"changed_bait": 1.0}, {}, {"start2": 1.0}])
+    events: list[tuple[str, str]] = []
+    messages: list[str] = []
+
+    class Notifications:
+        def notify_bait_tired(self):
+            messages.append("telegram")
+
+    bot.notification_manager = Notifications()
+    bot._publish_ui_event = lambda text, **kwargs: events.append((text, kwargs.get("icon", "")))
+
+    assert bot._do_change_bait() is True
+    assert events == [("Рыба устала от приманки, исправляем", "bait.png")]
+    assert messages == ["telegram"]
+
+
+def test_run_reeling_module_refuses_to_start_when_current_stage_is_not_reeling():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState()
+    bot._last_triggers = {}
+    bot._stop_event = threading.Event()
+    bot._has_pending_catch = lambda: False
+    bot._probe_catch_screen = lambda: False
+    bot._refresh_triggers = lambda: None
+    bot._publish_stage = lambda label: None
+    logs: list[str] = []
+    bot._log = logs.append
+
+    class Tracker:
+        def __init__(self):
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+        def start_control_loop(self):
+            self.started = True
+
+    tracker = Tracker()
+    bot.reeling_tracker = tracker
+
+    assert bot._run_reeling_module() == (None, 0.0)
+    assert tracker.started is False
+    assert any("Вываживание не запущено" in item for item in logs)
+
+
+def make_food_depleted_bot(action: str):
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(food_depleted_action=action)
+    bot._meal_search_disabled_until_restart = False
+    bot._inventory_retry_after = 0.0
+    bot._stop_event = threading.Event()
+    bot._log_messages: list[str] = []
+    bot._ui_events: list[str] = []
+    bot._stop_reasons: list[str] = []
+    bot._shutdown_game_calls = 0
+    bot._shutdown_pc_calls = 0
+    bot._log = bot._log_messages.append
+    bot._publish_ui_event = lambda title, **kwargs: bot._ui_events.append(title)
+    bot._stop_from_brain = bot._stop_reasons.append
+
+    def shutdown_game():
+        bot._shutdown_game_calls += 1
+
+    def shutdown_pc():
+        bot._shutdown_pc_calls += 1
+
+    bot._shutdown_game = shutdown_game
+    bot._shutdown_pc = shutdown_pc
+    return bot
+
+
+def test_food_depleted_continue_disables_meal_search_until_restart():
+    bot = make_food_depleted_bot("continue")
+
+    bot._handle_food_depleted()
+
+    assert bot._ui_events == ["Закончилась еда"]
+    assert bot._meal_search_disabled_until_restart is True
+    assert bot._inventory_retry_after == float("inf")
+    assert bot._stop_reasons == []
+
+
+def test_food_depleted_shutdown_game_stops_bot_after_closing_game():
+    bot = make_food_depleted_bot("exit_game")
+
+    bot._handle_food_depleted()
+
+    assert bot._ui_events == ["Закончилась еда"]
+    assert bot._shutdown_game_calls == 1
+    assert bot._shutdown_pc_calls == 0
+    assert bot._stop_reasons == ["Закончилась еда"]
+
+
+def test_meal_loop_stops_after_first_consumption_when_hud_is_clear():
+    meal_system = FakeMealSystem()
+    bot = make_meal_loop_bot(meal_system)
+    confirmations = []
+
+    def confirm_after_consumption() -> bool:
+        confirmations.append(True)
+        return False
+
+    bot._confirm_still_needs_meal_after_consumption = confirm_after_consumption
+
+    assert bot._do_meal_actions() is True
+    assert meal_system.backpack_moves == 1
+    assert bot._notifications == ["ИРП Армии США"]
+    assert confirmations == [True]
+
+
+def test_meal_loop_continues_after_consumption_only_when_hud_still_needs_meal():
+    meal_system = FakeMealSystem()
+    bot = make_meal_loop_bot(meal_system)
+    confirmations = iter([True, False])
+    bot._confirm_still_needs_meal_after_consumption = lambda: next(confirmations)
+
+    assert bot._do_meal_actions() is True
+    assert meal_system.backpack_moves == 1
+    assert bot._notifications == ["ИРП Армии США", "ИРП Армии США"]

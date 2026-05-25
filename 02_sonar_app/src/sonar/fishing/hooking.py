@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -38,6 +39,7 @@ class TemplateMonitor:
     resolution_type: str
     resource_dir: Path = FISHING_RESOURCE_DIR
     input_controller: InputController = field(default_factory=InputController)
+    focus_callback: Callable[[], bool] | None = None
     threshold: float = HOOKING_MATCH_THRESHOLD
 
     def __post_init__(self) -> None:
@@ -106,13 +108,25 @@ class TemplateMonitor:
         reason = ""
         if red_detected or bubles_detected:
             reason = "red" if red_conf >= bubles_conf else "bubles"
+            if self.focus_callback is not None:
+                self.focus_callback()
             if self.input_controller.press_key("space") is not False:
                 self.pause_until = now + HOOKING_PAUSE_SECONDS
                 pressed = True
         return HookingResult(red_conf, bubles_conf, red_detected, bubles_detected, pressed, reason, fps, 0.0)
 
 
-def create_monitor_for_frame(frame: np.ndarray, input_controller: InputController | None = None) -> TemplateMonitor:
+def create_monitor_for_frame(
+    frame: np.ndarray,
+    input_controller: InputController | None = None,
+    focus_callback: Callable[[], bool] | None = None,
+) -> TemplateMonitor:
     height, width = frame.shape[:2]
     roi1, roi2 = hooking_rois_for_resolution(width, height)
-    return TemplateMonitor(roi1, roi2, resolution_name(width, height), input_controller=input_controller or InputController())
+    return TemplateMonitor(
+        roi1,
+        roi2,
+        resolution_name(width, height),
+        input_controller=input_controller or InputController(),
+        focus_callback=focus_callback,
+    )
