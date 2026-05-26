@@ -8,7 +8,7 @@ import shutil
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -37,6 +37,7 @@ from sonar.fishing.hooking import TemplateMonitor, create_monitor_for_frame as c
 from sonar.fishing.inventory_stage import InventoryStageDetector
 from sonar.fishing.meal_system import MealItemSnapshot, MealSystem
 from sonar.fishing.memory_reeling import MemoryReelingTracker
+from sonar.fishing.player_status import PlayerStatus
 from sonar.fishing.statistics import FishingSessionStats, format_money_range, format_weight, parse_fish_prices_from_markdown
 from sonar.fishing.store_fish import FishStorer
 from sonar.fishing.tackle_detection import TackleDetector, TackleScanResult, format_tackle_items
@@ -54,6 +55,7 @@ DEBUG_CAPTURE_UNEXPECTED_FISH_DIR = DEBUG_CAPTURE_ROOT_DIR / "fish_identificatio
 DEBUG_CAPTURE_OVER_15KG_DIR = DEBUG_CAPTURE_ROOT_DIR / "over_15kg_fish_screenshots"
 DEBUG_CAPTURE_TROPHY_DIR = DEBUG_CAPTURE_ROOT_DIR / "trophy_fish_screenshots"
 DEBUG_CAPTURE_ALL_CATCHES_DIR = DEBUG_CAPTURE_ROOT_DIR / "all_caught_fish_session_screenshots"
+DEBUG_CAPTURE_MEAL_DIR = DEBUG_CAPTURE_ROOT_DIR / "eaten_item_info_screenshots"
 DEBUG_CAPTURE_CSV_NAME = "metadata.csv"
 DEBUG_CAPTURE_WEIGHT_THRESHOLD_KG = 15.0
 START_STOP_SOUND_VOLUME = 0.3
@@ -73,6 +75,7 @@ MEAL_HUD_CHECK_POLL_SECONDS = 0.5
 MEAL_CLEAR_CONFIRM_POLLS = 2
 MEAL_BACKPACK_MOVE_MAX_ATTEMPTS = 5
 MEAL_MISSING_RETRY_SECONDS = 45.0
+MEAL_STATUS_MAX_AGE_SECONDS = 15.0
 PREPARE_START_POLL_SECONDS = 0.05
 RANDOM_DELAY_JITTER_SECONDS = 0.6
 TACKLE_ACTION_DELAY_SECONDS = 0.5
@@ -126,6 +129,7 @@ class FishingBot:
     can_start_callback: Callable[[], bool] | None = None
     start_command_callback: Callable[[], bool] | None = None
     telegram_settings_changed_callback: Callable[[TelegramSettings], None] | None = None
+    player_status_callback: Callable[[PlayerStatus | None], None] | None = None
     stream_status_callback: Callable[[], object] | None = None
     stream_start_callback: Callable[[], bool] | None = None
     stream_stop_callback: Callable[[], None] | None = None
@@ -178,6 +182,8 @@ class FishingBot:
         self._start_attempt_since: float | None = None
         self._inventory_retry_after = 0.0
         self._meal_search_disabled_until_restart = False
+        self._last_player_status: PlayerStatus | None = None
+        self._last_player_status_at = 0.0
         self.inventory_full = False
         self.settings: FishingSettings = self.config_manager.load().fishing
         self._configure_notifications()
@@ -190,6 +196,17 @@ class FishingBot:
         self.session_stats.set_custom_prices(self.settings.custom_fish_prices)
         self._configure_notifications()
         self._log("Settings reloaded")
+
+    def detect_player_status(self, *, allow_screenshot_fallback: bool = False) -> PlayerStatus | None:
+        frame = None
+        if allow_screenshot_fallback:
+            try:
+                frame = self.capture.capture()
+            except Exception:
+                frame = None
+        status = self.meal_system.detect_player_status(frame, allow_screenshot_fallback=allow_screenshot_fallback)
+        self._publish_player_status(status)
+        return status
 
     def _configure_notifications(self) -> None:
         settings = self.config_manager.load()
@@ -305,6 +322,10 @@ class FishingBot:
             self._chat_pause_event.clear()
         self.reeling_tracker.stop()
         self.inventory_memory_detector.close()
+        try:
+            self.meal_system.status_memory_detector.close()
+        except Exception:
+            pass
         self.input_controller.release_all_keys()
         self.state.running = False
         self.state.phase = BotPhase.IDLE
@@ -469,6 +490,19 @@ class FishingBot:
     def _is_trigger_active(self, trigger_name: str) -> bool:
         return trigger_name in self._last_triggers
 
+    def _status_indicates_needs_meal(self, stage: str | None) -> bool:
+        if stage == "ad":
+            return False
+        status = getattr(self, "_last_player_status", None)
+        checked_at = getattr(self, "_last_player_status_at", 0.0)
+        if status is None or time.time() - checked_at > MEAL_STATUS_MAX_AGE_SECONDS:
+            return False
+        return status.has_needs(
+            food_threshold=self.settings.restore_food_from,
+            water_threshold=self.settings.restore_water_from,
+            health_threshold=self.settings.restore_health_from,
+        )
+
     def _brain_loop(self) -> None:
         while not self._stop_event.is_set():
             if self.is_paused_for_chat():
@@ -480,7 +514,9 @@ class FishingBot:
             stage = self._detect_stage(triggers)
             self._publish_stage(self._stage_label(stage))
             try:
-                needs_meal = ("hunger" in triggers or "thirst" in triggers) and not self._meal_search_disabled_until_restart
+                trigger_needs_meal = "hunger" in triggers or "thirst" in triggers
+                status_needs_meal = self._status_indicates_needs_meal(stage)
+                needs_meal = (trigger_needs_meal or status_needs_meal) and not self._meal_search_disabled_until_restart
                 if self._stop_if_no_stage_timed_out(stage, needs_meal):
                     break
                 if stage != "ad" and self._close_game_menu_if_open():
@@ -501,6 +537,8 @@ class FishingBot:
                     self._handle_overweight_trigger()
                 elif self._has_pending_catch() or self._probe_catch_screen():
                     self._do_fish_catch()
+                elif self._should_handle_meal_now(stage, needs_meal):
+                    self._handle_pending_tasks(do_meal=True)
                 elif stage == "ad":
                     fish_name, confidence = self._run_reeling_module()
                     if fish_name or self._has_pending_catch():
@@ -561,6 +599,9 @@ class FishingBot:
             "ad": "Вываживание",
         }
         return labels.get(stage or "", "Свободно")
+
+    def _should_handle_meal_now(self, stage: str | None, needs_meal: bool) -> bool:
+        return bool(needs_meal and stage != "ad" and time.time() >= self._inventory_retry_after)
 
     def _publish_stage(self, label: str) -> None:
         if self.state.detected_stage == label:
@@ -960,6 +1001,13 @@ class FishingBot:
             self._refresh_triggers()
             if "start2" not in self._last_triggers and "wait_tension" not in self._last_triggers:
                 self._log("Подсечка: стадия закончилась до триггера")
+                return False
+            if (
+                not self._meal_search_disabled_until_restart
+                and time.time() >= self._inventory_retry_after
+                and ("hunger" in self._last_triggers or "thirst" in self._last_triggers)
+            ):
+                self._log("Подсечка: найден голод/жажда, выхожу из ожидания для питания")
                 return False
             frame = self.capture.capture()
             if self.hooking_monitor is None:
@@ -1403,7 +1451,12 @@ class FishingBot:
         self._prepare_meal_system()
         while not self._stop_event.is_set():
             frame = self.capture.capture()
-            if not self.meal_system.check_needs_meal(frame):
+            if not self.meal_system.check_needs_meal(
+                frame,
+                food_threshold=self.settings.restore_food_from,
+                water_threshold=self.settings.restore_water_from,
+                health_threshold=self.settings.restore_health_from,
+            ):
                 if self._meal_trigger_active_after_inventory_close():
                     if self._open_inventory():
                         continue
@@ -1419,10 +1472,15 @@ class FishingBot:
                 )
                 consumed.append(snapshot)
                 moved_from_backpack_attempts = 0
-                self._notify_meal_consumed(snapshot)
-                self._publish_ui_event("Питание использовано", event_type="meal", icon="food.svg", detail=snapshot.item_title)
                 self._log(f"Еда/вода использована: {snapshot.item_title or snapshot.display_name}, жду завершения анимации")
                 self._sleep(MEAL_ANIMATION_WAIT_SECONDS)
+                player_status = self._detect_player_status_for_meal()
+                if player_status is not None:
+                    snapshot = replace(snapshot, player_status=player_status)
+                    consumed[-1] = snapshot
+                self._notify_meal_consumed(snapshot)
+                self._save_debug_meal_snapshot(snapshot)
+                self._publish_ui_event("Питание использовано", event_type="meal", icon="food.svg", detail=snapshot.item_title)
                 self._inventory_retry_after = 0.0
                 if not self._confirm_still_needs_meal_after_consumption():
                     break
@@ -1501,8 +1559,95 @@ class FishingBot:
             self._sleep(0.15)
         return False
 
+    def _detect_player_status_for_meal(self):
+        try:
+            frame = self.capture.capture()
+            status = self.meal_system.detect_player_status(frame)
+            self._publish_player_status(status)
+            return status
+        except Exception as exc:
+            debug_log(f"MEAL_STATUS_DETECT_FAILED {exc}")
+            return None
+
+    def _publish_player_status(self, status: PlayerStatus | None) -> None:
+        self._last_player_status = status
+        self._last_player_status_at = time.time()
+        callback = self.player_status_callback
+        if callback is None:
+            return
+        try:
+            callback(status)
+        except Exception as exc:
+            debug_log(f"PLAYER_STATUS_CALLBACK_FAILED {exc}")
+
     def _notify_meal_consumed(self, snapshot: MealItemSnapshot) -> None:
-        self.notification_manager.notify_meal_eaten(snapshot.item_title or snapshot.display_name, item_info=snapshot.item_info)
+        self.notification_manager.notify_meal_eaten(
+            snapshot.item_title or snapshot.display_name,
+            image_bytes=self._encode_png_bytes(snapshot.image),
+            item_info=snapshot.item_info,
+            player_status=snapshot.player_status,
+        )
+
+    def _save_debug_meal_snapshot(self, snapshot: MealItemSnapshot) -> None:
+        if not self._debug_capture_enabled() or snapshot.image is None:
+            return
+        try:
+            DEBUG_CAPTURE_MEAL_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = int(time.time() * 1000)
+            safe_item = self._safe_debug_filename_part(snapshot.item_title or snapshot.display_name or snapshot.key)
+            screenshot_path = DEBUG_CAPTURE_MEAL_DIR / f"{timestamp}_meal_{safe_item}.png"
+            if not cv2.imwrite(str(screenshot_path), snapshot.image):
+                debug_log(f"DEBUG_MEAL_CAPTURE_WRITE_FAILED {screenshot_path}")
+                return
+            item_info = snapshot.item_info
+            status = snapshot.player_status
+            csv_path = DEBUG_CAPTURE_MEAL_DIR / DEBUG_CAPTURE_CSV_NAME
+            write_header = not csv_path.exists()
+            with csv_path.open("a", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(
+                    file,
+                    fieldnames=[
+                        "screenshot",
+                        "screenshot_path",
+                        "created_at_utc",
+                        "item_key",
+                        "display_name",
+                        "item_title",
+                        "weight_kg",
+                        "satiety_change",
+                        "thirst_change",
+                        "condition_percent",
+                        "status_food",
+                        "status_water",
+                        "status_health",
+                        "status_source",
+                        "raw_text",
+                    ],
+                )
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(
+                    {
+                        "screenshot": screenshot_path.name,
+                        "screenshot_path": str(screenshot_path),
+                        "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                        "item_key": snapshot.key,
+                        "display_name": snapshot.display_name,
+                        "item_title": snapshot.item_title,
+                        "weight_kg": snapshot.item_weight,
+                        "satiety_change": item_info.satiety_change if item_info else "",
+                        "thirst_change": item_info.thirst_change if item_info else "",
+                        "condition_percent": item_info.condition_percent if item_info else "",
+                        "status_food": "" if status is None or status.food is None else status.food,
+                        "status_water": "" if status is None or status.water is None else status.water,
+                        "status_health": "" if status is None or status.health is None else status.health,
+                        "status_source": status.source if status else "",
+                        "raw_text": item_info.text if item_info else "",
+                    }
+                )
+            debug_log(f"DEBUG_MEAL_CAPTURE_SAVED path={screenshot_path}")
+        except Exception as exc:
+            debug_log(f"DEBUG_MEAL_CAPTURE_FAILED {exc}")
 
     def _handle_food_depleted(self) -> None:
         self._publish_ui_event("Закончилась еда", event_type="danger", icon="food.svg")

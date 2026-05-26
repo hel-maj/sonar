@@ -9,6 +9,7 @@ from PIL import Image
 
 from sonar.config.models import TelegramSettings
 from sonar.fishing.item_info import ItemEffect, ItemInfo
+from sonar.fishing.player_status import PlayerStatus
 from sonar.fishing.statistics import FishPrice, FishingSessionStats, SessionTotals
 from sonar.fishing.tackle_detection import TackleItemCount
 import sonar.telegram.notifier as notifier_module
@@ -609,3 +610,35 @@ def test_meal_notification_includes_item_effect_details(monkeypatch):
     assert "15 м." in text
     assert "+10% к скорости бега" in text
     assert "+100 к выносливости" in text
+
+
+def test_meal_notification_includes_player_status(monkeypatch):
+    calls = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1], notify_meal=True))
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_meal_eaten(
+        "ИРП Армии США",
+        player_status=PlayerStatus(
+            food=96,
+            water=71,
+            health=47,
+            inventory_weight=5.74,
+            inventory_weight_max=40,
+            backpack_weight=11.74,
+            backpack_weight_max=20,
+            source="screenshot",
+        ),
+    )
+
+    text = calls[0][1]["json"]["text"]
+    assert "Еда:</b> 96%" in text
+    assert "Вода:</b> 71%" in text
+    assert "Здоровье:</b> 47%" in text
+    assert "Инвентарь:</b> 5.74 / 40 кг" in text
+    assert "Рюкзак:</b> 11.74 / 20 кг" in text

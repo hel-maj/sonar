@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from sonar.fishing.constants import (
     thirst_check_roi_for_resolution,
 )
 from sonar.fishing.item_info import ItemInfo, ItemInfoDetector
+from sonar.fishing.player_status import PlayerStatus, PlayerStatusDetector, PlayerStatusMemoryDetector
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.capture import WindowCapture
 from sonar.vision.geometry import Rect
@@ -27,6 +29,10 @@ MEAL_FILES = {
     "irp": {"fullhd": "irp.png", "2k": "irp2k.png"},
     "full_indicator": {"fullhd": "100%.png", "2k": "100%_2k.png"},
 }
+
+ITEM_TOOLTIP_INITIAL_WAIT_SECONDS = 1.55
+ITEM_TOOLTIP_RETRY_SECONDS = 1.0
+ITEM_TOOLTIP_RETRY_POLL_SECONDS = 0.2
 
 MEAL_DISPLAY_NAMES = {
     "irp": "ИРП Армии США",
@@ -50,6 +56,7 @@ class MealItemSnapshot:
     item_weight: str
     image: np.ndarray | None = None
     item_info: ItemInfo | None = None
+    player_status: PlayerStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +83,8 @@ class MealSystem:
         self.capture = WindowCapture(self.process_name)
         self.matcher = TemplateMatcher(self.threshold)
         self.item_info_detector = ItemInfoDetector()
+        self.status_detector = PlayerStatusDetector()
+        self.status_memory_detector = PlayerStatusMemoryDetector(self.process_name)
 
     def initialize(self) -> bool:
         if not self.capture.find_window_by_process():
@@ -101,8 +110,43 @@ class MealSystem:
         template = self.templates.get("full_indicator")
         return bool(template is not None and self.find_template(screenshot, template, thirst_check_roi_for_resolution(width, height)))
 
-    def check_needs_meal(self, screenshot: np.ndarray) -> bool:
+    def check_needs_meal(
+        self,
+        screenshot: np.ndarray,
+        *,
+        food_threshold: int = 100,
+        water_threshold: int = 100,
+        health_threshold: int | None = None,
+    ) -> bool:
+        status = self.detect_player_status(screenshot)
+        if status is not None and status.food is not None and status.water is not None:
+            return status.has_needs(
+                food_threshold=food_threshold,
+                water_threshold=water_threshold,
+                health_threshold=health_threshold,
+            )
         return not (self.check_food_full(screenshot) and self.check_thirst_full(screenshot))
+
+    def detect_player_status(
+        self,
+        screenshot: np.ndarray | None = None,
+        *,
+        allow_screenshot_fallback: bool = True,
+    ) -> PlayerStatus | None:
+        status = self.status_memory_detector.detect()
+        if status is not None and (status.has_core_values() or not allow_screenshot_fallback) and screenshot is None:
+            return status
+        if not allow_screenshot_fallback:
+            return status
+        if screenshot is None:
+            try:
+                screenshot = self.capture.capture()
+            except Exception:
+                return status
+        fallback = self.status_detector.detect(screenshot)
+        if status is not None and fallback is not None:
+            return fallback.merge_missing(status)
+        return fallback or status
 
     def find_item_in_inventory(self, screenshot: np.ndarray, item_key: str):
         template = self.templates.get(item_key)
@@ -129,9 +173,10 @@ class MealSystem:
     def consume_item(self, x: int, y: int, item_name: str, use_key: str = "e") -> MealItemSnapshot:
         screen_x, screen_y = self.capture.client_to_screen(x, y)
         self.input_controller.move_to(screen_x, screen_y)
-        self.input_controller.sleep(0.35)
-        snapshot_frame = self.capture.capture()
-        item_info = self.item_info_detector.detect(snapshot_frame)
+        snapshot_frame, item_info = self._capture_hovered_item_info()
+        if snapshot_frame is None:
+            snapshot_frame = self.capture.capture()
+            item_info = self.item_info_detector.detect(snapshot_frame)
         image = self.item_info_detector.crop(snapshot_frame, item_info) if item_info is not None else None
         title = item_info.title if item_info and item_info.title else MEAL_DISPLAY_NAMES.get(item_name, item_name)
         weight = item_info.weight if item_info else ""
@@ -145,6 +190,18 @@ class MealSystem:
             image=image,
             item_info=item_info,
         )
+
+    def _capture_hovered_item_info(self) -> tuple[np.ndarray | None, ItemInfo | None]:
+        self.input_controller.sleep(ITEM_TOOLTIP_INITIAL_WAIT_SECONDS)
+        deadline = time.monotonic() + ITEM_TOOLTIP_RETRY_SECONDS
+        last_frame: np.ndarray | None = None
+        while time.monotonic() <= deadline:
+            last_frame = self.capture.capture()
+            item_info = self.item_info_detector.detect(last_frame)
+            if item_info is not None:
+                return last_frame, item_info
+            self.input_controller.sleep(ITEM_TOOLTIP_RETRY_POLL_SECONDS)
+        return last_frame, None
 
     def move_item_from_backpack(self, match: MealItemMatch, move_key: str = "r") -> bool:
         screen_x, screen_y = self.capture.client_to_screen(match.match.x, match.match.y)

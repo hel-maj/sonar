@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QStackedWidget,
     QStyledItemDelegate,
     QTableWidget,
@@ -49,6 +50,7 @@ from sonar.build_metadata import APP_BUILD_HASH, APP_NAME
 from sonar.fishing.bot import FishingBot
 from sonar.fishing.catch_quality import CATCH_SIZE_COLORS_BY_KEY
 from sonar.fishing.fish_names import FISH_DISPLAY_NAMES, fish_id_from_display
+from sonar.fishing.player_status import PlayerStatus
 from sonar.fishing.statistics import (
     FishingSessionStats,
     format_base_price,
@@ -194,6 +196,10 @@ class TelegramSettingsBridge(QObject):
     changed = Signal(object)
 
 
+class PlayerStatusBridge(QObject):
+    updated = Signal(object)
+
+
 class DigitsOnlyDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):  # type: ignore[override]
         editor = QLineEdit(parent)
@@ -234,6 +240,12 @@ class MainWindow(QMainWindow):
         self.ui_events_bridge = UiEventsBridge()
         self.ui_events_bridge.message.connect(self._handle_ui_event)
         self._unsubscribe_ui_events = event_bus.subscribe_ui_events(self.ui_events_bridge.message.emit)
+        self.player_status_bridge = PlayerStatusBridge()
+        self.player_status_bridge.updated.connect(self._handle_player_status_update)
+        self._player_status_refreshing = False
+        self._latest_player_status: PlayerStatus | None = None
+        self._latest_player_status_at = 0.0
+        self._last_player_status_screenshot_at = 0.0
         self.bot = FishingBot(
             log_callback=self.log_bridge.message.emit,
             config_manager=self.config_manager,
@@ -241,6 +253,7 @@ class MainWindow(QMainWindow):
             can_start_callback=self._has_active_license,
             start_command_callback=self._start_bot_from_remote,
             telegram_settings_changed_callback=self.telegram_settings_bridge.changed.emit,
+            player_status_callback=self.player_status_bridge.updated.emit,
             keep_debug_capture=keep_debug_capture,
         )
         self.chat_controller = MajesticChatController(
@@ -301,6 +314,9 @@ class MainWindow(QMainWindow):
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self._refresh_status_label)
         self.status_timer.start(250)
+        self.player_status_timer = QTimer(self)
+        self.player_status_timer.timeout.connect(self._refresh_player_status)
+        self.player_status_timer.start(5000)
         self.stats_timer = QTimer(self)
         self.stats_timer.timeout.connect(self._refresh_stats_tab)
         self.stats_timer.start(1000)
@@ -310,6 +326,7 @@ class MainWindow(QMainWindow):
         self.license_timer = QTimer(self)
         self.license_timer.timeout.connect(self._license_tick)
         self.license_timer.start(1000)
+        QTimer.singleShot(500, self._refresh_player_status)
         QTimer.singleShot(0, self._notify_app_started)
 
     def _build_ui(self) -> None:
@@ -508,6 +525,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self._build_fishing_control_card(), 3)
         top.addWidget(self._build_system_state_card(), 2)
         layout.addLayout(top)
+        layout.addWidget(self._build_player_status_card())
 
         session_card = Card()
         session_layout = QVBoxLayout(session_card)
@@ -540,6 +558,38 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self._build_recent_events_card(), 2)
         layout.addLayout(bottom, 1)
         return page
+
+    def _build_player_status_card(self) -> QWidget:
+        card = Card()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 16)
+        layout.setSpacing(10)
+        title_row = QHBoxLayout()
+        title = QLabel("Игрок")
+        title.setProperty("sectionTitle", True)
+        self.player_status_source_label = QLabel("Ожидание данных")
+        self.player_status_source_label.setProperty("muted", True)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        title_row.addWidget(self.player_status_source_label)
+        layout.addLayout(title_row)
+        metrics = QHBoxLayout()
+        metrics.setSpacing(12)
+        self.player_food_metric = MetricCard("Еда", "—", ui_icon("food.svg"))
+        self.player_water_metric = MetricCard("Вода", "—", ui_icon("gauge_10fps.png"))
+        self.player_health_metric = MetricCard("HP", "—", ui_icon("gauge_10fps.png"))
+        self.player_inventory_weight_metric = MetricCard("Инвентарь", "—", ui_icon("scales.svg"))
+        self.player_backpack_weight_metric = MetricCard("Рюкзак", "—", ui_icon("backpack.png"))
+        for metric in (
+            self.player_food_metric,
+            self.player_water_metric,
+            self.player_health_metric,
+            self.player_inventory_weight_metric,
+            self.player_backpack_weight_metric,
+        ):
+            metrics.addWidget(metric)
+        layout.addLayout(metrics)
+        return card
 
     def _build_fishing_control_card(self) -> QWidget:
         card = Card()
@@ -848,6 +898,18 @@ class MainWindow(QMainWindow):
         self.fish_without_net_check.stateChanged.connect(self._refresh_tackle_action_controls)
         left.addLayout(settings_grid)
 
+        self.meal_thresholds_card = Card()
+        meal_thresholds_layout = QVBoxLayout(self.meal_thresholds_card)
+        meal_thresholds_layout.setContentsMargins(16, 14, 16, 16)
+        meal_thresholds_layout.setSpacing(10)
+        meal_thresholds_title = QLabel("Пороги восстановления")
+        meal_thresholds_title.setProperty("sectionTitle", True)
+        meal_thresholds_layout.addWidget(meal_thresholds_title)
+        self.restore_food_slider = self._threshold_slider("Восстанавливать еду от", meal_thresholds_layout)
+        self.restore_water_slider = self._threshold_slider("Восстанавливать воду от", meal_thresholds_layout)
+        self.restore_health_slider = self._threshold_slider("Восстанавливать HP от", meal_thresholds_layout)
+        left.addWidget(self.meal_thresholds_card)
+
         self.garbage_checks: dict[str, QCheckBox] = {}
 
         fish_group = Card()
@@ -948,6 +1010,8 @@ class MainWindow(QMainWindow):
     def _refresh_meal_action_controls(self) -> None:
         if hasattr(self, "food_depleted_action_card"):
             self.food_depleted_action_card.setEnabled(self.auto_meal_check.isChecked())
+        if hasattr(self, "meal_thresholds_card"):
+            self.meal_thresholds_card.setEnabled(self.auto_meal_check.isChecked())
 
     def _fish_keep_card(self, fish_id: str, title: str) -> tuple[QWidget, QCheckBox]:
         card = QFrame()
@@ -971,6 +1035,25 @@ class MainWindow(QMainWindow):
         checkbox.setStyleSheet("font-size: 11px;")
         layout.addWidget(checkbox)
         return card, checkbox
+
+    def _threshold_slider(self, label: str, parent_layout: QVBoxLayout) -> QSlider:
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        label_widget = QLabel(label)
+        label_widget.setProperty("muted", True)
+        value_label = Badge("90", "blue")
+        value_label.setFixedWidth(48)
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(1, 90)
+        slider.setSingleStep(1)
+        slider.setPageStep(5)
+        slider.setValue(90)
+        slider.valueChanged.connect(lambda value, badge=value_label: badge.setText(str(value)))
+        row.addWidget(label_widget, 2)
+        row.addWidget(slider, 3)
+        row.addWidget(value_label)
+        parent_layout.addLayout(row)
+        return slider
 
     def _switch_card(self, title: str, subtitle: str, icon: str | Path, checkbox: QCheckBox) -> QWidget:
         card = SettingCard(title, subtitle, icon)
@@ -1219,6 +1302,9 @@ class MainWindow(QMainWindow):
     def _load_settings_to_ui(self, settings: SonarSettings) -> None:
         fishing = settings.fishing
         self.auto_meal_check.setChecked(fishing.auto_meal)
+        self.restore_food_slider.setValue(fishing.restore_food_from)
+        self.restore_water_slider.setValue(fishing.restore_water_from)
+        self.restore_health_slider.setValue(fishing.restore_health_from)
         self.auto_change_bait_check.setChecked(fishing.auto_change_bait)
         self.store_trunk_check.setChecked(fishing.store_in_trunk)
         self.start_stop_sound_check.setChecked(fishing.start_stop_sound_enabled)
@@ -1464,6 +1550,9 @@ class MainWindow(QMainWindow):
         settings = self.config_manager.load()
         fishing = settings.fishing
         fishing.auto_meal = self.auto_meal_check.isChecked()
+        fishing.restore_food_from = self.restore_food_slider.value()
+        fishing.restore_water_from = self.restore_water_slider.value()
+        fishing.restore_health_from = self.restore_health_slider.value()
         fishing.auto_change_bait = self.auto_change_bait_check.isChecked()
         fishing.store_in_backpack = False
         fishing.store_in_trunk = self.store_trunk_check.isChecked()
@@ -1887,6 +1976,94 @@ class MainWindow(QMainWindow):
             "meal": "#31c65b",
             "info": "#1f7aff",
         }.get(event_type, "#1f7aff")
+
+    def _refresh_player_status(self) -> None:
+        if getattr(self, "_player_status_refreshing", False):
+            return
+        self._player_status_refreshing = True
+        allow_screenshot_fallback = self._should_use_player_status_screenshot_fallback()
+        if allow_screenshot_fallback:
+            self._last_player_status_screenshot_at = time.time()
+
+        def worker() -> None:
+            try:
+                self.bot.detect_player_status(allow_screenshot_fallback=allow_screenshot_fallback)
+            except Exception as exc:
+                self.log_bridge.message.emit(f"Не удалось обновить показатели игрока: {exc}")
+                self.player_status_bridge.updated.emit(None)
+            finally:
+                self._player_status_refreshing = False
+
+        threading.Thread(target=worker, name="sonar-player-status-refresh", daemon=True).start()
+
+    def _should_use_player_status_screenshot_fallback(self) -> bool:
+        status = getattr(self, "_latest_player_status", None)
+        if status is None:
+            return True
+        if not status.has_core_values() and time.time() - self._last_player_status_screenshot_at >= 20.0:
+            return True
+        return status.has_core_values() and time.time() - self._last_player_status_screenshot_at >= 60.0
+
+    def _handle_player_status_update(self, status: object) -> None:
+        if status is not None and not isinstance(status, PlayerStatus):
+            return
+        self._latest_player_status = status
+        self._latest_player_status_at = time.time()
+        self._render_player_status(status)
+
+    def _render_player_status(self, status: PlayerStatus | None) -> None:
+        if not hasattr(self, "player_food_metric"):
+            return
+        self.player_food_metric.set_value(self._format_percent_value(status.food if status else None))
+        self.player_water_metric.set_value(self._format_percent_value(status.water if status else None))
+        self.player_health_metric.set_value(self._format_percent_value(status.health if status else None))
+        self.player_inventory_weight_metric.set_value(
+            self._format_weight_pair(
+                status.inventory_weight if status else None,
+                status.inventory_weight_max if status else None,
+            )
+        )
+        self.player_backpack_weight_metric.set_value(
+            self._format_weight_pair(
+                status.backpack_weight if status else None,
+                status.backpack_weight_max if status else None,
+            )
+        )
+        if hasattr(self, "player_status_source_label"):
+            self.player_status_source_label.setText(self._format_player_status_source(status))
+
+    @staticmethod
+    def _format_percent_value(value: int | None) -> str:
+        return "—" if value is None else f"{value}%"
+
+    @staticmethod
+    def _format_weight_pair(current: float | None, maximum: float | None) -> str:
+        if current is None and maximum is None:
+            return "—"
+        if current is None:
+            return f"— / {MainWindow._format_weight_number(maximum)} кг"
+        if maximum is None:
+            return f"{MainWindow._format_weight_number(current)} кг"
+        return f"{MainWindow._format_weight_number(current)} / {MainWindow._format_weight_number(maximum)} кг"
+
+    @staticmethod
+    def _format_weight_number(value: float | None) -> str:
+        if value is None:
+            return "—"
+        text = f"{value:.2f}".rstrip("0").rstrip(".")
+        return text or "0"
+
+    @staticmethod
+    def _format_player_status_source(status: PlayerStatus | None) -> str:
+        if status is None or not status.has_any_value():
+            return "Нет данных"
+        if "screenshot" in status.source and "memory" in status.source:
+            return "Память + скрин"
+        if "memory" in status.source:
+            return "Память процесса"
+        if "screenshot" in status.source:
+            return "Скриншот"
+        return status.source or "Данные получены"
 
     def _refresh_status_label(self) -> None:
         active_license = self._has_active_license()

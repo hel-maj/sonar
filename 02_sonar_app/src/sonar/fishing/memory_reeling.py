@@ -640,13 +640,13 @@ class MemoryReelingTracker:
 
     def _apply_move(self, move_val: float, action_eps: float) -> str:
         if move_val > action_eps:
-            if self._hold_key("d"):
-                self._release_key("a")
-            return "hold_d" if self.held_key == "d" else "hold_d_throttled"
-        if move_val < -action_eps:
             if self._hold_key("a"):
                 self._release_key("d")
             return "hold_a" if self.held_key == "a" else "hold_a_throttled"
+        if move_val < -action_eps:
+            if self._hold_key("d"):
+                self._release_key("a")
+            return "hold_d" if self.held_key == "d" else "hold_d_throttled"
         if self.held_key == "a":
             return "hold_a_wait"
         if self.held_key == "d":
@@ -841,7 +841,7 @@ class MemoryReelingTracker:
         if self.held_key and self.held_key != key:
             self.input_controller.key_up(self.held_key)
             self.held_key = None
-            time.sleep(random.uniform(*KEY_SWITCH_DELAY_RANGE))
+            # time.sleep(random.uniform(*KEY_SWITCH_DELAY_RANGE))
         if self.input_controller.key_down(key) is False:
             self._last_key_switch_at = time.time()
             return False
