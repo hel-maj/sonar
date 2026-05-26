@@ -141,6 +141,7 @@ class FishingBot:
     )
     process_name: str = "gta5.exe"
     keep_debug_capture: bool = False
+    manual_reeling_mode: bool = False
     state: BotState = field(default_factory=BotState)
 
     def __post_init__(self) -> None:
@@ -186,12 +187,14 @@ class FishingBot:
         self._last_player_status_at = 0.0
         self.inventory_full = False
         self.settings: FishingSettings = self.config_manager.load().fishing
+        self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
         self._configure_notifications()
         debug_log("FishingBot initialized")
 
     def reload_settings(self) -> None:
         settings = self.config_manager.load()
         self.settings = settings.fishing
+        self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
         self.session_stats.default_prices = parse_fish_prices_from_markdown()
         self.session_stats.set_custom_prices(self.settings.custom_fish_prices)
         self._configure_notifications()
@@ -634,6 +637,7 @@ class FishingBot:
             return None, 0.0
         self._publish_stage("Вываживание")
         last_reeling_focus_attempt_at = self._restore_reeling_focus(0.0)
+        self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
         self.reeling_tracker.start()
         self.reeling_tracker.start_control_loop()
         last_recognition_at = 0.0
@@ -918,12 +922,18 @@ class FishingBot:
                     last_debug_at = now
                 if result.pressed:
                     press_start = time.time()
-                    if self.input_controller.key_down("space") is False:
+                    tap_key_fast = getattr(self.input_controller, "tap_key_fast", None)
+                    if tap_key_fast is not None:
+                        pressed = tap_key_fast("space", duration=0.003)
+                    else:
+                        pressed = self.input_controller.key_down("space")
+                        if pressed is not False:
+                            time.sleep(0.003)
+                            self.input_controller.key_up("space")
+                    if pressed is False:
                         cast_result["blocked"] = "game_not_foreground"
                         cast_done.set()
                         return
-                    time.sleep(0.003)
-                    self.input_controller.key_up("space")
                     press_end = time.time()
                     after_frame = self.capture.capture()
                     snapshot_path = self._save_cast_press_snapshot(frame, result, after_frame, press_start, press_end)

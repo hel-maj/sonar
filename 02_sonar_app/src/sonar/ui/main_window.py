@@ -96,6 +96,7 @@ URL_RE = re.compile(r"https?://[^\s<>'\"]+", re.IGNORECASE)
 TRAILING_URL_PUNCTUATION = ".,;:!?)]}"
 LICENSE_REFRESH_INTERVAL_SECONDS = 600
 KEEP_DEBUG_CAPTURE_ARG = "--keep-debug-capture"
+MANUAL_REELING_ARG = "--manual-reeling"
 UI_ICON_DIR = RESOURCE_DIR / "ui_icons"
 FISH_ICON_DIR = RESOURCE_DIR / "fishing" / "fish_inv_hd"
 FONT_DIR = RESOURCE_DIR / "fonts"
@@ -216,6 +217,7 @@ class MainWindow(QMainWindow):
         self,
         *,
         keep_debug_capture: bool = False,
+        manual_reeling_mode: bool = False,
         initial_license_status: LicenseStatus | None = None,
         check_license_on_start: bool = True,
     ) -> None:
@@ -255,6 +257,7 @@ class MainWindow(QMainWindow):
             telegram_settings_changed_callback=self.telegram_settings_bridge.changed.emit,
             player_status_callback=self.player_status_bridge.updated.emit,
             keep_debug_capture=keep_debug_capture,
+            manual_reeling_mode=manual_reeling_mode,
         )
         self.chat_controller = MajesticChatController(
             capture=self.bot.capture,
@@ -2580,7 +2583,8 @@ def find_app_logo_path():
 
 def run_ui(argv: list[str]) -> int:
     keep_debug_capture = KEEP_DEBUG_CAPTURE_ARG in argv or os.environ.get("SONAR_KEEP_DEBUG_CAPTURE") == "1"
-    qt_argv = [arg for arg in argv if arg != KEEP_DEBUG_CAPTURE_ARG]
+    manual_reeling_mode = MANUAL_REELING_ARG in argv or os.environ.get("SONAR_REELING_MANUAL_MODE") == "1"
+    qt_argv = [arg for arg in argv if arg not in {KEEP_DEBUG_CAPTURE_ARG, MANUAL_REELING_ARG}]
     app = QApplication(qt_argv)
     load_app_fonts()
     apply_app_font(app)
@@ -2592,6 +2596,7 @@ def run_ui(argv: list[str]) -> int:
     initial_license_status = _initial_license_status_with_loader(app)
     window = MainWindow(
         keep_debug_capture=keep_debug_capture,
+        manual_reeling_mode=manual_reeling_mode,
         initial_license_status=initial_license_status,
         check_license_on_start=False,
     )
