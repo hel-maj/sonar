@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,7 +11,8 @@ from PIL import Image
 from sonar.fishing.catch_quality import normalize_catch_size
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
 from sonar.fishing.fish_recognition import FishRecognition
-from sonar.paths import FISHING_RESOURCE_DIR, RESOURCE_DIR
+from sonar.ocr import configure_tesseract, has_tessdata, tessdata_config
+from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.geometry import Rect
 from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
 
@@ -230,10 +230,9 @@ class CatchScreenDetector:
         _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         config = "--psm 7"
         lang = "eng"
-        tessdata_dir = RESOURCE_DIR / "tessdata"
-        if not digits and (tessdata_dir / "rus.traineddata").exists():
+        if not digits and has_tessdata("rus"):
             lang = "rus"
-            config += f" --tessdata-dir {tessdata_dir.as_posix()}"
+            config = tessdata_config(config, lang)
         if digits:
             config += " -c tessedit_char_whitelist=0123456789.,"
         candidates = [
@@ -304,15 +303,7 @@ class CatchScreenDetector:
 
     @staticmethod
     def _configure_tesseract(pytesseract_module) -> None:
-        if shutil.which("tesseract"):
-            return
-        for path in (
-            Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
-            Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
-        ):
-            if path.exists():
-                pytesseract_module.pytesseract.tesseract_cmd = str(path)
-                return
+        configure_tesseract(pytesseract_module)
 
     @staticmethod
     def _parse_weight(text: str | None) -> float | None:

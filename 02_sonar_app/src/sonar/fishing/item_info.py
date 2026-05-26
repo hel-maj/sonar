@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from sonar.ocr import configure_tesseract, tessdata_config
 from sonar.paths import RESOURCE_DIR
 from sonar.vision.geometry import Rect
 
@@ -1018,7 +1018,6 @@ class ItemInfoDetector:
 
     @staticmethod
     def _ocr_configs(region: str) -> tuple[tuple[str, str], ...]:
-        tessdata_dir = RESOURCE_DIR / "tessdata"
         if region == "title":
             base_configs = (("eng+rus+ell", "--oem 3 --psm 7"), ("rus+eng+ell", "--oem 3 --psm 7"), ("eng+rus", "--oem 3 --psm 7"))
         elif region == "weight":
@@ -1027,10 +1026,11 @@ class ItemInfoDetector:
             base_configs = (("rus+eng", "--oem 3 --psm 6"),)
         configs: list[tuple[str, str]] = []
         for lang, config in base_configs:
+            project_config = tessdata_config(config, lang)
+            configs.append((lang, project_config))
+            if project_config == config:
+                continue
             configs.append((lang, config))
-            language_files = [part.strip() for part in lang.split("+") if part.strip()]
-            if all((tessdata_dir / f"{language}.traineddata").exists() for language in language_files):
-                configs.append((lang, f"{config} --tessdata-dir {tessdata_dir.as_posix()}"))
         return tuple(configs)
 
     @staticmethod
@@ -1116,12 +1116,4 @@ class ItemInfoDetector:
 
     @staticmethod
     def _configure_tesseract(pytesseract_module: Any) -> None:
-        if shutil.which("tesseract"):
-            return
-        for path in (
-            Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
-            Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
-        ):
-            if path.exists():
-                pytesseract_module.pytesseract.tesseract_cmd = str(path)
-                return
+        configure_tesseract(pytesseract_module)

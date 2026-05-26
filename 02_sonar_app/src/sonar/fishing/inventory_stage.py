@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,7 +9,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from sonar.paths import FISHING_RESOURCE_DIR, RESOURCE_DIR
+from sonar.ocr import configure_tesseract, tessdata_config
+from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.geometry import Rect
 from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
 
@@ -109,11 +109,9 @@ class InventoryStageDetector:
         scaled = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
         gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        tessdata_dir = RESOURCE_DIR / "tessdata"
         config = "--psm 6"
         lang = "rus"
-        if (tessdata_dir / "rus.traineddata").exists():
-            config += f" --tessdata-dir {tessdata_dir.as_posix()}"
+        config = tessdata_config(config, lang)
         candidates = (Image.fromarray(gray), Image.fromarray(thresh))
         for candidate in candidates:
             try:
@@ -131,15 +129,7 @@ class InventoryStageDetector:
 
     @staticmethod
     def _configure_tesseract(pytesseract_module) -> None:
-        if shutil.which("tesseract"):
-            return
-        for path in (
-            Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
-            Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
-        ):
-            if path.exists():
-                pytesseract_module.pytesseract.tesseract_cmd = str(path)
-                return
+        configure_tesseract(pytesseract_module)
 
     @staticmethod
     def _scales_for_frame(width: int, height: int) -> tuple[float, ...]:
