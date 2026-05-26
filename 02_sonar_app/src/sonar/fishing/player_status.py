@@ -39,6 +39,9 @@ WEBENGINE_MARKERS = (
     b"weight__text-current",
 )
 READABLE_PROTECT_MASK = 0x02 | 0x04 | 0x08 | 0x20 | 0x40 | 0x80
+FOOD_DECAY_SECONDS = 5 * 60.0
+WATER_DECAY_SECONDS = 3 * 60.0
+STATUS_DECAY_STEP = 2
 
 
 class MEMORY_BASIC_INFORMATION(ctypes.Structure):
@@ -113,6 +116,107 @@ class StatusBar:
     name: str
     percent: int
     rect: tuple[int, int, int, int]
+
+
+@dataclass(slots=True)
+class PlayerStatusEstimate:
+    status: PlayerStatus | None = None
+    scanned_at: float = 0.0
+    inventory_fish_weight: float = 0.0
+
+    def update(self, status: PlayerStatus | None, *, trusted_core: bool = False, inventory_scan: bool = False) -> None:
+        if status is None or not status.has_any_value():
+            return
+        now = time.time()
+        previous = self.estimate(now)
+        food = status.food if trusted_core and status.food is not None else previous.food if previous else None
+        water = status.water if trusted_core and status.water is not None else previous.water if previous else None
+        health = status.health if trusted_core and status.health is not None else previous.health if previous else None
+        inventory_weight = status.inventory_weight if status.inventory_weight is not None else previous.inventory_weight if previous else None
+        inventory_weight_max = status.inventory_weight_max if status.inventory_weight_max is not None else previous.inventory_weight_max if previous else None
+        backpack_weight = status.backpack_weight if status.backpack_weight is not None else previous.backpack_weight if previous else None
+        backpack_weight_max = status.backpack_weight_max if status.backpack_weight_max is not None else previous.backpack_weight_max if previous else None
+        if inventory_scan and status.inventory_weight is not None:
+            self.inventory_fish_weight = 0.0
+        self.status = PlayerStatus(
+            food=food,
+            water=water,
+            health=health,
+            inventory_weight=inventory_weight,
+            inventory_weight_max=inventory_weight_max,
+            backpack_weight=backpack_weight,
+            backpack_weight_max=backpack_weight_max,
+            source="scan",
+        )
+        if trusted_core:
+            self.scanned_at = now
+        elif self.scanned_at <= 0.0:
+            self.scanned_at = now
+
+    def add_inventory_fish_weight(self, weight_kg: float | None) -> None:
+        if weight_kg is None or weight_kg <= 0:
+            return
+        self.inventory_fish_weight += weight_kg
+
+    def estimate(self, now: float | None = None) -> PlayerStatus | None:
+        if self.status is None:
+            return None
+        now = time.time() if now is None else now
+        elapsed = max(0.0, now - self.scanned_at)
+        inventory_weight = self.status.inventory_weight
+        if inventory_weight is not None:
+            inventory_weight += self.inventory_fish_weight
+            if self.status.inventory_weight_max is not None:
+                inventory_weight = min(inventory_weight, self.status.inventory_weight_max)
+        return PlayerStatus(
+            food=self._decayed_percent(self.status.food, elapsed, FOOD_DECAY_SECONDS),
+            water=self._decayed_percent(self.status.water, elapsed, WATER_DECAY_SECONDS),
+            health=self.status.health,
+            inventory_weight=inventory_weight,
+            inventory_weight_max=self.status.inventory_weight_max,
+            backpack_weight=self.status.backpack_weight,
+            backpack_weight_max=self.status.backpack_weight_max,
+            source="estimate",
+        )
+
+    def seconds_until_below(self, *, food_threshold: int, water_threshold: int) -> float | None:
+        if self.status is None:
+            return 0.0
+        now = time.time()
+        waits = [
+            self._seconds_until_value_below(self.status.food, self.scanned_at, FOOD_DECAY_SECONDS, food_threshold, now),
+            self._seconds_until_value_below(self.status.water, self.scanned_at, WATER_DECAY_SECONDS, water_threshold, now),
+        ]
+        waits = [wait for wait in waits if wait is not None]
+        if not waits:
+            return None
+        return max(0.0, min(waits))
+
+    @staticmethod
+    def _decayed_percent(value: int | None, elapsed: float, period_seconds: float) -> int | None:
+        if value is None:
+            return None
+        drops = int(elapsed // period_seconds)
+        return max(0, min(100, value - drops * STATUS_DECAY_STEP))
+
+    @staticmethod
+    def _seconds_until_value_below(
+        value: int | None,
+        scanned_at: float,
+        period_seconds: float,
+        threshold: int,
+        now: float,
+    ) -> float | None:
+        if value is None:
+            return None
+        elapsed = max(0.0, now - scanned_at)
+        drops_done = int(elapsed // period_seconds)
+        current = max(0, value - drops_done * STATUS_DECAY_STEP)
+        if current < threshold:
+            return 0.0
+        drops_needed = ((current - threshold) // STATUS_DECAY_STEP) + 1
+        next_drop_in = period_seconds - (elapsed % period_seconds)
+        return next_drop_in + max(0, drops_needed - 1) * period_seconds
 
 
 class PlayerStatusDetector:

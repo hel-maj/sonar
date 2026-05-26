@@ -51,6 +51,7 @@ class NotificationManager:
     tackle_callback: Callable[[], tuple[TackleItemCount, ...]] | None = None
     tackle_image_callback: Callable[[], bytes | None] | None = None
     tackle_scanned_at_callback: Callable[[], datetime | None] | None = None
+    player_status_callback: Callable[[], PlayerStatus | None] | None = None
     screenshot_callback: Callable[[], bytes] | None = None
     focus_game_callback: Callable[[], bool] | None = None
     shutdown_game_callback: Callable[[], None] | None = None
@@ -96,6 +97,7 @@ class NotificationManager:
         tackle_callback: Callable[[], tuple[TackleItemCount, ...]] | None = None,
         tackle_image_callback: Callable[[], bytes | None] | None = None,
         tackle_scanned_at_callback: Callable[[], datetime | None] | None = None,
+        player_status_callback: Callable[[], PlayerStatus | None] | None = None,
         screenshot_callback: Callable[[], bytes] | None = None,
         focus_game_callback: Callable[[], bool] | None = None,
         shutdown_game_callback: Callable[[], None] | None = None,
@@ -118,6 +120,7 @@ class NotificationManager:
         self.tackle_callback = tackle_callback
         self.tackle_image_callback = tackle_image_callback
         self.tackle_scanned_at_callback = tackle_scanned_at_callback
+        self.player_status_callback = player_status_callback
         self.screenshot_callback = screenshot_callback
         self.focus_game_callback = focus_game_callback
         self.shutdown_game_callback = shutdown_game_callback
@@ -208,6 +211,29 @@ class NotificationManager:
     def notify_inventory_full(self) -> None:
         if self.settings.notify_inventory_full:
             self.send_message("📦 <b>Закончилось место!</b>")
+
+    def notify_inventory_space_low(
+        self,
+        free_kg: float,
+        threshold_kg: float,
+        player_status: PlayerStatus | None = None,
+    ) -> None:
+        if not self.settings.notify_inventory_space_low:
+            return
+        lines = [
+            "⚖️ <b>Мало места в инвентаре</b>",
+            "",
+            f"Свободно: <b>{self._format_status_weight_number(free_kg)}</b> кг",
+            f"Порог: <b>{self._format_status_weight_number(threshold_kg)}</b> кг",
+        ]
+        if player_status is not None:
+            inventory_weight = self._format_status_weight(player_status.inventory_weight, player_status.inventory_weight_max)
+            backpack_weight = self._format_status_weight(player_status.backpack_weight, player_status.backpack_weight_max)
+            if inventory_weight:
+                lines.append(f"🎒 Инвентарь: {inventory_weight} кг")
+            if backpack_weight:
+                lines.append(f"🧳 Рюкзак: {backpack_weight} кг")
+        self.send_message("\n".join(lines))
 
     def notify_bait_tired(self) -> None:
         if self.settings.notify_bait_tired:
@@ -311,6 +337,8 @@ class NotificationManager:
                 self._send_stats(chat_id)
             elif text == "/tackle":
                 self._send_tackle(chat_id)
+            elif text == "/status":
+                self._send_player_status(chat_id)
             elif text == "/screen":
                 self._send_screen(chat_id)
             elif text == "/shutdown_pc":
@@ -362,6 +390,8 @@ class NotificationManager:
                 self._send_stats(chat_id)
             elif data == "action:tackle":
                 self._send_tackle(chat_id)
+            elif data == "action:player_status":
+                self._send_player_status(chat_id)
             elif data == "action:shutdown_pc":
                 self._shutdown_pc(chat_id)
             elif data == "action:shutdown_game":
@@ -380,6 +410,7 @@ class NotificationManager:
             ],
             [
                 {"text": "🎒 Снаряжение", "callback_data": "action:tackle"},
+                {"text": "📊 Показатели", "callback_data": "action:player_status"},
             ],
             [
                 {"text": start_stop_text, "callback_data": "action:start_stop"},
@@ -474,6 +505,7 @@ class NotificationManager:
             ("notify_start_stop", "Запуск/Остановка"),
             ("notify_meal", "Питание"),
             ("notify_inventory_full", "Закончилось место"),
+            ("notify_inventory_space_low", "Мало места"),
             ("notify_bait_tired", "Устала от приманки"),
         ]
         items.append(("notify_focus_lost", "Потеря фокуса игры"))
@@ -500,6 +532,28 @@ class NotificationManager:
         rows = self.stats_rows_callback() if self.stats_rows_callback else None
         self.send_message(self._format_session_stats_message("📊 Текущая статистика", "🎣 Сессия рыбалки", totals, rows=rows), chat_id=chat_id)
 
+    def _send_player_status(self, chat_id: int) -> None:
+        status = self.player_status_callback() if self.player_status_callback else None
+        if status is None:
+            self.send_message("📊 Показатели игрока\n\nПоследнего сканирования ещё нет.", chat_id=chat_id)
+            return
+        lines = ["📊 <b>Показатели игрока</b>", ""]
+        if status.food is not None:
+            lines.append(f"🍗 Еда: <b>{status.food}%</b>")
+        if status.water is not None:
+            lines.append(f"💧 Вода: <b>{status.water}%</b>")
+        if status.health is not None:
+            lines.append(f"❤️ HP: <b>{status.health}%</b>")
+        inventory_weight = self._format_status_weight(status.inventory_weight, status.inventory_weight_max)
+        backpack_weight = self._format_status_weight(status.backpack_weight, status.backpack_weight_max)
+        if inventory_weight:
+            lines.append(f"🎒 Инвентарь: <b>{inventory_weight}</b> кг")
+        if backpack_weight:
+            lines.append(f"🧳 Рюкзак: <b>{backpack_weight}</b> кг")
+        if len(lines) == 2:
+            lines.append("Данных пока нет.")
+        self.send_message("\n".join(lines), chat_id=chat_id)
+
     def _send_tackle(self, chat_id: int) -> None:
         items = self.tackle_callback() if self.tackle_callback else ()
         if not items:
@@ -519,6 +573,7 @@ class NotificationManager:
             "notify_start_stop",
             "notify_meal",
             "notify_inventory_full",
+            "notify_inventory_space_low",
             "notify_bait_tired",
             "notify_focus_lost",
         }:

@@ -910,7 +910,6 @@ class MainWindow(QMainWindow):
         meal_thresholds_layout.addWidget(meal_thresholds_title)
         self.restore_food_slider = self._threshold_slider("Восстанавливать еду от", meal_thresholds_layout)
         self.restore_water_slider = self._threshold_slider("Восстанавливать воду от", meal_thresholds_layout)
-        self.restore_health_slider = self._threshold_slider("Восстанавливать HP от", meal_thresholds_layout)
         left.addWidget(self.meal_thresholds_card)
 
         self.garbage_checks: dict[str, QCheckBox] = {}
@@ -1194,6 +1193,13 @@ class MainWindow(QMainWindow):
         self.telegram_notify_start_stop_check = ToggleSwitch("Запуск / остановка")
         self.telegram_notify_meal_check = ToggleSwitch("Питание")
         self.telegram_notify_inventory_full_check = ToggleSwitch("Закончилось место")
+        self.telegram_notify_inventory_space_low_check = ToggleSwitch("Оповещать, когда места в инвентаре меньше, чем:")
+        self.telegram_inventory_space_low_input = QLineEdit()
+        self.telegram_inventory_space_low_input.setPlaceholderText("1.00")
+        self.telegram_inventory_space_low_input.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"\d{0,6}([\.,]\d{0,2})?"), self.telegram_inventory_space_low_input)
+        )
+        self.telegram_inventory_space_low_input.editingFinished.connect(self._normalize_inventory_space_threshold_input)
         self.telegram_notify_bait_tired_check = ToggleSwitch("Рыба устала от приманки")
         self.telegram_notify_focus_lost_check = ToggleSwitch("Потеря фокуса игры")
         notify_layout.addWidget(notify_title)
@@ -1202,10 +1208,19 @@ class MainWindow(QMainWindow):
             self.telegram_notify_start_stop_check,
             self.telegram_notify_meal_check,
             self.telegram_notify_inventory_full_check,
+            self.telegram_notify_inventory_space_low_check,
             self.telegram_notify_bait_tired_check,
             self.telegram_notify_focus_lost_check,
         ):
             notify_layout.addWidget(checkbox)
+            if checkbox is self.telegram_notify_inventory_space_low_check:
+                threshold_row = QHBoxLayout()
+                threshold_row.setSpacing(8)
+                threshold_row.addWidget(self.telegram_inventory_space_low_input)
+                threshold_unit = QLabel("кг.")
+                threshold_unit.setProperty("muted", True)
+                threshold_row.addWidget(threshold_unit)
+                notify_layout.addLayout(threshold_row)
         notify_layout.addStretch(1)
         row.addWidget(notify, 1)
         layout.addLayout(row, 1)
@@ -1219,6 +1234,19 @@ class MainWindow(QMainWindow):
         block.addWidget(label_widget)
         block.addWidget(widget)
         return block
+
+    def _normalize_inventory_space_threshold_input(self) -> None:
+        if not hasattr(self, "telegram_inventory_space_low_input"):
+            return
+        value = self._parse_inventory_space_threshold(self.telegram_inventory_space_low_input.text())
+        self.telegram_inventory_space_low_input.setText(f"{value:.2f}")
+
+    @staticmethod
+    def _parse_inventory_space_threshold(value: str) -> float:
+        try:
+            return max(1.0, round(float(value.replace(",", ".")), 2))
+        except ValueError:
+            return 1.0
 
     def _build_stream_tab(self) -> QWidget:
         page, layout = self._page("Стрим", "Управление трансляцией и производительностью стрима.")
@@ -1307,7 +1335,8 @@ class MainWindow(QMainWindow):
         self.auto_meal_check.setChecked(fishing.auto_meal)
         self.restore_food_slider.setValue(fishing.restore_food_from)
         self.restore_water_slider.setValue(fishing.restore_water_from)
-        self.restore_health_slider.setValue(fishing.restore_health_from)
+        if hasattr(self, "restore_health_slider"):
+            self.restore_health_slider.setValue(fishing.restore_health_from)
         self.auto_change_bait_check.setChecked(fishing.auto_change_bait)
         self.store_trunk_check.setChecked(fishing.store_in_trunk)
         self.start_stop_sound_check.setChecked(fishing.start_stop_sound_enabled)
@@ -1357,6 +1386,8 @@ class MainWindow(QMainWindow):
             self.telegram_notify_start_stop_check,
             self.telegram_notify_meal_check,
             self.telegram_notify_inventory_full_check,
+            self.telegram_notify_inventory_space_low_check,
+            self.telegram_inventory_space_low_input,
             self.telegram_notify_bait_tired_check,
             self.telegram_notify_focus_lost_check,
         )
@@ -1369,6 +1400,8 @@ class MainWindow(QMainWindow):
             self.telegram_notify_start_stop_check.setChecked(telegram.notify_start_stop)
             self.telegram_notify_meal_check.setChecked(telegram.notify_meal)
             self.telegram_notify_inventory_full_check.setChecked(telegram.notify_inventory_full)
+            self.telegram_notify_inventory_space_low_check.setChecked(telegram.notify_inventory_space_low)
+            self.telegram_inventory_space_low_input.setText(f"{telegram.inventory_space_low_threshold_kg:.2f}")
             self.telegram_notify_bait_tired_check.setChecked(telegram.notify_bait_tired)
             self.telegram_notify_focus_lost_check.setChecked(telegram.notify_focus_lost)
         finally:
@@ -1555,7 +1588,7 @@ class MainWindow(QMainWindow):
         fishing.auto_meal = self.auto_meal_check.isChecked()
         fishing.restore_food_from = self.restore_food_slider.value()
         fishing.restore_water_from = self.restore_water_slider.value()
-        fishing.restore_health_from = self.restore_health_slider.value()
+        fishing.restore_health_from = self.restore_health_slider.value() if hasattr(self, "restore_health_slider") else 1
         fishing.auto_change_bait = self.auto_change_bait_check.isChecked()
         fishing.store_in_backpack = False
         fishing.store_in_trunk = self.store_trunk_check.isChecked()
@@ -1588,6 +1621,9 @@ class MainWindow(QMainWindow):
         telegram.notify_start_stop = self.telegram_notify_start_stop_check.isChecked()
         telegram.notify_meal = self.telegram_notify_meal_check.isChecked()
         telegram.notify_inventory_full = self.telegram_notify_inventory_full_check.isChecked()
+        telegram.notify_inventory_space_low = self.telegram_notify_inventory_space_low_check.isChecked()
+        telegram.inventory_space_low_threshold_kg = self._parse_inventory_space_threshold(self.telegram_inventory_space_low_input.text())
+        self.telegram_inventory_space_low_input.setText(f"{telegram.inventory_space_low_threshold_kg:.2f}")
         telegram.notify_bait_tired = self.telegram_notify_bait_tired_check.isChecked()
         telegram.notify_focus_lost = self.telegram_notify_focus_lost_check.isChecked()
         return settings
@@ -2060,6 +2096,8 @@ class MainWindow(QMainWindow):
     def _format_player_status_source(status: PlayerStatus | None) -> str:
         if status is None or not status.has_any_value():
             return "Нет данных"
+        if "estimate" in status.source:
+            return "Расчёт"
         if "screenshot" in status.source and "memory" in status.source:
             return "Память + скрин"
         if "memory" in status.source:

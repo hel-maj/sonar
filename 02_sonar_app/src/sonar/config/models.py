@@ -69,7 +69,7 @@ class FishingSettings:
             auto_meal=bool(data.get("auto_meal", defaults.auto_meal)),
             restore_food_from=cls._slider_percent(data.get("restore_food_from", defaults.restore_food_from)),
             restore_water_from=cls._slider_percent(data.get("restore_water_from", defaults.restore_water_from)),
-            restore_health_from=cls._slider_percent(data.get("restore_health_from", defaults.restore_health_from)),
+            restore_health_from=defaults.restore_health_from,
             auto_change_bait=bool(data.get("auto_change_bait", defaults.auto_change_bait)),
             store_in_backpack=False,
             store_in_trunk=bool(data.get("store_in_trunk", defaults.store_in_trunk)),
@@ -114,6 +114,8 @@ class TelegramSettings:
     notify_start_stop: bool = True
     notify_meal: bool = True
     notify_inventory_full: bool = True
+    notify_inventory_space_low: bool = False
+    inventory_space_low_threshold_kg: float = 1.0
     notify_bait_tired: bool = True
     notify_focus_lost: bool = False
 
@@ -136,12 +138,23 @@ class TelegramSettings:
             notify_start_stop=bool(data.get("notify_start_stop", True)),
             notify_meal=bool(data.get("notify_meal", True)),
             notify_inventory_full=bool(data.get("notify_inventory_full", True)),
+            notify_inventory_space_low=bool(data.get("notify_inventory_space_low", False)),
+            inventory_space_low_threshold_kg=cls._threshold_kg(data.get("inventory_space_low_threshold_kg", 1.0)),
             notify_bait_tired=bool(data.get("notify_bait_tired", True)),
             notify_focus_lost=bool(data.get("notify_focus_lost", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @staticmethod
+    def _threshold_kg(value: Any) -> float:
+        if isinstance(value, str):
+            value = value.replace(",", ".")
+        try:
+            return max(1.0, round(float(value), 2))
+        except (TypeError, ValueError):
+            return 1.0
 
 
 @dataclass(slots=True)

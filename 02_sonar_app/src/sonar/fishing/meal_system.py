@@ -55,6 +55,7 @@ class MealItemSnapshot:
     item_title: str
     item_weight: str
     image: np.ndarray | None = None
+    screen_image: np.ndarray | None = None
     item_info: ItemInfo | None = None
     player_status: PlayerStatus | None = None
 
@@ -178,7 +179,7 @@ class MealSystem:
             snapshot_frame = self.capture.capture()
             item_info = self.item_info_detector.detect(snapshot_frame)
         image = self.item_info_detector.crop(snapshot_frame, item_info) if item_info is not None else None
-        title = item_info.title if item_info and item_info.title else MEAL_DISPLAY_NAMES.get(item_name, item_name)
+        title = self._meal_item_title(item_name, item_info)
         weight = item_info.weight if item_info else ""
         self.input_controller.press_key(use_key)
         self.input_controller.sleep(0.1)
@@ -188,8 +189,14 @@ class MealSystem:
             item_title=title,
             item_weight=weight,
             image=image,
+            screen_image=snapshot_frame,
             item_info=item_info,
         )
+
+    @staticmethod
+    def _meal_item_title(item_name: str, item_info: ItemInfo | None) -> str:
+        display_name = MEAL_DISPLAY_NAMES.get(item_name, item_name)
+        return item_info.title if item_info and item_info.title else display_name
 
     def _capture_hovered_item_info(self) -> tuple[np.ndarray | None, ItemInfo | None]:
         self.input_controller.sleep(ITEM_TOOLTIP_INITIAL_WAIT_SECONDS)

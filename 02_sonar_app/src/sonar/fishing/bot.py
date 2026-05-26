@@ -37,7 +37,7 @@ from sonar.fishing.hooking import TemplateMonitor, create_monitor_for_frame as c
 from sonar.fishing.inventory_stage import InventoryStageDetector
 from sonar.fishing.meal_system import MealItemSnapshot, MealSystem
 from sonar.fishing.memory_reeling import MemoryReelingTracker
-from sonar.fishing.player_status import PlayerStatus
+from sonar.fishing.player_status import PlayerStatus, PlayerStatusEstimate
 from sonar.fishing.statistics import FishingSessionStats, format_money_range, format_weight, parse_fish_prices_from_markdown
 from sonar.fishing.store_fish import FishStorer
 from sonar.fishing.tackle_detection import TackleDetector, TackleScanResult, format_tackle_items
@@ -76,6 +76,7 @@ MEAL_CLEAR_CONFIRM_POLLS = 2
 MEAL_BACKPACK_MOVE_MAX_ATTEMPTS = 5
 MEAL_MISSING_RETRY_SECONDS = 45.0
 MEAL_STATUS_MAX_AGE_SECONDS = 15.0
+MEAL_STATUS_THRESHOLD_TOLERANCE = 2
 PREPARE_START_POLL_SECONDS = 0.05
 RANDOM_DELAY_JITTER_SECONDS = 0.6
 TACKLE_ACTION_DELAY_SECONDS = 0.5
@@ -185,6 +186,11 @@ class FishingBot:
         self._meal_search_disabled_until_restart = False
         self._last_player_status: PlayerStatus | None = None
         self._last_player_status_at = 0.0
+        self._player_status_estimate = PlayerStatusEstimate()
+        self._last_published_estimated_status: PlayerStatus | None = None
+        self._initial_status_scan_pending = False
+        self._last_confirmed_storage = ""
+        self._inventory_space_low_notified = False
         self.inventory_full = False
         self.settings: FishingSettings = self.config_manager.load().fishing
         self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
@@ -208,8 +214,13 @@ class FishingBot:
             except Exception:
                 frame = None
         status = self.meal_system.detect_player_status(frame, allow_screenshot_fallback=allow_screenshot_fallback)
-        self._publish_player_status(status)
-        return status
+        self._remember_player_status(status)
+        estimated = self.estimated_player_status() or status
+        self._publish_player_status(estimated)
+        return estimated
+
+    def estimated_player_status(self) -> PlayerStatus | None:
+        return self._player_status_estimate.estimate()
 
     def _configure_notifications(self) -> None:
         settings = self.config_manager.load()
@@ -235,6 +246,7 @@ class FishingBot:
             stream_set_quality_callback=self.stream_set_quality_callback,
             stream_set_chat_zoom_callback=self.stream_set_chat_zoom_callback,
             stream_set_snapshot_mode_callback=self.stream_set_snapshot_mode_callback,
+            player_status_callback=self.estimated_player_status,
         )
 
     def configure_streaming_callbacks(
@@ -289,6 +301,11 @@ class FishingBot:
         self.inventory_full = False
         self._inventory_retry_after = 0.0
         self._meal_search_disabled_until_restart = False
+        self._initial_status_scan_pending = self.settings.auto_meal
+        self._player_status_estimate = PlayerStatusEstimate()
+        self._last_published_estimated_status = None
+        self._last_confirmed_storage = ""
+        self._inventory_space_low_notified = False
         self._last_catch_result = None
         self._no_stage_since = None
         self._start_attempt_since = None
@@ -494,6 +511,8 @@ class FishingBot:
         return trigger_name in self._last_triggers
 
     def _status_indicates_needs_meal(self, stage: str | None) -> bool:
+        if not self.settings.auto_meal:
+            return False
         if stage == "ad":
             return False
         status = getattr(self, "_last_player_status", None)
@@ -503,7 +522,7 @@ class FishingBot:
         return status.has_needs(
             food_threshold=self.settings.restore_food_from,
             water_threshold=self.settings.restore_water_from,
-            health_threshold=self.settings.restore_health_from,
+            health_threshold=None,
         )
 
     def _brain_loop(self) -> None:
@@ -517,9 +536,15 @@ class FishingBot:
             stage = self._detect_stage(triggers)
             self._publish_stage(self._stage_label(stage))
             try:
+                self._publish_estimated_player_status_if_changed()
                 trigger_needs_meal = "hunger" in triggers or "thirst" in triggers
                 status_needs_meal = self._status_indicates_needs_meal(stage)
-                needs_meal = (trigger_needs_meal or status_needs_meal) and not self._meal_search_disabled_until_restart
+                timer_needs_meal = self._status_timer_needs_meal()
+                needs_meal = (
+                    self.settings.auto_meal
+                    and (trigger_needs_meal or status_needs_meal or timer_needs_meal)
+                    and not self._meal_search_disabled_until_restart
+                )
                 if self._stop_if_no_stage_timed_out(stage, needs_meal):
                     break
                 if stage != "ad" and self._close_game_menu_if_open():
@@ -530,6 +555,10 @@ class FishingBot:
                         fish_name, confidence = self._run_reeling_module()
                         if fish_name or self._has_pending_catch():
                             self._do_fish_catch(fish_name, confidence)
+                        continue
+                    if self._should_run_initial_status_scan(stage):
+                        self._initial_status_scan_pending = False
+                        self._handle_pending_tasks(do_meal=True)
                         continue
                     if needs_meal and time.time() >= self._inventory_retry_after:
                         self._handle_pending_tasks(do_meal=True)
@@ -605,6 +634,40 @@ class FishingBot:
 
     def _should_handle_meal_now(self, stage: str | None, needs_meal: bool) -> bool:
         return bool(needs_meal and stage != "ad" and time.time() >= self._inventory_retry_after)
+
+    def _should_run_initial_status_scan(self, stage: str | None) -> bool:
+        return bool(self.settings.auto_meal and self._initial_status_scan_pending and stage != "ad")
+
+    def _status_timer_needs_meal(self) -> bool:
+        if not self.settings.auto_meal:
+            return False
+        return time.time() >= self._inventory_retry_after > 0.0
+
+    def _schedule_next_meal_check_from_estimate(self) -> None:
+        estimate = getattr(self, "_player_status_estimate", None)
+        wait_seconds = None
+        if estimate is not None:
+            wait_seconds = estimate.seconds_until_below(
+                food_threshold=self._meal_food_threshold(),
+                water_threshold=self._meal_water_threshold(),
+            )
+        if wait_seconds is None:
+            self._inventory_retry_after = time.time() + MEAL_MISSING_RETRY_SECONDS
+            return
+        self._inventory_retry_after = time.time() + max(0.0, wait_seconds)
+        self._log(f"Питание: следующая проверка через {self._format_seconds(wait_seconds)}")
+
+    def _meal_food_threshold(self) -> int:
+        return min(100, self.settings.restore_food_from + MEAL_STATUS_THRESHOLD_TOLERANCE)
+
+    def _meal_water_threshold(self) -> int:
+        return min(100, self.settings.restore_water_from + MEAL_STATUS_THRESHOLD_TOLERANCE)
+
+    @staticmethod
+    def _format_seconds(seconds: float) -> str:
+        total = max(0, int(round(seconds)))
+        minutes, sec = divmod(total, 60)
+        return f"{minutes}м {sec:02d}с"
 
     def _publish_stage(self, label: str) -> None:
         if self.state.detected_stage == label:
@@ -1013,7 +1076,8 @@ class FishingBot:
                 self._log("Подсечка: стадия закончилась до триггера")
                 return False
             if (
-                not self._meal_search_disabled_until_restart
+                self.settings.auto_meal
+                and not self._meal_search_disabled_until_restart
                 and time.time() >= self._inventory_retry_after
                 and ("hunger" in self._last_triggers or "thirst" in self._last_triggers)
             ):
@@ -1182,6 +1246,7 @@ class FishingBot:
             image_bytes=catch_image_bytes,
         )
         if keep_fish:
+            self._add_kept_fish_weight_to_inventory_estimate(result.weight_kg)
             self._log(f"Рыба оставлена: {fish_label} ({confidence:.2f})")
             if self._wait_for_pereves(timeout=2.0):
                 self._handle_overweight_after_keep(result)
@@ -1429,8 +1494,9 @@ class FishingBot:
         return True
 
     def _handle_pending_tasks(self, do_meal: bool | None = None) -> None:
+        requested_meal = self.settings.auto_meal if do_meal is None else bool(do_meal and self.settings.auto_meal)
         self._do_combined_inventory_tasks(
-            do_meal=self.settings.auto_meal if do_meal is None else do_meal,
+            do_meal=requested_meal,
             do_backpack=self.settings.store_in_backpack,
         )
 
@@ -1456,16 +1522,25 @@ class FishingBot:
         self._return_to_fishing()
 
     def _do_meal_actions(self) -> bool:
+        if not self.settings.auto_meal:
+            self._log("Питание пропущено: авто-питание выключено")
+            return False
         consumed: list[MealItemSnapshot] = []
         moved_from_backpack_attempts = 0
         self._prepare_meal_system()
         while not self._stop_event.is_set():
             frame = self.capture.capture()
-            if not self.meal_system.check_needs_meal(
+            detect_player_status = getattr(self.meal_system, "detect_player_status", None)
+            status = detect_player_status(frame) if callable(detect_player_status) else None
+            self._remember_player_status(status, inventory_scan=True)
+            if status is not None and not self._status_needs_meal_for_scan(status):
+                self._schedule_next_meal_check_from_estimate()
+                break
+            if status is None and not self.meal_system.check_needs_meal(
                 frame,
-                food_threshold=self.settings.restore_food_from,
-                water_threshold=self.settings.restore_water_from,
-                health_threshold=self.settings.restore_health_from,
+                food_threshold=self._meal_food_threshold(),
+                water_threshold=self._meal_water_threshold(),
+                health_threshold=None,
             ):
                 if self._meal_trigger_active_after_inventory_close():
                     if self._open_inventory():
@@ -1511,9 +1586,10 @@ class FishingBot:
                 self._handle_food_depleted()
             break
         if consumed:
-            self._inventory_retry_after = 0.0
+            self._schedule_next_meal_check_from_estimate()
         else:
-            self._inventory_retry_after = time.time() + MEAL_MISSING_RETRY_SECONDS
+            if self._inventory_retry_after <= time.time():
+                self._inventory_retry_after = time.time() + MEAL_MISSING_RETRY_SECONDS
         self._log(f"Meal routine: consumed={len(consumed)} backpack_attempts={moved_from_backpack_attempts}")
         return bool(consumed)
 
@@ -1526,12 +1602,21 @@ class FishingBot:
         return self._confirm_still_needs_meal_outside_inventory(MEAL_MISSING_HUD_CHECK_TIMEOUT_SECONDS)
 
     def _confirm_still_needs_meal_after_consumption(self) -> bool:
+        status = self.estimated_player_status()
+        if status is not None and status.has_core_values():
+            still_needs_meal = self._status_needs_meal_for_scan(status)
+            if still_needs_meal:
+                self._log("Питание: показатели всё ещё ниже порога, продолжаю поиск еды")
+            return still_needs_meal
         still_needs_meal = self._confirm_still_needs_meal_outside_inventory(MEAL_POST_USE_HUD_CHECK_TIMEOUT_SECONDS)
         if still_needs_meal:
             self._log("Питание: голод/жажда всё ещё активны, продолжаю поиск еды")
         return still_needs_meal
 
     def _confirm_still_needs_meal_without_food(self) -> bool:
+        status = self.estimated_player_status()
+        if status is not None and status.has_core_values():
+            return self._status_needs_meal_for_scan(status)
         return self._confirm_still_needs_meal_outside_inventory(MEAL_MISSING_HUD_CHECK_TIMEOUT_SECONDS)
 
     def _confirm_still_needs_meal_outside_inventory(self, timeout: float) -> bool:
@@ -1573,11 +1658,36 @@ class FishingBot:
         try:
             frame = self.capture.capture()
             status = self.meal_system.detect_player_status(frame)
-            self._publish_player_status(status)
-            return status
+            self._remember_player_status(status, inventory_scan=True)
+            estimated = self.estimated_player_status() or status
+            self._publish_player_status(estimated)
+            return estimated
         except Exception as exc:
             debug_log(f"MEAL_STATUS_DETECT_FAILED {exc}")
             return None
+
+    def _status_needs_meal_for_scan(self, status: PlayerStatus) -> bool:
+        return status.has_needs(
+            food_threshold=self._meal_food_threshold(),
+            water_threshold=self._meal_water_threshold(),
+            health_threshold=None,
+        )
+
+    def _remember_player_status(self, status: PlayerStatus | None, *, inventory_scan: bool = False) -> None:
+        if status is None:
+            return
+        trusted_core = "screenshot" in status.source or inventory_scan
+        self._player_status_estimate.update(status, trusted_core=trusted_core, inventory_scan=inventory_scan or "screenshot" in status.source)
+        estimated = self.estimated_player_status()
+        if estimated is not None:
+            self._check_inventory_space_notification(estimated)
+
+    def _publish_estimated_player_status_if_changed(self) -> None:
+        status = self.estimated_player_status()
+        if status is None or status == self._last_published_estimated_status:
+            return
+        self._last_published_estimated_status = status
+        self._publish_player_status(status)
 
     def _publish_player_status(self, status: PlayerStatus | None) -> None:
         self._last_player_status = status
@@ -1599,15 +1709,20 @@ class FishingBot:
         )
 
     def _save_debug_meal_snapshot(self, snapshot: MealItemSnapshot) -> None:
-        if not self._debug_capture_enabled() or snapshot.image is None:
+        if not self._debug_capture_enabled():
+            return
+        if snapshot.image is None and snapshot.screen_image is None:
             return
         try:
             DEBUG_CAPTURE_MEAL_DIR.mkdir(parents=True, exist_ok=True)
             timestamp = int(time.time() * 1000)
             safe_item = self._safe_debug_filename_part(snapshot.item_title or snapshot.display_name or snapshot.key)
-            screenshot_path = DEBUG_CAPTURE_MEAL_DIR / f"{timestamp}_meal_{safe_item}.png"
-            if not cv2.imwrite(str(screenshot_path), snapshot.image):
-                debug_log(f"DEBUG_MEAL_CAPTURE_WRITE_FAILED {screenshot_path}")
+            base_name = f"{timestamp}_meal_{safe_item}"
+            item_info_path = DEBUG_CAPTURE_MEAL_DIR / f"{base_name}_item_info.png"
+            screen_path = DEBUG_CAPTURE_MEAL_DIR / f"{base_name}_screen.png"
+            saved_item_info_path = self._write_debug_png(item_info_path, snapshot.image)
+            saved_screen_path = self._write_debug_png(screen_path, snapshot.screen_image)
+            if saved_item_info_path is None and saved_screen_path is None:
                 return
             item_info = snapshot.item_info
             status = snapshot.player_status
@@ -1619,6 +1734,10 @@ class FishingBot:
                     fieldnames=[
                         "screenshot",
                         "screenshot_path",
+                        "item_info_screenshot",
+                        "item_info_screenshot_path",
+                        "screen_screenshot",
+                        "screen_screenshot_path",
                         "created_at_utc",
                         "item_key",
                         "display_name",
@@ -1636,10 +1755,16 @@ class FishingBot:
                 )
                 if write_header:
                     writer.writeheader()
+                item_info_screenshot = saved_item_info_path.name if saved_item_info_path else ""
+                item_info_screenshot_path = str(saved_item_info_path) if saved_item_info_path else ""
                 writer.writerow(
                     {
-                        "screenshot": screenshot_path.name,
-                        "screenshot_path": str(screenshot_path),
+                        "screenshot": item_info_screenshot,
+                        "screenshot_path": item_info_screenshot_path,
+                        "item_info_screenshot": item_info_screenshot,
+                        "item_info_screenshot_path": item_info_screenshot_path,
+                        "screen_screenshot": saved_screen_path.name if saved_screen_path else "",
+                        "screen_screenshot_path": str(saved_screen_path) if saved_screen_path else "",
                         "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                         "item_key": snapshot.key,
                         "display_name": snapshot.display_name,
@@ -1655,9 +1780,21 @@ class FishingBot:
                         "raw_text": item_info.text if item_info else "",
                     }
                 )
-            debug_log(f"DEBUG_MEAL_CAPTURE_SAVED path={screenshot_path}")
+            debug_log(
+                "DEBUG_MEAL_CAPTURE_SAVED "
+                f"item_info={saved_item_info_path or ''} screen={saved_screen_path or ''}"
+            )
         except Exception as exc:
             debug_log(f"DEBUG_MEAL_CAPTURE_FAILED {exc}")
+
+    @staticmethod
+    def _write_debug_png(path: Path, image) -> Path | None:
+        if image is None:
+            return None
+        if not cv2.imwrite(str(path), image):
+            debug_log(f"DEBUG_MEAL_CAPTURE_WRITE_FAILED {path}")
+            return None
+        return path
 
     def _handle_food_depleted(self) -> None:
         self._publish_ui_event("Закончилась еда", event_type="danger", icon="food.svg")
@@ -1783,6 +1920,38 @@ class FishingBot:
         self.inventory_full = True
         self._handle_overweight_action(previous_result=self._last_catch_result)
 
+    def _check_inventory_space_notification(self, status: PlayerStatus | None = None) -> None:
+        telegram = self.config_manager.load().telegram
+        if not telegram.notify_inventory_space_low:
+            self._inventory_space_low_notified = False
+            return
+        status = status or self.estimated_player_status()
+        if status is None or status.inventory_weight is None or status.inventory_weight_max is None:
+            return
+        free_kg = max(0.0, status.inventory_weight_max - status.inventory_weight)
+        threshold = telegram.inventory_space_low_threshold_kg
+        if free_kg < threshold:
+            if not self._inventory_space_low_notified:
+                self._inventory_space_low_notified = True
+                self.notification_manager.notify_inventory_space_low(free_kg, threshold, status)
+            return
+        self._inventory_space_low_notified = False
+
+    def _mark_storage_from_matches(self, matches: dict[str, TemplateMatch]) -> None:
+        if "human" in matches:
+            self._last_confirmed_storage = "human"
+        elif "boat" in matches:
+            self._last_confirmed_storage = "boat"
+
+    def _add_kept_fish_weight_to_inventory_estimate(self, weight_kg: float | None) -> None:
+        if getattr(self, "_last_confirmed_storage", "") != "human":
+            return
+        self._player_status_estimate.add_inventory_fish_weight(weight_kg)
+        status = self.estimated_player_status()
+        if status is not None:
+            self._publish_player_status(status)
+            self._check_inventory_space_notification(status)
+
     def _handle_overweight_after_keep(self, previous_result: CatchScreenResult | None) -> None:
         self.inventory_full = True
         self._handle_overweight_action(previous_result=previous_result)
@@ -1848,6 +2017,7 @@ class FishingBot:
             matches = self.trigger_monitor.find_detections(frame)
             self._last_trigger_matches = matches
             self._last_triggers = {name: match.confidence for name, match in matches.items()}
+            self._mark_storage_from_matches(matches)
             if matches and time.time() - last_log_at > 1.0:
                 self._log(f"Pre-cast detections: {self._format_precise_triggers(matches)}")
                 last_log_at = time.time()
