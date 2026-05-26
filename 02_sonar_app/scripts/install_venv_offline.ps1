@@ -11,7 +11,8 @@ if (-not (Test-Path $Python)) {
 
 Push-Location $Root
 try {
-  & $Python -m pip install --no-index --find-links=$Wheelhouse -e ".[test]"
+  & $Python -m pip install --no-index --find-links=$Wheelhouse "setuptools>=69" "wheel>=0.43"
+  & $Python -m pip install --no-index --find-links=$Wheelhouse --no-build-isolation -e ".[test]"
 } finally {
   Pop-Location
 }
