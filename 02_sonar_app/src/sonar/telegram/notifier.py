@@ -17,6 +17,7 @@ from PIL import Image, ImageFilter, ImageOps
 
 from sonar.config.models import TelegramSettings
 from sonar.fishing.item_info import ItemInfo
+from sonar.fishing.player_status import PlayerStatus
 from sonar.fishing.statistics import FishStatsRow, SessionTotals, format_catch_summary, format_duration, format_money, format_money_range, format_weight
 from sonar.fishing.tackle_detection import TackleItemCount, format_tackle_items
 
@@ -183,11 +184,18 @@ class NotificationManager:
             return
         self.send_message(self._format_session_stats_message("🛑 Рыбалка остановлена!", "📊 Статистика сессии", totals, reason=reason))
 
-    def notify_meal_eaten(self, item_name: str = "", *, image_bytes: bytes | None = None, item_info: ItemInfo | None = None) -> None:
+    def notify_meal_eaten(
+        self,
+        item_name: str = "",
+        *,
+        image_bytes: bytes | None = None,
+        item_info: ItemInfo | None = None,
+        player_status: PlayerStatus | None = None,
+    ) -> None:
         del image_bytes
         if not self.settings.notify_meal:
             return
-        self.send_message(self._format_meal_message(item_name, item_info))
+        self.send_message(self._format_meal_message(item_name, item_info, player_status))
 
     def notify_meal_ended(self) -> None:
         if self.settings.notify_meal:
@@ -803,7 +811,7 @@ class NotificationManager:
                 canvas_width = max(width, int(round(width * 1.35)))
                 canvas_height = max(height, int(round(height * 1.35)))
                 sample = original.convert("RGB").resize((24, 24), Image.Resampling.BILINEAR)
-                colors = list(sample.get_flattened_data())
+                colors = list(sample.getdata())
                 random.SystemRandom().shuffle(colors)
                 background_seed = Image.new("RGB", sample.size)
                 background_seed.putdata(colors)
@@ -824,7 +832,7 @@ class NotificationManager:
             return image_bytes
 
     @staticmethod
-    def _format_meal_message(item_name: str, item_info: ItemInfo | None) -> str:
+    def _format_meal_message(item_name: str, item_info: ItemInfo | None, player_status: PlayerStatus | None = None) -> str:
         title = _non_empty(item_info.item_name if item_info else "") or _non_empty(item_info.title if item_info else "") or item_name.strip() or "еда"
         lines = ["🍽 <b>Питание использовано!</b>", "", f"🥪 <b>Съедено:</b> {_h(title)}"]
         if item_info is not None:
@@ -853,7 +861,48 @@ class NotificationManager:
                 lines.extend(["", "🧩 <b>Модификации параметров</b>"])
                 for modification in item_info.parameter_modifications:
                     lines.append(f"• <code>{_h(modification)}</code>")
+        if player_status is not None:
+            status_lines = []
+            if player_status.food is not None:
+                status_lines.append(f"🍗 <b>Еда:</b> {player_status.food}%")
+            if player_status.water is not None:
+                status_lines.append(f"💧 <b>Вода:</b> {player_status.water}%")
+            if player_status.health is not None:
+                status_lines.append(f"❤️ <b>Здоровье:</b> {player_status.health}%")
+            inventory_weight = NotificationManager._format_status_weight(
+                player_status.inventory_weight,
+                player_status.inventory_weight_max,
+            )
+            if inventory_weight:
+                status_lines.append(f"🎒 <b>Инвентарь:</b> {inventory_weight} кг")
+            backpack_weight = NotificationManager._format_status_weight(
+                player_status.backpack_weight,
+                player_status.backpack_weight_max,
+            )
+            if backpack_weight:
+                status_lines.append(f"🎒 <b>Рюкзак:</b> {backpack_weight} кг")
+            if status_lines:
+                lines.extend(["", "📊 <b>Показатели</b>", *status_lines])
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_status_weight(current: float | None, maximum: float | None) -> str:
+        if current is None and maximum is None:
+            return ""
+        if current is None:
+            return f"— / {NotificationManager._format_status_weight_number(maximum)}"
+        if maximum is None:
+            return NotificationManager._format_status_weight_number(current)
+        return (
+            f"{NotificationManager._format_status_weight_number(current)} / "
+            f"{NotificationManager._format_status_weight_number(maximum)}"
+        )
+
+    @staticmethod
+    def _format_status_weight_number(value: float | None) -> str:
+        if value is None:
+            return "—"
+        return f"{value:.2f}".rstrip("0").rstrip(".")
 
     @staticmethod
     def _format_catch_message(

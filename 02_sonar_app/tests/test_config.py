@@ -50,6 +50,14 @@ def test_fishing_settings_accepts_food_depleted_and_backpack_move_options():
     assert settings.backpack_move_hotkey == "R"
 
 
+def test_fishing_settings_accepts_restore_thresholds():
+    settings = FishingSettings.from_dict({"restore_food_from": 12, "restore_water_from": "91", "restore_health_from": 0})
+
+    assert settings.restore_food_from == 12
+    assert settings.restore_water_from == 90
+    assert settings.restore_health_from == 1
+
+
 def test_fishing_settings_rejects_unknown_food_depleted_action():
     settings = FishingSettings.from_dict({"food_depleted_action": "loop_forever"})
 

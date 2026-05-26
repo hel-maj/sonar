@@ -33,7 +33,7 @@ OCR_PADDING_RIGHT = 8
 OCR_PADDING_BOTTOM = 5
 BASE_TOOLTIP_WIDTH = 312
 OCR_WORD_CONFIDENCE = 18
-OCR_RECT_MIN_SCORE = 8.0
+OCR_RECT_MIN_SCORE = 6.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +126,7 @@ class ItemInfoParser:
         "Аксессуары",
         "Низ",
         "Обувь",
+        "Рюкзаки",
     }
     SECTION_LABELS = {
         "Эффекты": "effects",
@@ -445,6 +446,8 @@ class ItemInfoDetector:
             rect = self._trim_rect(frame, rough_rect)
             if rect.width < MIN_TOOLTIP_WIDTH or rect.height < MIN_TOOLTIP_HEIGHT:
                 continue
+            if self._is_likely_hud_overlay_rect(frame, rect):
+                continue
             refined_mask = mask[rect.y:rect.bottom, rect.x:rect.right]
             refined_dark_ratio = float(np.mean(refined_mask > 0)) if refined_mask.size else 0.0
             candidates.append((rect, refined_dark_ratio, fill_ratio))
@@ -482,8 +485,6 @@ class ItemInfoDetector:
             if not clustered_words:
                 continue
             score = self._score_ocr_cluster(clustered_words, expected_width)
-            if score <= best_score:
-                continue
             min_y = min(word["top"] for word in clustered_words)
             max_y = max(word["bottom"] for word in clustered_words)
             min_x = min(word["left"] for word in clustered_words)
@@ -498,6 +499,15 @@ class ItemInfoDetector:
             rect = Rect(rect_x, y, rect_width, rect_height).clamp(width, height)
             if height - rect.bottom <= max(35, int(round(40 * frame_scale))):
                 rect = Rect(rect.x, rect.y, rect.width, height - rect.y)
+            if self._is_likely_hud_overlay_rect(frame, rect):
+                continue
+            dark_score = self._rect_dark_ratio(frame, rect)
+            if dark_score < 0.12:
+                continue
+            score += min(1.0, dark_score) * 6.0
+            if score <= best_score:
+                continue
+            rect = self._expand_ocr_rect_to_dark_panel(frame, rect)
             best_rect = rect
             best_score = score
         if best_rect is None or best_score < OCR_RECT_MIN_SCORE:
@@ -661,6 +671,67 @@ class ItemInfoDetector:
         if ocr_width_error + 4 < contour_width_error and ocr_rect.height <= contour_rect.height + max(16, int(22 * frame_scale)):
             return True
         return False
+
+    @staticmethod
+    def _is_likely_hud_overlay_rect(frame: np.ndarray, rect: Rect) -> bool:
+        height, width = frame.shape[:2]
+        if width <= 0 or height <= 0:
+            return False
+        right_edge_margin = max(18, int(round(width * 0.05)))
+        if rect.x >= int(width * 0.78) and rect.right >= width - right_edge_margin and rect.y <= int(height * 0.36):
+            return True
+        if rect.x >= int(width * 0.70) and rect.height >= int(height * 0.85):
+            return True
+        return rect.x <= int(width * 0.22) and rect.y >= int(height * 0.72)
+
+    @staticmethod
+    def _rect_dark_ratio(frame: np.ndarray, rect: Rect) -> float:
+        height, width = frame.shape[:2]
+        clamped = rect.clamp(width, height)
+        if clamped.width <= 0 or clamped.height <= 0:
+            return 0.0
+        mask = ItemInfoDetector._dark_mask(frame)
+        crop = mask[clamped.y:clamped.bottom, clamped.x:clamped.right]
+        return float(np.mean(crop > 0)) if crop.size else 0.0
+
+    @staticmethod
+    def _expand_ocr_rect_to_dark_panel(frame: np.ndarray, rect: Rect) -> Rect:
+        height, width = frame.shape[:2]
+        clamped = rect.clamp(width, height)
+        if clamped.width <= 0 or clamped.height <= 0:
+            return clamped
+        mask = ItemInfoDetector._dark_mask(frame)
+        frame_scale = ItemInfoDetector._resolution_scale(frame)
+        max_gap = max(3, int(round(6 * frame_scale)))
+        top = clamped.y
+        misses = 0
+        while top > 0:
+            row = mask[top - 1, clamped.x:clamped.right]
+            dark_ratio = float(np.mean(row > 0)) if row.size else 0.0
+            if dark_ratio >= 0.42:
+                misses = 0
+            else:
+                misses += 1
+                if misses > max_gap:
+                    top += misses
+                    break
+            top -= 1
+        top = max(0, min(clamped.y, top))
+        bottom = clamped.bottom
+        misses = 0
+        while bottom < height:
+            row = mask[bottom, clamped.x:clamped.right]
+            dark_ratio = float(np.mean(row > 0)) if row.size else 0.0
+            if dark_ratio >= 0.42:
+                misses = 0
+            else:
+                misses += 1
+                if misses > max_gap:
+                    bottom -= misses
+                    break
+            bottom += 1
+        bottom = max(clamped.bottom, min(height, bottom))
+        return Rect(clamped.x, top, clamped.width, bottom - top)
 
     @staticmethod
     def _resolution_scale(frame: np.ndarray) -> float:

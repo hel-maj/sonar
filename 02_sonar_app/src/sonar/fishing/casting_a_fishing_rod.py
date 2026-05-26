@@ -20,9 +20,6 @@ from sonar.vision.geometry import Rect
 
 CAST_INPUT_LEAD_SECONDS = 0.075
 MARKER_SAMPLE_MAX_AGE = 0.12
-FAST_CAPTURE_PRESS_FPS = 35.0
-SLOW_CAPTURE_LEAD_RATIO = 0.30
-SLOW_CAPTURE_WINDOW_RATIO = 0.10
 
 
 class GreenMonitorState(str, Enum):
@@ -91,8 +88,12 @@ class GreenPixelMonitor:
         return Rect(roi.x + x, roi.y + y, w, h)
 
     def _tap_space_fast(self) -> None:
+        tap_key_fast = getattr(self.input_controller, "tap_key_fast", None)
+        if tap_key_fast is not None:
+            tap_key_fast("space", duration=0.003)
+            return
         self.input_controller.key_down("space")
-        time.sleep(0.015)
+        time.sleep(0.003)
         self.input_controller.key_up("space")
 
     def _marker_offset_from_center(self, frame: np.ndarray) -> float | None:
@@ -163,18 +164,9 @@ class GreenPixelMonitor:
             if marker_offset is not None:
                 self.last_marker_offset = marker_offset
                 self.last_marker_time = now
-            bbox_width = self.tight_bbox.width if self.tight_bbox else self.roi.width
-            slow_capture_lead = min(max(bbox_width * SLOW_CAPTURE_LEAD_RATIO, center_tolerance * 3.0), bbox_width * 0.45)
-            slow_capture_window = max(center_tolerance * 1.8, bbox_width * SLOW_CAPTURE_WINDOW_RATIO)
-            current_centered = (
-                marker_offset is not None
-                and (
-                    fps >= FAST_CAPTURE_PRESS_FPS
-                    or abs(abs(marker_offset) - slow_capture_lead) <= slow_capture_window
-                )
-            )
+            current_marker_visible = marker_offset is not None
             predicted_centered = predicted_offset is not None and abs(predicted_offset) <= center_tolerance
-            centered_marker = current_centered or predicted_centered
+            centered_marker = current_marker_visible or predicted_centered
             if self.peak_count >= MIN_GREEN_PIXELS and drop >= min_drop and centered_marker:
                 result_peak_count = self.peak_count
                 result_bbox_area = -1 if self.tight_bbox is None else self.tight_bbox.width * self.tight_bbox.height

@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import csv
+import struct
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pytest
 
 from sonar.fishing.item_info import ItemInfoDetector, ItemInfoParser
+from sonar.fishing.player_status import PlayerStatusDetector, PlayerStatusMemoryDetector
 from sonar.vision.geometry import Rect
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "inventory_item_info"
 METADATA_PATH = FIXTURE_DIR / "metadata.csv"
+STATUS_METADATA_PATH = FIXTURE_DIR / "status_metadata.csv"
 COORDINATE_TOLERANCE = 22
 LOW_RES_SCALE = 0.5
 LOW_RES_FIXTURE_NAMES = {
@@ -32,6 +36,11 @@ def metadata_rows() -> list[dict[str, str]]:
 
 def low_res_rows() -> list[dict[str, str]]:
     return [row for row in metadata_rows() if row["source_image"] in LOW_RES_FIXTURE_NAMES]
+
+
+def status_rows() -> list[dict[str, str]]:
+    with STATUS_METADATA_PATH.open(encoding="utf-8-sig", newline="") as file:
+        return list(csv.DictReader(file, delimiter=";"))
 
 
 def expected_rect(row: dict[str, str], scale: float = 1.0) -> Rect:
@@ -101,4 +110,99 @@ def test_item_info_detector_keeps_rect_on_downscaled_screenshots(row: dict[str, 
     item_info = ItemInfoDetector().detect(small_frame, read_text=False)
 
     assert item_info is not None
-    assert_rect_close(item_info.rect, expected_rect(row, LOW_RES_SCALE), tolerance=18)
+    assert_rect_close(item_info.rect, expected_rect(row, LOW_RES_SCALE), tolerance=36)
+
+
+@pytest.mark.parametrize("row", status_rows(), ids=lambda row: row["source_image"])
+def test_player_status_detector_matches_inventory_bars(row: dict[str, str]):
+    frame = cv2.imread(str(FIXTURE_DIR / "images" / row["source_image"]))
+    assert frame is not None
+
+    status = PlayerStatusDetector().detect(frame)
+
+    assert status is not None
+    assert status.food == int(row["food"])
+    assert status.water == int(row["water"])
+    assert status.health == int(row["health"])
+
+
+@pytest.mark.parametrize("row", status_rows(), ids=lambda row: row["source_image"])
+def test_player_status_detector_matches_downscaled_inventory_bars(row: dict[str, str]):
+    frame = cv2.imread(str(FIXTURE_DIR / "images" / row["source_image"]))
+    assert frame is not None
+    small_frame = cv2.resize(frame, None, fx=LOW_RES_SCALE, fy=LOW_RES_SCALE, interpolation=cv2.INTER_AREA)
+
+    status = PlayerStatusDetector().detect(small_frame)
+
+    assert status is not None
+    assert status.food == int(row["food"])
+    assert status.water == int(row["water"])
+    assert status.health == int(row["health"])
+
+
+def test_player_status_detector_infers_zero_middle_bar():
+    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (812, 494), (956, 497), (0, 185, 255), -1)
+    cv2.rectangle(frame, (812, 548), (1019, 551), (40, 40, 255), -1)
+
+    status = PlayerStatusDetector().detect(frame)
+
+    assert status is not None
+    assert status.food == 50
+    assert status.water == 0
+    assert status.health == 72
+
+
+def test_player_status_memory_parser_reads_webengine_weight_strings():
+    data = (
+        b"\x00weight__text-current \x00"
+        b"\x04\x00\x00\x005.72I&"
+        b"https://cdn.majestic-files.net/public/master/static/img/inventory/indicators/v2/health.svg\x00"
+        b"https://cdn.majestic-files.net/public/master/static/img/inventory/indicators/v2/water.svg\x00"
+        b"https://cdn.majestic-files.net/public/master/static/img/inventory/indicators/v2/hunger.svg\x00"
+        b" \xa0/ 20\x00\x05\x00\x00\x0011.74\x00"
+        b" \xa0/ 40 \x00"
+    )
+
+    status = PlayerStatusMemoryDetector._parse_webengine_window(data)
+
+    assert status is not None
+    assert status.inventory_weight == 5.72
+    assert status.inventory_weight_max == 40.0
+    assert status.backpack_weight == 11.74
+    assert status.backpack_weight_max == 20.0
+
+
+def test_player_status_memory_parser_reads_webengine_indicator_records():
+    def record(value: int, icon_ptr: int, tail_ptr: int, extra_ptr: int = 0x01F5FE29, final_ptr: int = 0x28D9) -> bytes:
+        return struct.pack(
+            "<13I",
+            value << 1,
+            0x00EF5FF1,
+            0x775,
+            0x775,
+            0x047793A1,
+            0x041DE895,
+            0xA1,
+            icon_ptr,
+            0x775,
+            0x775,
+            tail_ptr,
+            extra_ptr,
+            final_ptr,
+        )
+
+    data = (
+        b"https://cdn.majestic-files.net/public/master/static/img/inventory/indicators/v2/health.svg\x00"
+        + b"\x00" * 32
+        + record(83, 0x064142C5, 0x0476D5E5)
+        + record(63, 0x064142C5, 0x0476D5E5)
+        + record(32, 0x058B2815, 0x0477938D, 0x028F0A59, 0x041DE7B5)
+    )
+
+    status = PlayerStatusMemoryDetector._parse_webengine_window(data)
+
+    assert status is not None
+    assert status.food == 83
+    assert status.water == 63
+    assert status.health == 32

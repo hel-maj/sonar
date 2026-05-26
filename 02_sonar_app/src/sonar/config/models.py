@@ -9,6 +9,9 @@ from sonar.config.defaults import DEFAULT_FISH_SETTINGS, DEFAULT_GARBAGE_SETTING
 @dataclass(slots=True)
 class FishingSettings:
     auto_meal: bool = True
+    restore_food_from: int = 90
+    restore_water_from: int = 90
+    restore_health_from: int = 1
     auto_change_bait: bool = True
     store_in_backpack: bool = False
     store_in_trunk: bool = True
@@ -64,6 +67,9 @@ class FishingSettings:
             food_depleted_action = defaults.food_depleted_action
         return cls(
             auto_meal=bool(data.get("auto_meal", defaults.auto_meal)),
+            restore_food_from=cls._slider_percent(data.get("restore_food_from", defaults.restore_food_from)),
+            restore_water_from=cls._slider_percent(data.get("restore_water_from", defaults.restore_water_from)),
+            restore_health_from=cls._slider_percent(data.get("restore_health_from", defaults.restore_health_from)),
             auto_change_bait=bool(data.get("auto_change_bait", defaults.auto_change_bait)),
             store_in_backpack=False,
             store_in_trunk=bool(data.get("store_in_trunk", defaults.store_in_trunk)),
@@ -90,6 +96,13 @@ class FishingSettings:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @staticmethod
+    def _slider_percent(value: Any) -> int:
+        try:
+            return max(1, min(90, int(value)))
+        except (TypeError, ValueError):
+            return 90
 
 
 @dataclass(slots=True)

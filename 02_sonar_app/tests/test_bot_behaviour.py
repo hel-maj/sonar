@@ -10,7 +10,9 @@ import sonar.fishing.bot as bot_module
 from sonar.config.models import FishingSettings
 from sonar.core.state import BotState
 from sonar.fishing.bot import FishingBot
+from sonar.fishing.item_info import ItemInfo
 from sonar.fishing.meal_system import MealItemMatch, MealItemSnapshot
+from sonar.fishing.player_status import PlayerStatus
 from sonar.fishing.catch_screen import CatchScreenResult
 from sonar.fishing.tackle_detection import TACKLE_SLOTS, TackleItemCount, TackleScanResult
 from sonar.vision.geometry import Rect
@@ -45,7 +47,7 @@ class FakeMealSystem:
         self.backpack_moves = 0
         self.inventory_checks = 0
 
-    def check_needs_meal(self, _frame) -> bool:
+    def check_needs_meal(self, _frame, **_kwargs) -> bool:
         return True
 
     def find_food_in_inventory(self, _frame):
@@ -228,6 +230,24 @@ def test_chat_pause_can_resume_without_kickstart_after_failed_open():
     assert bot._kickstart_requested is False
 
 
+def test_player_status_threshold_can_request_meal_outside_reeling():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(restore_food_from=90, restore_water_from=90, restore_health_from=50)
+    bot._last_player_status = PlayerStatus(food=89, water=100, health=100, source="memory")
+    bot._last_player_status_at = time.time()
+
+    assert bot._status_indicates_needs_meal("start2") is True
+
+
+def test_player_status_threshold_is_ignored_during_reeling():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(restore_food_from=90, restore_water_from=90, restore_health_from=50)
+    bot._last_player_status = PlayerStatus(food=1, water=1, health=1, source="memory")
+    bot._last_player_status_at = time.time()
+
+    assert bot._status_indicates_needs_meal("ad") is False
+
+
 def make_chat_exit_bot(trigger_steps: list[dict[str, DummyMatch]], *, running: bool = False):
     bot = FishingBot.__new__(FishingBot)
     bot.input_controller = DummyInput()
@@ -291,6 +311,21 @@ def test_auto_stop_when_no_stage_is_visible_for_timeout():
     assert bot._stop_if_no_stage_timed_out(None, needs_meal=False) is True
     assert reasons == [bot_module.STOP_REASON_NO_STAGE]
     assert any(bot_module.STOP_REASON_NO_STAGE in message for message in logs)
+
+
+def test_meal_can_interrupt_non_reeling_stages_when_retry_is_due():
+    bot = FishingBot.__new__(FishingBot)
+    bot._inventory_retry_after = time.time() - 1.0
+
+    assert bot._should_handle_meal_now("start2", needs_meal=True) is True
+    assert bot._should_handle_meal_now("start1", needs_meal=True) is True
+    assert bot._should_handle_meal_now("start", needs_meal=True) is True
+    assert bot._should_handle_meal_now(None, needs_meal=True) is True
+    assert bot._should_handle_meal_now("ad", needs_meal=True) is False
+
+    bot._inventory_retry_after = time.time() + 10.0
+    assert bot._should_handle_meal_now("start2", needs_meal=True) is False
+    assert bot._should_handle_meal_now("start2", needs_meal=False) is False
 
 
 def test_auto_stop_when_start_cannot_find_fishing_stage():
@@ -557,6 +592,31 @@ def test_debug_capture_writes_only_when_debug_enabled(tmp_path, monkeypatch):
     assert len(list((tmp_path / "all").glob("*.png"))) == 1
     assert (tmp_path / "all" / "metadata.csv").exists()
     assert (tmp_path / "unexpected" / "metadata.csv").exists()
+
+
+def test_debug_capture_writes_meal_item_info_crop(tmp_path, monkeypatch):
+    monkeypatch.setattr(bot_module, "DEBUG_CAPTURE_MEAL_DIR", tmp_path / "meal")
+    monkeypatch.setenv("SONAR_DEBUG_CAPTURE", "1")
+    bot = FishingBot.__new__(FishingBot)
+    snapshot = MealItemSnapshot(
+        key="irp",
+        display_name="ИРП Армии США",
+        item_title="ИРП Армии США",
+        item_weight="0.6",
+        image=np.zeros((8, 12, 3), dtype=np.uint8),
+        item_info=ItemInfo(Rect(0, 0, 12, 8), title="ИРП Армии США", satiety_change="+80", thirst_change="+75", text="ИРП Армии США"),
+        player_status=PlayerStatus(food=96, water=71, health=47, source="screenshot"),
+    )
+
+    bot._save_debug_meal_snapshot(snapshot)
+
+    png_files = list((tmp_path / "meal").glob("*.png"))
+    assert len(png_files) == 1
+    csv_text = (tmp_path / "meal" / bot_module.DEBUG_CAPTURE_CSV_NAME).read_text(encoding="utf-8")
+    assert "ИРП Армии США" in csv_text
+    assert "96" in csv_text
+    assert "71" in csv_text
+    assert "47" in csv_text
 
 
 def test_catch_screen_text_overrides_reeling_image_guess():

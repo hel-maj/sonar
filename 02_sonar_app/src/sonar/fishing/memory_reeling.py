@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+import base64
 import ctypes
+import json
 import math
+import os
 import random
 import struct
 import threading
 import time
 from ctypes import wintypes
+from datetime import datetime, timezone
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, TextIO
 
 import psutil
 import numpy as np
 
 from sonar.automation.input_controller import InputController
 from sonar.core.logging import debug_log
+from sonar.paths import LOG_DIR
 
 
 PROCESS_ALL_READ = 0x0410
@@ -65,6 +70,8 @@ FISH_DIRECTION_SOURCE_RANK = {0x304: 0, 0x68: 1, 0x300: 2, 0x70: 3}
 ALLOW_UNKNOWN_FISH_CANDIDATES = False
 DIRECTION_STALE_EPS = 0.01
 DIRECTION_STALE_SECONDS = 1.6
+FISH_DIRECTION_CONSENSUS_EPS = 0.75
+FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION = 3.0
 FISH_DIRECTION_FIELDS = (
     (0x304, 0.08, 1.0),
     (0x68, 0.0012, 1.0),
@@ -74,6 +81,25 @@ FISH_DIRECTION_FIELDS = (
     (0x64, 0.08, -1.0),
     (0x314, 0.08, -1.0),
 )
+# Confirmed fish direction fields have different numeric ranges and can
+# disagree briefly. These scales keep the vote dimensionless instead of
+# letting the tiny 0x68 field or the broad heading fields dominate.
+FISH_DIRECTION_CONSENSUS_FIELDS = (
+    (0x68, 0.0017, 1.0),
+    (0x304, 0.68, -1.0),
+    (0x300, 0.68, -1.0),
+    (0x70, 0.68, -1.0),
+    (0x80, 0.25, -1.0),
+    (0x64, 0.68, -1.0),
+    (0x314, 1.36, -1.0),
+)
+FISH_DIRECTION_FIELD_CONFIG = {offset: (eps, polarity) for offset, eps, polarity in FISH_DIRECTION_FIELDS}
+MANUAL_REELING_ENV = "SONAR_REELING_MANUAL_MODE"
+MANUAL_REELING_DUMP_INTERVAL_SECONDS = 0.02
+MANUAL_REELING_MEMORY_DUMP_INTERVAL_SECONDS = 0.25
+MANUAL_REELING_MEMORY_DUMP_BYTES = 0x400
+VK_A = 0x41
+VK_D = 0x44
 POS_X_OFF = 144
 POS_Y_OFF = 148
 POS_Z_OFF = 152
@@ -189,10 +215,12 @@ class MemoryReelingTracker:
         process_name: str = "gta5.exe",
         input_controller: InputController | None = None,
         log_callback: Callable[[str], None] | None = None,
+        manual_input_mode: bool | None = None,
     ) -> None:
         self.process_name = process_name
         self.input_controller = input_controller or InputController()
         self.log_callback = log_callback
+        self.manual_input_mode = self._manual_mode_enabled(manual_input_mode)
         self.running = False
         self.pid: int | None = None
         self.handle: int | None = None
@@ -241,6 +269,26 @@ class MemoryReelingTracker:
         self._control_stop = threading.Event()
         self._last_input_allowed_check_at = 0.0
         self._input_allowed_cached = True
+        self._manual_dump_file: TextIO | None = None
+        self._manual_dump_path = None
+        self._last_manual_dump_at = 0.0
+        self._last_manual_memory_dump_at = 0.0
+
+    def configure_manual_mode(self, enabled: bool | None) -> None:
+        self.manual_input_mode = self._manual_mode_enabled(enabled)
+        if self.running and self.manual_input_mode:
+            self._open_manual_dump()
+        elif self.running:
+            self._close_manual_dump()
+
+    @staticmethod
+    def _manual_mode_enabled(enabled: bool | None) -> bool:
+        env_value = os.environ.get(MANUAL_REELING_ENV, "").strip().lower()
+        env_enabled = env_value in {"1", "true", "yes", "on"}
+        return env_enabled if enabled is None else bool(enabled) or env_enabled
+
+    def _manual_input_enabled(self) -> bool:
+        return bool(getattr(self, "manual_input_mode", False))
 
     def _log(self, msg: str) -> None:
         if self.log_callback:
@@ -248,6 +296,7 @@ class MemoryReelingTracker:
 
     def start(self) -> None:
         self.running = True
+        self._close_manual_dump()
         self.player_addr = None
         self.fish_addr = None
         self.replay_interface = None
@@ -275,6 +324,10 @@ class MemoryReelingTracker:
         self._reset_move_stabilizer()
         self._last_input_allowed_check_at = 0.0
         self._input_allowed_cached = True
+        self._last_manual_dump_at = 0.0
+        self._last_manual_memory_dump_at = 0.0
+        if self._manual_input_enabled():
+            self._open_manual_dump()
         self._set_latest_state(ReelingState(active=True, action="starting"))
         self.pid = self._get_pid()
         if self.pid is None:
@@ -294,6 +347,7 @@ class MemoryReelingTracker:
         self.stop_control_loop()
         self._release_key("a")
         self._release_key("d")
+        self._close_manual_dump()
         if self.handle:
             ctypes.windll.kernel32.CloseHandle(self.handle)
         self.handle = None
@@ -345,14 +399,18 @@ class MemoryReelingTracker:
             try:
                 state = self.step()
                 if state.action == "memory_unavailable" and not memory_unavailable_released:
-                    self.input_controller.key_up("a")
-                    self.input_controller.key_up("d")
+                    if self._manual_input_enabled():
+                        debug_log("REEL_MANUAL_MEMORY_UNAVAILABLE release_skipped")
+                    else:
+                        self.input_controller.key_up("a")
+                        self.input_controller.key_up("d")
                     memory_unavailable_released = True
                 elif state.action != "memory_unavailable":
                     memory_unavailable_released = False
             except Exception as exc:
                 state = ReelingState(active=True, action="control_error")
                 debug_log(f"REEL_CONTROL_ERROR {exc}")
+            self._write_manual_dump(state)
             self._set_latest_state(state)
             elapsed = time.perf_counter() - started_at
             self._control_stop.wait(max(0.0, interval - elapsed))
@@ -376,7 +434,7 @@ class MemoryReelingTracker:
             return ReelingState(active=True, action="target_search", fish_addr=self.fish_addr, player_addr=self.player_addr)
 
         self._ensure_direction_tracking_target()
-        direction_item = self._read_fish_direction(
+        direction_item = self._read_control_direction(
             self.fish_addr,
             self._fish_direction_offsets,
             self._blocked_direction_offsets,
@@ -394,7 +452,7 @@ class MemoryReelingTracker:
                 )
                 if self.held_key:
                     self._release_key(self.held_key)
-                next_direction = self._read_fish_direction(
+                next_direction = self._read_control_direction(
                     self.fish_addr,
                     self._fish_direction_offsets,
                     self._blocked_direction_offsets,
@@ -416,7 +474,7 @@ class MemoryReelingTracker:
                 debug_log(
                     "REEL_STEP "
                     f"player={self._fmt_addr(self.player_addr)} fish={self._fmt_addr(self.fish_addr)} "
-                    f"direction_offset=0x{direction_offset:X} raw={raw_value:.5f} move={move_val:.3f} "
+                    f"direction_offset=0x{direction_offset:X} direction_value={raw_value:.5f} move={move_val:.3f} "
                     f"source=fish_direction_field/{stable_source}"
                 )
             return ReelingState(
@@ -585,6 +643,49 @@ class MemoryReelingTracker:
             if abs(move_val) >= eps:
                 return (DIRECTION_MOVE if move_val > 0 else -DIRECTION_MOVE), offset, value
         return None
+
+    def _read_control_direction(
+        self,
+        fish_addr: int,
+        allowed_offsets: frozenset[int] | None = None,
+        blocked_offsets: set[int] | None = None,
+    ) -> tuple[float, int, float] | None:
+        if not self._fish_confirmed_hash:
+            return self._read_fish_direction(fish_addr, allowed_offsets, blocked_offsets)
+
+        score = 0.0
+        dominant: tuple[float, int] | None = None
+        used = False
+        for offset, scale, vote_polarity in FISH_DIRECTION_CONSENSUS_FIELDS:
+            if blocked_offsets is not None and offset in blocked_offsets:
+                continue
+            config = FISH_DIRECTION_FIELD_CONFIG.get(offset)
+            if config is None:
+                continue
+            _eps, field_polarity = config
+            raw = self._f32(fish_addr + offset)
+            if raw is None or not math.isfinite(raw):
+                continue
+            if abs(raw) > FISH_DIRECTION_MAX_ABS:
+                continue
+            normalized = raw * field_polarity
+            contribution = normalized * vote_polarity / scale
+            contribution = max(
+                -FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION,
+                min(FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION, contribution),
+            )
+            score += contribution
+            used = True
+            if dominant is None or abs(contribution) > dominant[0]:
+                dominant = (abs(contribution), offset)
+
+        if not used or dominant is None:
+            return self._read_fish_direction(fish_addr, allowed_offsets, blocked_offsets)
+        if score > FISH_DIRECTION_CONSENSUS_EPS:
+            return DIRECTION_MOVE, dominant[1], score
+        if score < -FISH_DIRECTION_CONSENSUS_EPS:
+            return -DIRECTION_MOVE, dominant[1], score
+        return 0.0, dominant[1], score
 
     def _ensure_direction_tracking_target(self) -> None:
         if self._direction_watch_addr != self.fish_addr:
@@ -830,6 +931,7 @@ class MemoryReelingTracker:
     def _hold_key(self, key: str) -> bool:
         if self.held_key == key:
             return True
+        manual = self._manual_input_enabled()
         now = time.time()
         if self.held_key and self.held_key != key and now - self._last_key_switch_at < KEY_SWITCH_MIN_SECONDS:
             debug_log(
@@ -839,24 +941,35 @@ class MemoryReelingTracker:
             return False
         previous_key = self.held_key
         if self.held_key and self.held_key != key:
-            self.input_controller.key_up(self.held_key)
+            if manual:
+                debug_log(f"REEL_MANUAL_KEY_UP key={self.held_key} next={key}")
+            else:
+                self.input_controller.key_up(self.held_key)
             self.held_key = None
-            time.sleep(random.uniform(*KEY_SWITCH_DELAY_RANGE))
-        if self.input_controller.key_down(key) is False:
-            self._last_key_switch_at = time.time()
-            return False
-        debug_log(f"REEL_KEY_DOWN key={key} previous={previous_key}")
+            if not manual:
+                time.sleep(random.uniform(*KEY_SWITCH_DELAY_RANGE))
+        if manual:
+            debug_log(f"REEL_MANUAL_KEY_DOWN key={key} previous={previous_key}")
+        else:
+            if self.input_controller.key_down(key) is False:
+                self._last_key_switch_at = time.time()
+                return False
+            debug_log(f"REEL_KEY_DOWN key={key} previous={previous_key}")
         self.held_key = key
         self._last_key_switch_at = time.time()
         return True
 
     def _release_key(self, key: str) -> None:
+        manual = self._manual_input_enabled()
         if self.held_key == key:
-            self.input_controller.key_up(key)
-            debug_log(f"REEL_KEY_UP key={key}")
+            if manual:
+                debug_log(f"REEL_MANUAL_KEY_UP key={key}")
+            else:
+                self.input_controller.key_up(key)
+                debug_log(f"REEL_KEY_UP key={key}")
             self.held_key = None
             self._last_key_switch_at = time.time()
-        elif self.held_key is None:
+        elif self.held_key is None and not manual:
             self.input_controller.key_up(key)
 
     def _input_allowed(self) -> bool:
@@ -868,6 +981,166 @@ class MemoryReelingTracker:
             self._input_allowed_cached = bool(is_allowed())
             self._last_input_allowed_check_at = now
         return self._input_allowed_cached
+
+    def _open_manual_dump(self) -> None:
+        if self._manual_dump_file is not None:
+            return
+        dump_dir = LOG_DIR / "reeling_manual"
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._manual_dump_path = dump_dir / f"reeling_manual_{stamp}.jsonl"
+        self._manual_dump_file = self._manual_dump_path.open("w", encoding="utf-8")
+        self._log(f"Manual reeling mode: bot A/D input disabled, dump={self._manual_dump_path}")
+        self._write_manual_record(
+            {
+                "type": "session_start",
+                "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                "process": self.process_name,
+                "manual_input_mode": True,
+                "label_meaning": {"-1": "A", "0": "none", "1": "D", "2": "A+D"},
+            }
+        )
+
+    def _close_manual_dump(self) -> None:
+        dump_file = getattr(self, "_manual_dump_file", None)
+        if dump_file is None:
+            return
+        try:
+            self._write_manual_record(
+                {
+                    "type": "session_stop",
+                    "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "bot_key": self.held_key,
+                }
+            )
+        finally:
+            dump_file.close()
+            self._manual_dump_file = None
+
+    def _write_manual_dump(self, state: ReelingState) -> None:
+        if not self._manual_input_enabled():
+            return
+        now = time.time()
+        if now - getattr(self, "_last_manual_dump_at", 0.0) < MANUAL_REELING_DUMP_INTERVAL_SECONDS:
+            return
+        self._last_manual_dump_at = now
+        try:
+            if getattr(self, "_manual_dump_file", None) is None:
+                self._open_manual_dump()
+            actual_label, actual_a, actual_d = self._keyboard_snapshot()
+            selected_direction = self._manual_selected_direction()
+            record: dict[str, object] = {
+                "type": "sample",
+                "t": now,
+                "action": state.action,
+                "move_val": state.move_val,
+                "distance": state.distance,
+                "lateral": state.lateral,
+                "bot_key": self.held_key,
+                "bot_label": self._key_label(self.held_key),
+                "actual_label": actual_label,
+                "actual_a": actual_a,
+                "actual_d": actual_d,
+                "player_addr": self._fmt_addr(self.player_addr),
+                "fish_addr": self._fmt_addr(self.fish_addr),
+                "player_pos_offset": state.player_pos_offset,
+                "fish_pos_offset": state.fish_pos_offset,
+                "fish_confirmed_hash": self._fish_confirmed_hash,
+                "blocked_direction_offsets": [f"0x{offset:X}" for offset in sorted(self._blocked_direction_offsets)],
+                "stable_move_sign": self._stable_move_sign,
+                "pending_move_sign": self._pending_move_sign,
+                "pending_move_count": self._pending_move_count,
+                "selected_direction": selected_direction,
+                "direction_values": self._manual_direction_values(),
+                "player_pos": self._manual_player_pos(),
+                "fish_pos": self._manual_fish_pos(),
+            }
+            if now - getattr(self, "_last_manual_memory_dump_at", 0.0) >= MANUAL_REELING_MEMORY_DUMP_INTERVAL_SECONDS:
+                self._last_manual_memory_dump_at = now
+                record["memory"] = {
+                    "bytes": MANUAL_REELING_MEMORY_DUMP_BYTES,
+                    "player_b64": self._read_memory_b64(self.player_addr, MANUAL_REELING_MEMORY_DUMP_BYTES),
+                    "fish_b64": self._read_memory_b64(self.fish_addr, MANUAL_REELING_MEMORY_DUMP_BYTES),
+                }
+            self._write_manual_record(record)
+        except Exception as exc:
+            debug_log(f"REEL_MANUAL_DUMP_FAILED {exc}")
+
+    def _write_manual_record(self, record: dict[str, object]) -> None:
+        dump_file = getattr(self, "_manual_dump_file", None)
+        if dump_file is None:
+            return
+        json.dump(record, dump_file, ensure_ascii=False, separators=(",", ":"))
+        dump_file.write("\n")
+        dump_file.flush()
+
+    def _manual_selected_direction(self) -> dict[str, object] | None:
+        if self.fish_addr is None:
+            return None
+        selected = self._read_control_direction(self.fish_addr, self._fish_direction_offsets, self._blocked_direction_offsets)
+        if selected is None:
+            return None
+        move_val, offset, value = selected
+        return {"offset": f"0x{offset:X}", "score": value, "move": move_val}
+
+    def _manual_direction_values(self) -> dict[str, float | None]:
+        if self.fish_addr is None:
+            return {}
+        values: dict[str, float | None] = {}
+        for offset, _eps, polarity in FISH_DIRECTION_FIELDS:
+            raw = self._f32(self.fish_addr + offset)
+            values[f"0x{offset:X}"] = raw * polarity if raw is not None and math.isfinite(raw) else None
+        return values
+
+    def _manual_player_pos(self) -> list[float] | None:
+        if self.player_addr is None:
+            return None
+        item = self._read_pos_at_offsets(self.player_addr, POS_OFFSETS)
+        return None if item is None else [float(value) for value in item[0]]
+
+    def _manual_fish_pos(self) -> list[float] | None:
+        if self.fish_addr is None:
+            return None
+        player_pos = self._manual_player_pos()
+        item = self._read_fish_pos_relative(
+            self.fish_addr,
+            None if player_pos is None else (player_pos[0], player_pos[1], player_pos[2]),
+        )
+        return None if item is None else [float(value) for value in item[0]]
+
+    def _read_memory_b64(self, addr: int | None, size: int) -> str | None:
+        if addr is None:
+            return None
+        data = self._read(addr, size)
+        if data is None:
+            return None
+        return base64.b64encode(data).decode("ascii")
+
+    @staticmethod
+    def _key_label(key: str | None) -> int:
+        if key == "a":
+            return -1
+        if key == "d":
+            return 1
+        return 0
+
+    @staticmethod
+    def _keyboard_snapshot() -> tuple[int, bool, bool]:
+        if not hasattr(ctypes, "windll"):
+            return 0, False, False
+        try:
+            user32 = ctypes.windll.user32
+            a_down = bool(user32.GetAsyncKeyState(VK_A) & 0x8000)
+            d_down = bool(user32.GetAsyncKeyState(VK_D) & 0x8000)
+        except Exception:
+            return 0, False, False
+        if a_down and d_down:
+            return 2, True, True
+        if a_down:
+            return -1, True, False
+        if d_down:
+            return 1, False, True
+        return 0, False, False
 
     def _get_pid(self) -> int | None:
         wanted = self.process_name.lower()

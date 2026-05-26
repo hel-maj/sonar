@@ -158,6 +158,19 @@ class InputController:
         time.sleep(self.pause_after_action)
         return True
 
+    def tap_key_fast(self, key: str, duration: float = 0.003) -> bool:
+        if not self.dry_run and not self.is_input_allowed():
+            return False
+        if self.dry_run:
+            return True
+        self._send_key(key, key_up=False)
+        try:
+            if duration > 0:
+                time.sleep(duration)
+        finally:
+            self._send_key(key, key_up=True)
+        return True
+
     def hotkey(self, *keys: str) -> bool:
         pressed: list[str] = []
         for key in keys:
