@@ -32,6 +32,7 @@ WEBENGINE_WINDOW_BEFORE_BYTES = 64 * 1024
 WEBENGINE_WINDOW_AFTER_BYTES = 160 * 1024
 WEBENGINE_INDICATOR_RECORD_BYTES = 52
 WEBENGINE_INDICATOR_SCORE_MIN = 60
+WEBENGINE_MAX_MARKER_HITS_PER_REGION = 96
 WEBENGINE_MARKERS = (
     b"inventory/indicators/v2/health.svg",
     b"inventory-interface full-width full-height router-view",
@@ -313,6 +314,8 @@ class PlayerStatusMemoryDetector:
 
     def detect(self) -> PlayerStatus | None:
         profile_status = self._detect_profile_status()
+        # Webengine keeps inventory UI snapshots and can lag while the inventory is closed.
+        # Keep this fallback: it is still useful for weights and post-inventory verification.
         webengine_status = self._detect_webengine_status()
         if profile_status is not None and webengine_status is not None:
             return webengine_status.merge_missing(profile_status)
@@ -335,20 +338,22 @@ class PlayerStatusMemoryDetector:
         return PlayerStatus(food=result.get("food"), water=result.get("water"), health=result.get("health"), source="memory")
 
     def _detect_webengine_status(self) -> PlayerStatus | None:
+        cached_status: PlayerStatus | None = None
         if self._webengine_window is not None:
-            status = self._read_webengine_window(self._webengine_window)
-            if status is not None and status.has_any_value():
-                return status
-            self._webengine_window = None
+            cached_status = self._read_webengine_window(self._webengine_window)
+            if cached_status is None or not cached_status.has_any_value():
+                self._webengine_window = None
+                cached_status = None
 
         now = time.monotonic()
         if now - self._last_webengine_scan_at < WEBENGINE_SCAN_COOLDOWN_SECONDS:
-            return None
+            return cached_status
         self._last_webengine_scan_at = now
 
         best_status: PlayerStatus | None = None
         best_window: WebengineStatusWindow | None = None
         best_score = 0
+        best_hit_addr = 0
         for process in self._processes_by_name(WEBENGINE_PROCESS_NAME)[:WEBENGINE_PROCESS_SCAN_LIMIT]:
             handle = self._handle_for_process(process)
             if not handle:
@@ -360,12 +365,13 @@ class PlayerStatusMemoryDetector:
                     if status is None:
                         continue
                     score = self._status_score(status)
-                    if score > best_score:
+                    if score > best_score or (score == best_score and hit_addr > best_hit_addr):
                         best_score = score
                         best_status = status
                         best_window = window
+                        best_hit_addr = hit_addr
         self._webengine_window = best_window
-        return best_status
+        return best_status or cached_status
 
     def _read_webengine_window(self, window: WebengineStatusWindow) -> PlayerStatus | None:
         handle = self._handles.get(window.pid)
@@ -653,7 +659,7 @@ class PlayerStatusMemoryDetector:
                         if hit >= region_base:
                             hits.append(hit)
                         start = index + 1
-                        if len(hits) >= 12:
+                        if len(hits) >= WEBENGINE_MAX_MARKER_HITS_PER_REGION:
                             return tuple(dict.fromkeys(hits))
                 carry = data[-max_marker_len:]
             offset += chunk_size
