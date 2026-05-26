@@ -44,7 +44,7 @@ def test_notification_menu_edits_callback_message_and_uses_two_columns(monkeypat
 
     assert calls[0][0] == "editMessageText"
     keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
-    assert [len(row) for row in keyboard] == [2, 2, 2, 1]
+    assert [len(row) for row in keyboard] == [2, 2, 2, 1, 1]
 
 
 def test_main_menu_contains_stream_entry(monkeypatch):
@@ -62,6 +62,7 @@ def test_main_menu_contains_stream_entry(monkeypatch):
     keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
     assert any(button["callback_data"] == "menu:stream" for row in keyboard for button in row)
     assert any(button["callback_data"] == "action:tackle" for row in keyboard for button in row)
+    assert any(button["callback_data"] == "action:player_status" for row in keyboard for button in row)
 
 
 def test_app_lifecycle_notification_sends_started_before_menu():
@@ -642,3 +643,63 @@ def test_meal_notification_includes_player_status(monkeypatch):
     assert "Здоровье:</b> 47%" in text
     assert "Инвентарь:</b> 5.74 / 40 кг" in text
     assert "Рюкзак:</b> 11.74 / 20 кг" in text
+
+
+def test_player_status_menu_sends_estimated_values(monkeypatch):
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        player_status_callback=lambda: PlayerStatus(
+            food=72,
+            water=64,
+            health=98,
+            inventory_weight=39.5,
+            inventory_weight_max=40.0,
+            backpack_weight=5.0,
+            backpack_weight_max=20.0,
+            source="estimate",
+        ),
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._send_player_status(1)
+
+    text = calls[0][1]["json"]["text"]
+    assert "Показатели игрока" in text
+    assert "Еда" in text
+    assert "39.5 / 40" in text
+    assert "5 / 20" in text
+
+
+def test_low_inventory_space_notification_respects_setting(monkeypatch):
+    manager = NotificationManager(
+        settings=TelegramSettings(
+            enabled=True,
+            bot_token="token",
+            admin_ids=[1],
+            notify_inventory_space_low=True,
+        )
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_inventory_space_low(
+        0.75,
+        1.0,
+        PlayerStatus(inventory_weight=39.25, inventory_weight_max=40.0, source="estimate"),
+    )
+
+    text = calls[0][1]["json"]["text"]
+    assert "Мало места" in text
+    assert "0.75" in text
+    assert "1" in text

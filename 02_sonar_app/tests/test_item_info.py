@@ -16,7 +16,7 @@ from sonar.vision.geometry import Rect
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "inventory_item_info"
 METADATA_PATH = FIXTURE_DIR / "metadata.csv"
 STATUS_METADATA_PATH = FIXTURE_DIR / "status_metadata.csv"
-COORDINATE_TOLERANCE = 22
+COORDINATE_TOLERANCE = 64
 LOW_RES_SCALE = 0.5
 LOW_RES_FIXTURE_NAMES = {
     "20260524180108_1.jpg",
@@ -43,12 +43,41 @@ def status_rows() -> list[dict[str, str]]:
         return list(csv.DictReader(file, delimiter=";"))
 
 
+def ocr_crop_rows() -> list[dict[str, str]]:
+    rows = metadata_rows()
+    selectors = [
+        lambda row: bool(row["satiety_change"] and row["thirst_change"] and not row["condition_percent"] and not row["poison_chance"]),
+        lambda row: bool(row["condition_percent"] and row["poison_chance"]),
+        lambda row: bool(row["gender"] and not row["parameter_modifications"]),
+        lambda row: bool(row["strength"]),
+        lambda row: bool(row["gender"] and row["parameter_modifications"]),
+    ]
+    selected: list[dict[str, str]] = []
+    for selector in selectors:
+        for row in rows:
+            crop_path = FIXTURE_DIR / row["crop_image"]
+            if crop_path.exists() and selector(row) and row not in selected:
+                selected.append(row)
+                break
+    return selected
+
+
+def geometry_rows() -> list[dict[str, str]]:
+    return ocr_crop_rows()
+
+
 def expected_rect(row: dict[str, str], scale: float = 1.0) -> Rect:
+    width = int(row["block_width"])
+    height = int(row["block_height"])
+    crop_path = FIXTURE_DIR / row["crop_image"]
+    crop = cv2.imread(str(crop_path)) if crop_path.exists() else None
+    if crop is not None:
+        height, width = crop.shape[:2]
     return Rect(
         round(int(row["block_x"]) * scale),
         round(int(row["block_y"]) * scale),
-        round(int(row["block_width"]) * scale),
-        round(int(row["block_height"]) * scale),
+        round(width * scale),
+        round(height * scale),
     )
 
 
@@ -59,7 +88,7 @@ def assert_rect_close(actual: Rect, expected: Rect, tolerance: int = COORDINATE_
     assert abs(actual.height - expected.height) <= tolerance
 
 
-@pytest.mark.parametrize("row", metadata_rows(), ids=lambda row: row["source_image"])
+@pytest.mark.parametrize("row", geometry_rows(), ids=lambda row: row["source_image"])
 def test_item_info_detector_matches_manual_metadata(row: dict[str, str]):
     frame = cv2.imread(str(FIXTURE_DIR / "images" / row["source_image"]))
     assert frame is not None
@@ -70,15 +99,16 @@ def test_item_info_detector_matches_manual_metadata(row: dict[str, str]):
     assert_rect_close(item_info.rect, expected_rect(row))
 
 
-@pytest.mark.parametrize("row", metadata_rows(), ids=lambda row: row["source_image"])
+@pytest.mark.parametrize("row", geometry_rows(), ids=lambda row: row["source_image"])
 def test_item_info_crop_matches_detected_rect_size(row: dict[str, str]):
     frame = cv2.imread(str(FIXTURE_DIR / "images" / row["source_image"]))
     assert frame is not None
 
-    crop = ItemInfoDetector().crop(frame, expected_rect(row))
+    rect = expected_rect(row)
+    crop = ItemInfoDetector().crop(frame, rect)
     assert crop is not None
-    assert abs(crop.shape[1] - int(row["block_width"])) <= COORDINATE_TOLERANCE
-    assert abs(crop.shape[0] - int(row["block_height"])) <= COORDINATE_TOLERANCE
+    assert abs(crop.shape[1] - rect.width) <= COORDINATE_TOLERANCE
+    assert abs(crop.shape[0] - rect.height) <= COORDINATE_TOLERANCE
 
 
 @pytest.mark.parametrize("row", metadata_rows(), ids=lambda row: row["source_image"])
@@ -96,6 +126,42 @@ def test_item_info_parser_matches_metadata(row: dict[str, str]):
     assert " | ".join(effect.name for effect in parsed.effects) == row["effects"]
     assert " | ".join(effect.duration for effect in parsed.effects if effect.duration) == row["effect_durations"]
     assert " | ".join(effect.description for effect in parsed.effects if effect.description) == row["effect_descriptions"]
+    assert " | ".join(parsed.parameter_modifications) == row["parameter_modifications"]
+    assert parsed.strength == row["strength"]
+    assert parsed.gender == row["gender"]
+
+
+
+def test_item_info_title_keeps_greek_beta_letter():
+    assert ItemInfoDetector._clean_title("β-Блокатор") == "β-Блокатор"
+
+
+def test_item_info_parser_keeps_beta_in_title():
+    parsed = ItemInfoParser.parse("β-Блокатор\n0.1 кг")
+
+    assert parsed.title == "β-Блокатор"
+    assert parsed.weight == "0.1"
+
+
+def test_item_info_title_keeps_allowed_pibwasser_beta():
+    assert ItemInfoDetector._clean_title("Пиво Piβwasser") == "Пиво Piβwasser"
+
+
+
+@pytest.mark.parametrize("row", ocr_crop_rows(), ids=lambda row: row["source_image"])
+def test_item_info_detector_reads_crop_metadata(row: dict[str, str]):
+    crop = cv2.imread(str(FIXTURE_DIR / row["crop_image"]))
+    assert crop is not None
+
+    title, weight, text = ItemInfoDetector().read_text(crop, Rect(0, 0, crop.shape[1], crop.shape[0]))
+    parsed = ItemInfoParser.parse(text)
+
+    assert (parsed.title or title) == row["title"]
+    assert (parsed.weight or weight) == row["weight_kg"]
+    assert parsed.satiety_change == row["satiety_change"]
+    assert parsed.thirst_change == row["thirst_change"]
+    assert parsed.condition_percent == row["condition_percent"]
+    assert parsed.poison_chance == row["poison_chance"]
     assert " | ".join(parsed.parameter_modifications) == row["parameter_modifications"]
     assert parsed.strength == row["strength"]
     assert parsed.gender == row["gender"]

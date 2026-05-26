@@ -594,7 +594,7 @@ def test_debug_capture_writes_only_when_debug_enabled(tmp_path, monkeypatch):
     assert (tmp_path / "unexpected" / "metadata.csv").exists()
 
 
-def test_debug_capture_writes_meal_item_info_crop(tmp_path, monkeypatch):
+def test_debug_capture_writes_meal_item_info_crop_and_screen(tmp_path, monkeypatch):
     monkeypatch.setattr(bot_module, "DEBUG_CAPTURE_MEAL_DIR", tmp_path / "meal")
     monkeypatch.setenv("SONAR_DEBUG_CAPTURE", "1")
     bot = FishingBot.__new__(FishingBot)
@@ -604,6 +604,7 @@ def test_debug_capture_writes_meal_item_info_crop(tmp_path, monkeypatch):
         item_title="ИРП Армии США",
         item_weight="0.6",
         image=np.zeros((8, 12, 3), dtype=np.uint8),
+        screen_image=np.zeros((24, 32, 3), dtype=np.uint8),
         item_info=ItemInfo(Rect(0, 0, 12, 8), title="ИРП Армии США", satiety_change="+80", thirst_change="+75", text="ИРП Армии США"),
         player_status=PlayerStatus(food=96, water=71, health=47, source="screenshot"),
     )
@@ -611,12 +612,38 @@ def test_debug_capture_writes_meal_item_info_crop(tmp_path, monkeypatch):
     bot._save_debug_meal_snapshot(snapshot)
 
     png_files = list((tmp_path / "meal").glob("*.png"))
-    assert len(png_files) == 1
+    assert len(png_files) == 2
+    assert any(path.name.endswith("_item_info.png") for path in png_files)
+    assert any(path.name.endswith("_screen.png") for path in png_files)
     csv_text = (tmp_path / "meal" / bot_module.DEBUG_CAPTURE_CSV_NAME).read_text(encoding="utf-8")
+    assert "item_info_screenshot" in csv_text
+    assert "screen_screenshot" in csv_text
     assert "ИРП Армии США" in csv_text
     assert "96" in csv_text
     assert "71" in csv_text
     assert "47" in csv_text
+
+
+def test_debug_capture_writes_meal_screen_even_without_item_info_crop(tmp_path, monkeypatch):
+    monkeypatch.setattr(bot_module, "DEBUG_CAPTURE_MEAL_DIR", tmp_path / "meal")
+    monkeypatch.setenv("SONAR_DEBUG_CAPTURE", "1")
+    bot = FishingBot.__new__(FishingBot)
+    snapshot = MealItemSnapshot(
+        key="irp",
+        display_name="ИРП Армии США",
+        item_title="ИРП Армии США",
+        item_weight="",
+        screen_image=np.zeros((24, 32, 3), dtype=np.uint8),
+    )
+
+    bot._save_debug_meal_snapshot(snapshot)
+
+    png_files = list((tmp_path / "meal").glob("*.png"))
+    assert len(png_files) == 1
+    assert png_files[0].name.endswith("_screen.png")
+    csv_text = (tmp_path / "meal" / bot_module.DEBUG_CAPTURE_CSV_NAME).read_text(encoding="utf-8")
+    assert "screen_screenshot" in csv_text
+    assert "ИРП Армии США" in csv_text
 
 
 def test_catch_screen_text_overrides_reeling_image_guess():
@@ -876,3 +903,50 @@ def test_meal_loop_continues_after_consumption_only_when_hud_still_needs_meal():
     assert bot._do_meal_actions() is True
     assert meal_system.backpack_moves == 1
     assert bot._notifications == ["ИРП Армии США", "ИРП Армии США"]
+
+
+def test_auto_meal_off_ignores_low_player_status():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(auto_meal=False, restore_food_from=90, restore_water_from=90, restore_health_from=50)
+    bot._last_player_status = PlayerStatus(food=1, water=1, health=1, source="memory")
+    bot._last_player_status_at = time.time()
+
+    assert bot._status_indicates_needs_meal("start2") is False
+
+
+def test_status_timer_is_disabled_when_auto_meal_is_off():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(auto_meal=False)
+    bot._inventory_retry_after = time.time() - 1.0
+
+    assert bot._status_timer_needs_meal() is False
+
+
+def test_kept_fish_weight_is_added_only_for_confirmed_human_storage():
+    bot = FishingBot.__new__(FishingBot)
+    bot._player_status_estimate = bot_module.PlayerStatusEstimate()
+    bot._last_published_estimated_status = None
+    bot._last_confirmed_storage = "boat"
+    bot._publish_player_status = lambda status: None
+    bot._check_inventory_space_notification = lambda status=None: None
+    bot._player_status_estimate.update(
+        PlayerStatus(inventory_weight=10.0, inventory_weight_max=40.0, source="screenshot"),
+        trusted_core=True,
+        inventory_scan=True,
+    )
+
+    bot._add_kept_fish_weight_to_inventory_estimate(2.5)
+    assert bot.estimated_player_status().inventory_weight == 10.0
+
+    bot._last_confirmed_storage = "human"
+    bot._add_kept_fish_weight_to_inventory_estimate(2.5)
+    assert bot.estimated_player_status().inventory_weight == 12.5
+
+
+def test_removed_hp_threshold_does_not_request_meal():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(restore_food_from=30, restore_water_from=30, restore_health_from=90)
+    bot._last_player_status = PlayerStatus(food=100, water=100, health=10, source="memory")
+    bot._last_player_status_at = time.time()
+
+    assert bot._status_indicates_needs_meal("start2") is False

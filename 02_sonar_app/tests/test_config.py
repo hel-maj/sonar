@@ -91,3 +91,18 @@ def test_license_settings_serializes_only_runtime_license_state():
         "expires_at": "2026-06-19T10:00:00+00:00",
         "role": "user",
     }
+
+
+def test_telegram_settings_accepts_low_inventory_space_threshold():
+    settings = TelegramSettings.from_dict(
+        {"notify_inventory_space_low": True, "inventory_space_low_threshold_kg": "2,75"}
+    )
+
+    assert settings.notify_inventory_space_low is True
+    assert settings.inventory_space_low_threshold_kg == 2.75
+
+
+def test_telegram_settings_clamps_low_inventory_space_threshold():
+    settings = TelegramSettings.from_dict({"inventory_space_low_threshold_kg": "0,5"})
+
+    assert settings.inventory_space_low_threshold_kg == 1.0
