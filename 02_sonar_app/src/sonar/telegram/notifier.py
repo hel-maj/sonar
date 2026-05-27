@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 import requests
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 from sonar.config.models import TelegramSettings
 from sonar.fishing.item_info import ItemInfo
@@ -63,6 +63,7 @@ class NotificationManager:
     stream_set_quality_callback: Callable[[str], bool] | None = None
     stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None
     stream_set_snapshot_mode_callback: Callable[[bool], bool] | None = None
+    player_status_scan_callback: Callable[[], tuple[bool, str]] | None = None
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
     _poll_thread: threading.Thread | None = field(default=None, init=False)
     _last_update_id: int | None = field(default=None, init=False)
@@ -109,6 +110,7 @@ class NotificationManager:
         stream_set_quality_callback: Callable[[str], bool] | None = None,
         stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None,
         stream_set_snapshot_mode_callback: Callable[[bool], bool] | None = None,
+        player_status_scan_callback: Callable[[], tuple[bool, str]] | None = None,
     ) -> None:
         self.settings = settings
         self.start_callback = start_callback
@@ -132,6 +134,7 @@ class NotificationManager:
         self.stream_set_quality_callback = stream_set_quality_callback
         self.stream_set_chat_zoom_callback = stream_set_chat_zoom_callback
         self.stream_set_snapshot_mode_callback = stream_set_snapshot_mode_callback
+        self.player_status_scan_callback = player_status_scan_callback
         if self.settings.enabled and self.settings.bot_token:
             self.start_polling()
         else:
@@ -164,10 +167,19 @@ class NotificationManager:
         xp_total: int | None,
         totals: SessionTotals,
         image_bytes: bytes | None = None,
+        released: bool | None = None,
     ) -> None:
         if not self.settings.notify_catch:
             return
-        message = self._format_catch_message(fish_name, weight_kg, quality_text, xp_current, xp_total, totals)
+        message = self._format_catch_message(
+            fish_name,
+            weight_kg,
+            quality_text,
+            xp_current,
+            xp_total,
+            totals,
+            released=released,
+        )
         if image_bytes is not None:
             image_bytes = self._decorate_catch_photo(image_bytes)
         if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message):
@@ -339,6 +351,8 @@ class NotificationManager:
                 self._send_tackle(chat_id)
             elif text == "/status":
                 self._send_player_status(chat_id)
+            elif text == "/scan_status":
+                self._request_player_status_scan(chat_id)
             elif text == "/screen":
                 self._send_screen(chat_id)
             elif text == "/shutdown_pc":
@@ -392,6 +406,8 @@ class NotificationManager:
                 self._send_tackle(chat_id)
             elif data == "action:player_status":
                 self._send_player_status(chat_id)
+            elif data == "action:scan_player_status":
+                self._request_player_status_scan(chat_id)
             elif data == "action:shutdown_pc":
                 self._shutdown_pc(chat_id)
             elif data == "action:shutdown_game":
@@ -411,6 +427,9 @@ class NotificationManager:
             [
                 {"text": "🎒 Снаряжение", "callback_data": "action:tackle"},
                 {"text": "📊 Показатели", "callback_data": "action:player_status"},
+            ],
+            [
+                {"text": "🔎 Просканировать показатели", "callback_data": "action:scan_player_status"},
             ],
             [
                 {"text": start_stop_text, "callback_data": "action:start_stop"},
@@ -553,6 +572,14 @@ class NotificationManager:
         if len(lines) == 2:
             lines.append("Данных пока нет.")
         self.send_message("\n".join(lines), chat_id=chat_id)
+
+    def _request_player_status_scan(self, chat_id: int) -> None:
+        if self.player_status_scan_callback is None:
+            self.send_message("🔎 Сканирование показателей недоступно", chat_id=chat_id)
+            return
+        ok, message = self.player_status_scan_callback()
+        prefix = "✅" if ok else "⚠️"
+        self.send_message(f"{prefix} {message}", chat_id=chat_id)
 
     def _send_tackle(self, chat_id: int) -> None:
         items = self.tackle_callback() if self.tackle_callback else ()
@@ -863,15 +890,24 @@ class NotificationManager:
                 width, height = original.size
                 if width <= 0 or height <= 0:
                     return image_bytes
+                crop_x = min(width // 3, max(0, int(round(width * 0.02))))
+                if crop_x > 0 and width - crop_x * 2 > 1:
+                    original = original.crop((crop_x, 0, width - crop_x, height))
+                    width, height = original.size
                 canvas_width = max(width, int(round(width * 1.35)))
                 canvas_height = max(height, int(round(height * 1.35)))
-                sample = original.convert("RGB").resize((24, 24), Image.Resampling.BILINEAR)
+                sample_source = Image.new("RGB", original.size, (34, 48, 64))
+                sample_source.paste(original.convert("RGB"), mask=original.getchannel("A"))
+                sample = sample_source.resize((24, 24), Image.Resampling.BILINEAR)
                 colors = list(sample.getdata())
                 random.SystemRandom().shuffle(colors)
                 background_seed = Image.new("RGB", sample.size)
                 background_seed.putdata(colors)
                 background = background_seed.resize((canvas_width, canvas_height), Image.Resampling.BICUBIC)
                 background = background.filter(ImageFilter.GaussianBlur(radius=max(18, max(canvas_width, canvas_height) // 14)))
+                background = ImageEnhance.Color(background).enhance(1.65)
+                background = ImageEnhance.Contrast(background).enhance(1.18)
+                background = ImageEnhance.Brightness(background).enhance(1.06)
                 max_foreground_width = int(canvas_width * 0.82)
                 max_foreground_height = int(canvas_height * 0.82)
                 foreground = original.copy()
@@ -967,13 +1003,18 @@ class NotificationManager:
         xp_current: int | None,
         xp_total: int | None,
         totals: SessionTotals,
+        *,
+        released: bool | None = None,
     ) -> str:
         trophy = quality_text and any(marker in quality_text.lower() for marker in ("троф", "рекорд"))
         lines = []
         if trophy:
-            lines.append("🏆 <b>Трофейный улов!</b>")
+            lines.append(f"🏆 <b>{_h(quality_text)}!</b>")
             lines.append("")
         lines.append(f"🐟 <b>{_h(fish_name)}</b> — {_h(format_weight(weight_kg or 0.0))}")
+        if released is not None:
+            status = "отпущена" if released else "оставлена"
+            lines.append(f"🌊 <b>Статус:</b> {_h(status)}")
         lines.append("")
         lines.append(f"📦 <b>Всего:</b> {_h(format_weight(totals.caught_kg))} · {totals.caught_count} выловов")
         lines.append(f"💰 <b>Доход:</b> от {_h(format_money(totals.earned_min))}")
