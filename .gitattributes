@@ -1,9 +1,7 @@
-*.gbf filter=lfs diff=lfs merge=lfs -text
-01_reverse_engineering/reverse_analysis/deep_static/ghidra_exports/ghidra_symbols.csv filter=lfs diff=lfs merge=lfs -text
-
 * text=auto
 
 *.py text eol=lf
+*.ps1 text eol=crlf
 *.sh text eol=lf
 *.md text eol=lf
 *.yml text eol=lf
@@ -11,3 +9,9 @@
 *.json text eol=lf
 *.js text eol=lf
 *.mjs text eol=lf
+
+*.gbf filter=lfs diff=lfs merge=lfs -text
+01_reverse_engineering/reverse_analysis/deep_static/ghidra_exports/ghidra_symbols.csv filter=lfs diff=lfs merge=lfs -text
+02_sonar_app/wheelhouse/**/*.whl filter=lfs diff=lfs merge=lfs -text
+02_sonar_app/src/sonar/resources/tesseract/windows/** filter=lfs diff=lfs merge=lfs -text
+02_sonar_app/src/sonar/resources/tessdata/*.traineddata filter=lfs diff=lfs merge=lfs -text

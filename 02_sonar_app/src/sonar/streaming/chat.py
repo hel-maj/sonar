@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,7 +12,7 @@ from PIL import Image
 
 from sonar.automation.input_controller import InputController
 from sonar.automation.window import WindowActivator
-from sonar.paths import RESOURCE_DIR
+from sonar.ocr import configure_tesseract, tessdata_config
 from sonar.vision.capture import WindowCapture
 from sonar.vision.geometry import Rect
 from sonar.vision.matching import ensure_bgr
@@ -353,11 +352,9 @@ class MajesticChatDetector:
         scaled = cv2.resize(crop, None, fx=4.0, fy=4.0, interpolation=cv2.INTER_CUBIC)
         gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        tessdata_dir = RESOURCE_DIR / "tessdata"
         config = "--psm 7"
         lang = "rus"
-        if (tessdata_dir / "rus.traineddata").exists():
-            config += f" --tessdata-dir {tessdata_dir.as_posix()}"
+        config = tessdata_config(config, lang)
         for candidate in (Image.fromarray(gray), Image.fromarray(thresh)):
             try:
                 text = pytesseract.image_to_string(candidate, lang=lang, config=config)
@@ -415,15 +412,7 @@ class MajesticChatDetector:
 
     @staticmethod
     def _configure_tesseract(pytesseract_module) -> None:
-        if shutil.which("tesseract"):
-            return
-        for path in (
-            Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
-            Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
-        ):
-            if path.exists():
-                pytesseract_module.pytesseract.tesseract_cmd = str(path)
-                return
+        configure_tesseract(pytesseract_module)
 
 
 class MajesticChatController:
