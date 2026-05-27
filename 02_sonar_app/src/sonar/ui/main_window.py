@@ -572,9 +572,12 @@ class MainWindow(QMainWindow):
         title.setProperty("sectionTitle", True)
         self.player_status_source_label = QLabel("Ожидание данных")
         self.player_status_source_label.setProperty("muted", True)
+        self.player_status_scan_button = ActionButton("Просканировать показатели", icon=ui_icon("pulse.svg"), size="s")
+        self.player_status_scan_button.clicked.connect(self.request_player_status_scan)
         title_row.addWidget(title)
         title_row.addStretch(1)
         title_row.addWidget(self.player_status_source_label)
+        title_row.addWidget(self.player_status_scan_button)
         layout.addLayout(title_row)
         metrics = QHBoxLayout()
         metrics.setSpacing(12)
@@ -2034,6 +2037,12 @@ class MainWindow(QMainWindow):
                 self._player_status_refreshing = False
 
         threading.Thread(target=worker, name="sonar-player-status-refresh", daemon=True).start()
+
+    def request_player_status_scan(self) -> None:
+        ok, message = self.bot.request_player_status_scan()
+        self.log_bridge.message.emit(message)
+        if hasattr(self, "player_status_source_label"):
+            self.player_status_source_label.setText("Сканирование запланировано" if ok else message)
 
     def _should_use_player_status_screenshot_fallback(self) -> bool:
         status = getattr(self, "_latest_player_status", None)

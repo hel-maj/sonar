@@ -63,6 +63,7 @@ def test_main_menu_contains_stream_entry(monkeypatch):
     assert any(button["callback_data"] == "menu:stream" for row in keyboard for button in row)
     assert any(button["callback_data"] == "action:tackle" for row in keyboard for button in row)
     assert any(button["callback_data"] == "action:player_status" for row in keyboard for button in row)
+    assert any(button["callback_data"] == "action:scan_player_status" for row in keyboard for button in row)
 
 
 def test_app_lifecycle_notification_sends_started_before_menu():
@@ -489,6 +490,32 @@ def test_caught_fish_notification_sends_photo_with_caption(monkeypatch):
     assert "Рустер" in photo_call[1]["data"]["caption"]
 
 
+def test_caught_fish_notification_includes_release_status_and_real_quality_title(monkeypatch):
+    calls = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_caught_fish(
+        "Рустер",
+        3.0,
+        "Рекордный улов",
+        10,
+        None,
+        SessionTotals(0, 1, 3.0, 1, 3.0, 100, 100),
+        released=True,
+    )
+
+    text = calls[0][1]["json"]["text"]
+    assert "Рекордный улов" in text
+    assert "Трофейный" not in text
+    assert "Статус:</b> отпущена" in text
+
+
 def test_tackle_menu_sends_last_scan_photo_with_counts(monkeypatch):
     calls = []
     manager = NotificationManager(
@@ -674,6 +701,34 @@ def test_player_status_menu_sends_estimated_values(monkeypatch):
     assert "Еда" in text
     assert "39.5 / 40" in text
     assert "5 / 20" in text
+
+
+def test_player_status_scan_button_requests_inventory_scan(monkeypatch):
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        player_status_scan_callback=lambda: (True, "Сканирование показателей добавлено в очередь"),
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._handle_update(
+        {
+            "update_id": 1,
+            "callback_query": {
+                "id": "cb",
+                "data": "action:scan_player_status",
+                "message": {"chat": {"id": 1}, "message_id": 10},
+            },
+        }
+    )
+
+    sent_text = [call[1]["json"]["text"] for call in calls if call[0] == "sendMessage"][-1]
+    assert "Сканирование показателей добавлено в очередь" in sent_text
 
 
 def test_low_inventory_space_notification_respects_setting(monkeypatch):

@@ -8,7 +8,7 @@ import numpy as np
 
 import sonar.fishing.bot as bot_module
 from sonar.config.models import FishingSettings
-from sonar.core.state import BotState
+from sonar.core.state import BotPhase, BotState
 from sonar.fishing.bot import FishingBot
 from sonar.fishing.item_info import ItemInfo
 from sonar.fishing.meal_system import MealItemMatch, MealItemSnapshot
@@ -246,6 +246,44 @@ def test_player_status_threshold_is_ignored_during_reeling():
     bot._last_player_status_at = time.time()
 
     assert bot._status_indicates_needs_meal("ad") is False
+
+
+def test_player_status_scan_request_is_queued_during_reeling():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True, phase=BotPhase.REELING, detected_stage="Вываживание")
+    bot._last_triggers = {"ad": 1.0}
+    bot._last_catch_result = None
+    bot._log_messages = []
+    bot._log = bot._log_messages.append
+
+    ok, message = bot.request_player_status_scan()
+
+    assert ok is True
+    assert "после вываживания" in message
+    assert bot._player_status_scan_requested is True
+
+
+def test_player_status_scan_request_waits_while_stage_is_reeling():
+    bot = FishingBot.__new__(FishingBot)
+    bot._player_status_scan_requested = True
+
+    assert bot._handle_player_status_scan_request("ad") is False
+    assert bot._player_status_scan_requested is True
+
+
+def test_player_status_scan_request_is_queued_when_running():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True, phase=BotPhase.IDLE, detected_stage="Ожидание поклёвки")
+    bot._last_triggers = {"start2": 1.0}
+    bot._last_catch_result = None
+    bot._log_messages = []
+    bot._log = bot._log_messages.append
+
+    ok, message = bot.request_player_status_scan()
+
+    assert ok is True
+    assert "очередь" in message
+    assert bot._player_status_scan_requested is True
 
 
 def make_chat_exit_bot(trigger_steps: list[dict[str, DummyMatch]], *, running: bool = False):
@@ -506,6 +544,25 @@ def test_empty_tackle_scan_is_retried_instead_of_missing_rod_stop():
     assert scan.count_for("rod") == 1
 
 
+def test_active_stage_tackle_scan_stores_waiting_stage_counts():
+    class Detector:
+        def detect(self, frame):
+            return make_tackle_scan({"bait": 7})
+
+    bot = FishingBot.__new__(FishingBot)
+    stored: list[TackleScanResult] = []
+    bot.tackle_detector = Detector()
+    bot.capture = DummyCapture()
+    bot._last_active_tackle_scan_at = {}
+    bot._store_tackle_scan = lambda scan, frame: stored.append(scan)
+    bot._log = lambda message: None
+
+    bot._scan_tackle_for_active_stage("start2", object())
+
+    assert stored
+    assert stored[0].count_for("bait") == 7
+
+
 def test_tackle_depletion_is_rechecked_before_stop():
     bot = FishingBot.__new__(FishingBot)
     scans = iter([make_tackle_scan({"rod": 0}), make_tackle_scan({})])
@@ -592,6 +649,23 @@ def test_debug_capture_writes_only_when_debug_enabled(tmp_path, monkeypatch):
     assert len(list((tmp_path / "all").glob("*.png"))) == 1
     assert (tmp_path / "all" / "metadata.csv").exists()
     assert (tmp_path / "unexpected" / "metadata.csv").exists()
+
+
+def test_reeling_loss_debug_log_is_saved_in_debug_mode(tmp_path, monkeypatch):
+    bot = FishingBot.__new__(FishingBot)
+    logs: list[str] = []
+    bot._log = logs.append
+    monkeypatch.setenv("SONAR_DEBUG_MODE", "1")
+    monkeypatch.setattr(bot_module, "DEBUG_CAPTURE_REELING_LOSS_DIR", tmp_path / "reeling")
+
+    records = bot._new_reeling_debug_log()
+    bot._append_reeling_debug_log(records, "state", action="target_search")
+    path = bot._save_reeling_debug_log(records, "ad_stage_ended")
+
+    assert path is not None
+    assert path.exists()
+    assert "target_search" in path.read_text(encoding="utf-8")
+    assert any("debug-лог срыва" in message for message in logs)
 
 
 def test_debug_capture_writes_meal_item_info_crop_and_screen(tmp_path, monkeypatch):

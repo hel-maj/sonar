@@ -74,6 +74,10 @@ def make_tracker(
     tracker._fish_confirmed_hash = entity_hash == FISH_MODEL_HASH
     tracker._direction_watch_addr = None
     tracker._direction_watch = {}
+    tracker._direction_alignment = {}
+    tracker._dead_direction_addr = None
+    tracker._dead_direction_since = 0.0
+    tracker._dead_direction_count = 0
     tracker._blocked_direction_offsets = set()
     tracker._last_lateral = None
     tracker._last_lateral_at = None
@@ -294,6 +298,129 @@ def test_confirmed_fish_uses_direction_consensus_when_primary_field_disagrees() 
     assert state.action == "hold_d"
     assert state.move_val == 1.0
     assert tracker.held_key == "d"
+
+
+def test_confirmed_fish_adapts_heading_fields_with_direct_polarity() -> None:
+    tracker = make_tracker(
+        entity_hash=FISH_MODEL_HASH,
+        direction=None,
+        extra_directions={
+            0x68: 0.0008,
+            0x300: 0.6,
+            0x70: 0.6,
+            0x80: -0.3,
+            0x64: -0.6,
+        },
+    )
+    tracker._direction_watch_addr = FISH
+    for offset in (0x300, 0x70, 0x80, 0x64):
+        tracker._direction_alignment[offset] = reeling_module.FISH_DIRECTION_ALIGNMENT_THRESHOLD
+
+    state = tracker.step()
+
+    assert state.action == "hold_d"
+    assert state.move_val == 1.0
+
+
+def test_confirmed_fish_20260527_direct_heading_overrides_wrong_anchor_sample() -> None:
+    tracker = make_tracker(
+        entity_hash=FISH_MODEL_HASH,
+        direction=None,
+        extra_directions={
+            0x304: -0.07647757977247238,
+            0x68: -0.0035606950987130404,
+            0x300: 0.82224041223526,
+            0x70: 0.810722291469574,
+            0x80: -0.5747964382171631,
+            0x64: -0.9938056468963623,
+            0x314: -0.5996294617652893,
+        },
+    )
+    tracker._direction_watch_addr = FISH
+    for offset in (0x300, 0x70, 0x80, 0x64, 0x314):
+        tracker._direction_alignment[offset] = reeling_module.FISH_DIRECTION_ALIGNMENT_THRESHOLD
+
+    state = tracker.step()
+
+    assert state.action == "hold_d"
+    assert state.move_val == 1.0
+
+
+def test_confirmed_fish_preserves_inverse_heading_polarity_after_learning() -> None:
+    tracker = make_tracker(
+        entity_hash=FISH_MODEL_HASH,
+        direction=None,
+        extra_directions={
+            0x68: 0.0008,
+            0x300: -0.6,
+            0x70: -0.6,
+            0x80: 0.3,
+            0x64: 0.6,
+        },
+    )
+    tracker._direction_watch_addr = FISH
+    for offset in (0x300, 0x70, 0x80, 0x64):
+        tracker._direction_alignment[offset] = -reeling_module.FISH_DIRECTION_ALIGNMENT_THRESHOLD
+
+    state = tracker.step()
+
+    assert state.action == "hold_d"
+    assert state.move_val == 1.0
+
+
+def test_confirmed_fish_rejects_dead_zero_anchor_from_20260527_manual_log() -> None:
+    tracker = make_tracker(
+        entity_hash=FISH_MODEL_HASH,
+        direction=None,
+        fish_pos=(3.0001258850097656, 4.007851600646973, 0.0),
+        player_pos=(7.403059862554073e-05, 6.221765181602188e-43, 0.0),
+        extra_directions={
+            0x68: 0.0,
+            0x304: -0.2592464089393616,
+            0x300: 0.7563496828079224,
+            0x70: 0.7549276947975159,
+            0x80: -0.5309227108955383,
+            0x64: -0.9229272603988647,
+            0x314: -0.5696833729743958,
+        },
+    )
+    tracker._direction_watch_addr = FISH
+    tracker._dead_direction_addr = FISH
+    tracker._dead_direction_since = time.time() - reeling_module.CONFIRMED_DEAD_DIRECTION_SECONDS - 0.1
+    tracker._dead_direction_count = reeling_module.CONFIRMED_DEAD_DIRECTION_COUNT - 1
+
+    state = tracker.step()
+
+    assert state.action == "target_search"
+    assert tracker.fish_addr is None
+    assert FISH in tracker._rejected_fish_addrs
+    assert any("confirmed direction unavailable" in message for message in tracker.log_messages)
+
+
+def test_confirmed_fish_does_not_reject_zero_anchor_after_alignment_is_learned() -> None:
+    tracker = make_tracker(
+        entity_hash=FISH_MODEL_HASH,
+        direction=None,
+        extra_directions={
+            0x68: 0.0,
+            0x300: 0.7563496828079224,
+            0x70: 0.7549276947975159,
+            0x80: -0.5309227108955383,
+            0x64: -0.9229272603988647,
+        },
+    )
+    tracker._direction_watch_addr = FISH
+    for offset in (0x300, 0x70, 0x80, 0x64):
+        tracker._direction_alignment[offset] = reeling_module.FISH_DIRECTION_ALIGNMENT_THRESHOLD
+    tracker._dead_direction_addr = FISH
+    tracker._dead_direction_since = time.time() - reeling_module.CONFIRMED_DEAD_DIRECTION_SECONDS - 0.1
+    tracker._dead_direction_count = reeling_module.CONFIRMED_DEAD_DIRECTION_COUNT - 1
+
+    state = tracker.step()
+
+    assert state.action == "hold_d"
+    assert state.move_val == 1.0
+    assert tracker.fish_addr == FISH
 
 
 def test_confirmed_hash_local_position_without_direction_keeps_target() -> None:

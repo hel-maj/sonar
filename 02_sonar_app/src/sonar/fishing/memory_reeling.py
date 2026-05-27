@@ -70,8 +70,15 @@ FISH_DIRECTION_SOURCE_RANK = {0x304: 0, 0x68: 1, 0x300: 2, 0x70: 3}
 ALLOW_UNKNOWN_FISH_CANDIDATES = False
 DIRECTION_STALE_EPS = 0.01
 DIRECTION_STALE_SECONDS = 1.6
-FISH_DIRECTION_CONSENSUS_EPS = 0.75
+FISH_DIRECTION_CONSENSUS_EPS = 1.5
 FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION = 3.0
+FISH_DIRECTION_ALIGNMENT_THRESHOLD = 12
+FISH_DIRECTION_ANCHOR_OFFSET = 0x68
+FISH_DIRECTION_ANCHOR_SCALE = 0.0017
+FISH_DIRECTION_ANCHOR_WEIGHT = 1.5
+CONFIRMED_DEAD_DIRECTION_EPS = 0.05
+CONFIRMED_DEAD_DIRECTION_SECONDS = 1.0
+CONFIRMED_DEAD_DIRECTION_COUNT = 6
 FISH_DIRECTION_FIELDS = (
     (0x304, 0.08, 1.0),
     (0x68, 0.0012, 1.0),
@@ -81,17 +88,16 @@ FISH_DIRECTION_FIELDS = (
     (0x64, 0.08, -1.0),
     (0x314, 0.08, -1.0),
 )
-# Confirmed fish direction fields have different numeric ranges and can
-# disagree briefly. These scales keep the vote dimensionless instead of
-# letting the tiny 0x68 field or the broad heading fields dominate.
-FISH_DIRECTION_CONSENSUS_FIELDS = (
-    (0x68, 0.0017, 1.0),
-    (0x304, 0.68, -1.0),
-    (0x300, 0.68, -1.0),
-    (0x70, 0.68, -1.0),
-    (0x80, 0.25, -1.0),
-    (0x64, 0.68, -1.0),
-    (0x314, 1.36, -1.0),
+# Confirmed fish direction fields have different numeric ranges and their
+# polarity can change with the fishing local frame. 0x68 is the anchor; the
+# broader heading fields learn same/opposite polarity relative to it per fish.
+FISH_DIRECTION_ADAPTIVE_FIELDS = (
+    (0x304, 0.68, 0.4),
+    (0x300, 0.68, 0.75),
+    (0x70, 0.68, 0.75),
+    (0x80, 0.25, 0.9),
+    (0x64, 0.68, 0.75),
+    (0x314, 1.36, 0.25),
 )
 FISH_DIRECTION_FIELD_CONFIG = {offset: (eps, polarity) for offset, eps, polarity in FISH_DIRECTION_FIELDS}
 MANUAL_REELING_ENV = "SONAR_REELING_MANUAL_MODE"
@@ -252,6 +258,10 @@ class MemoryReelingTracker:
         self._fish_confirmed_hash = False
         self._direction_watch_addr: int | None = None
         self._direction_watch: dict[int, tuple[float, float]] = {}
+        self._direction_alignment: dict[int, int] = {}
+        self._dead_direction_addr: int | None = None
+        self._dead_direction_since = 0.0
+        self._dead_direction_count = 0
         self._blocked_direction_offsets: set[int] = set()
         self._last_lateral: float | None = None
         self._last_lateral_at: float | None = None
@@ -317,6 +327,7 @@ class MemoryReelingTracker:
         self._fish_direction_offsets = FISH_PRIMARY_DIRECTION_OFFSETS
         self._fish_confirmed_hash = False
         self._reset_direction_tracking()
+        self._reset_dead_direction_tracking()
         self._unreadable_addr = None
         self._unreadable_since = 0.0
         self._unreadable_count = 0
@@ -434,14 +445,17 @@ class MemoryReelingTracker:
             return ReelingState(active=True, action="target_search", fish_addr=self.fish_addr, player_addr=self.player_addr)
 
         self._ensure_direction_tracking_target()
+        now = time.time()
         direction_item = self._read_control_direction(
             self.fish_addr,
             self._fish_direction_offsets,
             self._blocked_direction_offsets,
         )
-        now = time.time()
         if direction_item is not None:
             move_val, direction_offset, raw_value = direction_item
+            if self._is_confirmed_dead_direction(now, move_val, direction_offset, raw_value):
+                self._reject_current_fish("confirmed direction unavailable")
+                return ReelingState(active=True, action="target_search", player_addr=self.player_addr)
             if not self._fish_confirmed_hash and self._is_stale_direction_signal(now, direction_offset, raw_value):
                 self._blocked_direction_offsets.add(direction_offset)
                 debug_log(
@@ -649,35 +663,60 @@ class MemoryReelingTracker:
         fish_addr: int,
         allowed_offsets: frozenset[int] | None = None,
         blocked_offsets: set[int] | None = None,
+        update_alignment: bool = True,
     ) -> tuple[float, int, float] | None:
         if not self._fish_confirmed_hash:
             return self._read_fish_direction(fish_addr, allowed_offsets, blocked_offsets)
 
+        values: dict[int, float] = {}
+        anchor_sign = 0
+        for offset in (FISH_DIRECTION_ANCHOR_OFFSET, *(item[0] for item in FISH_DIRECTION_ADAPTIVE_FIELDS)):
+            if blocked_offsets is not None and offset in blocked_offsets:
+                continue
+            normalized = self._read_normalized_direction_value(fish_addr, offset)
+            if normalized is None:
+                continue
+            values[offset] = normalized
+            if offset == FISH_DIRECTION_ANCHOR_OFFSET:
+                anchor_sign = self._direction_value_sign(normalized, FISH_DIRECTION_FIELD_CONFIG[offset][0])
+
         score = 0.0
         dominant: tuple[float, int] | None = None
         used = False
-        for offset, scale, vote_polarity in FISH_DIRECTION_CONSENSUS_FIELDS:
-            if blocked_offsets is not None and offset in blocked_offsets:
-                continue
-            config = FISH_DIRECTION_FIELD_CONFIG.get(offset)
-            if config is None:
-                continue
-            _eps, field_polarity = config
-            raw = self._f32(fish_addr + offset)
-            if raw is None or not math.isfinite(raw):
-                continue
-            if abs(raw) > FISH_DIRECTION_MAX_ABS:
-                continue
-            normalized = raw * field_polarity
-            contribution = normalized * vote_polarity / scale
-            contribution = max(
-                -FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION,
-                min(FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION, contribution),
+        anchor_value = values.get(FISH_DIRECTION_ANCHOR_OFFSET)
+        if anchor_value is not None:
+            contribution = self._clamp_direction_contribution(
+                anchor_value * FISH_DIRECTION_ANCHOR_WEIGHT / FISH_DIRECTION_ANCHOR_SCALE
             )
+            score += contribution
+            used = True
+            dominant = (abs(contribution), FISH_DIRECTION_ANCHOR_OFFSET)
+
+        for offset, scale, weight in FISH_DIRECTION_ADAPTIVE_FIELDS:
+            normalized = values.get(offset)
+            if normalized is None:
+                continue
+            alignment = self._direction_alignment.get(offset, 0)
+            if alignment >= FISH_DIRECTION_ALIGNMENT_THRESHOLD:
+                relative_polarity = 1
+            elif alignment <= -FISH_DIRECTION_ALIGNMENT_THRESHOLD:
+                relative_polarity = -1
+            else:
+                field_sign = self._direction_value_sign(normalized, FISH_DIRECTION_FIELD_CONFIG[offset][0])
+                relative_polarity = 1 if anchor_sign and field_sign == anchor_sign else 0
+            if relative_polarity == 0:
+                continue
+            contribution = self._clamp_direction_contribution(normalized * relative_polarity * weight / scale)
             score += contribution
             used = True
             if dominant is None or abs(contribution) > dominant[0]:
                 dominant = (abs(contribution), offset)
+
+        if update_alignment and anchor_sign:
+            for offset, _scale, _weight in FISH_DIRECTION_ADAPTIVE_FIELDS:
+                field_sign = self._direction_value_sign(values.get(offset), FISH_DIRECTION_FIELD_CONFIG[offset][0])
+                if field_sign:
+                    self._direction_alignment[offset] = self._direction_alignment.get(offset, 0) + anchor_sign * field_sign
 
         if not used or dominant is None:
             return self._read_fish_direction(fish_addr, allowed_offsets, blocked_offsets)
@@ -687,6 +726,67 @@ class MemoryReelingTracker:
             return -DIRECTION_MOVE, dominant[1], score
         return 0.0, dominant[1], score
 
+    def _read_normalized_direction_value(self, fish_addr: int, offset: int) -> float | None:
+        config = FISH_DIRECTION_FIELD_CONFIG.get(offset)
+        if config is None:
+            return None
+        _eps, field_polarity = config
+        raw = self._f32(fish_addr + offset)
+        if raw is None or not math.isfinite(raw):
+            return None
+        if abs(raw) > FISH_DIRECTION_MAX_ABS:
+            return None
+        return raw * field_polarity
+
+    @staticmethod
+    def _direction_value_sign(value: float | None, eps: float) -> int:
+        if value is None:
+            return 0
+        if value > eps:
+            return 1
+        if value < -eps:
+            return -1
+        return 0
+
+    @staticmethod
+    def _clamp_direction_contribution(value: float) -> float:
+        return max(
+            -FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION,
+            min(FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION, value),
+        )
+
+    def _is_confirmed_dead_direction(self, now: float, move_val: float, direction_offset: int, score: float) -> bool:
+        if not self._fish_confirmed_hash or self.fish_addr is None:
+            self._reset_dead_direction_tracking()
+            return False
+        has_learned_alignment = any(
+            abs(value) >= FISH_DIRECTION_ALIGNMENT_THRESHOLD for value in self._direction_alignment.values()
+        )
+        is_dead_center = (
+            direction_offset == FISH_DIRECTION_ANCHOR_OFFSET
+            and abs(score) <= CONFIRMED_DEAD_DIRECTION_EPS
+            and abs(move_val) <= DIRECTION_EPS
+            and not has_learned_alignment
+        )
+        if not is_dead_center:
+            self._reset_dead_direction_tracking()
+            return False
+        if self._dead_direction_addr != self.fish_addr:
+            self._dead_direction_addr = self.fish_addr
+            self._dead_direction_since = now
+            self._dead_direction_count = 1
+            return False
+        self._dead_direction_count += 1
+        return (
+            self._dead_direction_count >= CONFIRMED_DEAD_DIRECTION_COUNT
+            and now - self._dead_direction_since >= CONFIRMED_DEAD_DIRECTION_SECONDS
+        )
+
+    def _reset_dead_direction_tracking(self) -> None:
+        self._dead_direction_addr = None
+        self._dead_direction_since = 0.0
+        self._dead_direction_count = 0
+
     def _ensure_direction_tracking_target(self) -> None:
         if self._direction_watch_addr != self.fish_addr:
             self._reset_direction_tracking(self.fish_addr)
@@ -694,6 +794,8 @@ class MemoryReelingTracker:
     def _reset_direction_tracking(self, fish_addr: int | None = None) -> None:
         self._direction_watch_addr = fish_addr
         self._direction_watch = {}
+        self._direction_alignment = {offset: 0 for offset, _scale, _weight in FISH_DIRECTION_ADAPTIVE_FIELDS}
+        self._reset_dead_direction_tracking()
         self._blocked_direction_offsets = set()
 
     def _is_stale_direction_signal(self, now: float, offset: int, raw_value: float) -> bool:
@@ -912,6 +1014,7 @@ class MemoryReelingTracker:
         self._fish_direction_offsets = FISH_PRIMARY_DIRECTION_OFFSETS
         self._fish_confirmed_hash = False
         self._reset_direction_tracking()
+        self._reset_dead_direction_tracking()
         self.last_fish_xy = None
         self.last_fish_pos = None
         self.last_fish_pos_offset = None
@@ -1077,7 +1180,12 @@ class MemoryReelingTracker:
     def _manual_selected_direction(self) -> dict[str, object] | None:
         if self.fish_addr is None:
             return None
-        selected = self._read_control_direction(self.fish_addr, self._fish_direction_offsets, self._blocked_direction_offsets)
+        selected = self._read_control_direction(
+            self.fish_addr,
+            self._fish_direction_offsets,
+            self._blocked_direction_offsets,
+            update_alignment=False,
+        )
         if selected is None:
             return None
         move_val, offset, value = selected

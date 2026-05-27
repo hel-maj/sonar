@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
 import random
 import shutil
@@ -56,6 +57,7 @@ DEBUG_CAPTURE_OVER_15KG_DIR = DEBUG_CAPTURE_ROOT_DIR / "over_15kg_fish_screensho
 DEBUG_CAPTURE_TROPHY_DIR = DEBUG_CAPTURE_ROOT_DIR / "trophy_fish_screenshots"
 DEBUG_CAPTURE_ALL_CATCHES_DIR = DEBUG_CAPTURE_ROOT_DIR / "all_caught_fish_session_screenshots"
 DEBUG_CAPTURE_MEAL_DIR = DEBUG_CAPTURE_ROOT_DIR / "eaten_item_info_screenshots"
+DEBUG_CAPTURE_REELING_LOSS_DIR = DEBUG_CAPTURE_ROOT_DIR / "reeling_loss_logs"
 DEBUG_CAPTURE_CSV_NAME = "metadata.csv"
 DEBUG_CAPTURE_WEIGHT_THRESHOLD_KG = 15.0
 START_STOP_SOUND_VOLUME = 0.3
@@ -104,6 +106,7 @@ TACKLE_OBSCURED_RETRY_WAIT_SECONDS = 2.0
 TACKLE_OBSCURED_RETRIES = 3
 TACKLE_DEPLETION_CONFIRM_DELAY_SECONDS = 0.5
 TACKLE_DEPLETION_CONFIRM_ATTEMPTS = 2
+TACKLE_ACTIVE_STAGE_SCAN_INTERVAL_SECONDS = 6.0
 REELING_PROBLEM_ACTIONS = frozenset({"target_search", "position_unreadable", "memory_unavailable", "control_error"})
 REELING_KNOWN_INTERRUPTION_TRIGGERS = frozenset(
     {
@@ -191,6 +194,8 @@ class FishingBot:
         self._initial_status_scan_pending = False
         self._last_confirmed_storage = ""
         self._inventory_space_low_notified = False
+        self._player_status_scan_requested = False
+        self._last_active_tackle_scan_at: dict[str, float] = {}
         self.inventory_full = False
         self.settings: FishingSettings = self.config_manager.load().fishing
         self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
@@ -222,6 +227,19 @@ class FishingBot:
     def estimated_player_status(self) -> PlayerStatus | None:
         return self._player_status_estimate.estimate()
 
+    def request_player_status_scan(self) -> tuple[bool, str]:
+        if not self.state.running:
+            return False, "Сканирование через инвентарь доступно во время работы бота"
+        if self.state.phase == BotPhase.REELING or self.state.detected_stage == "Вываживание" or "ad" in getattr(self, "_last_triggers", {}):
+            self._player_status_scan_requested = True
+            self._log("Показатели: ручное сканирование добавлено в очередь после вываживания")
+            return True, "Подождите немного: сканирование показателей поставлено в очередь и будет выполнено после вываживания"
+        if self._has_pending_catch():
+            return False, "Сначала нужно обработать экран улова"
+        self._player_status_scan_requested = True
+        self._log("Показатели: ручное сканирование добавлено в очередь")
+        return True, "Сканирование показателей добавлено в очередь"
+
     def _configure_notifications(self) -> None:
         settings = self.config_manager.load()
         self.notification_manager.configure(
@@ -247,6 +265,7 @@ class FishingBot:
             stream_set_chat_zoom_callback=self.stream_set_chat_zoom_callback,
             stream_set_snapshot_mode_callback=self.stream_set_snapshot_mode_callback,
             player_status_callback=self.estimated_player_status,
+            player_status_scan_callback=self.request_player_status_scan,
         )
 
     def configure_streaming_callbacks(
@@ -306,6 +325,8 @@ class FishingBot:
         self._last_published_estimated_status = None
         self._last_confirmed_storage = ""
         self._inventory_space_low_notified = False
+        self._player_status_scan_requested = False
+        self._last_active_tackle_scan_at = {}
         self._last_catch_result = None
         self._no_stage_since = None
         self._start_attempt_since = None
@@ -355,6 +376,7 @@ class FishingBot:
         self._no_stage_since = None
         self._start_attempt_since = None
         self._focus_lost_notified = False
+        self._player_status_scan_requested = False
         if was_running:
             self.session_stats.stop_timer()
         self._log(f"Fishing bot stopped: {reason}")
@@ -569,6 +591,8 @@ class FishingBot:
                     self._handle_overweight_trigger()
                 elif self._has_pending_catch() or self._probe_catch_screen():
                     self._do_fish_catch()
+                elif self._handle_player_status_scan_request(stage):
+                    continue
                 elif self._should_handle_meal_now(stage, needs_meal):
                     self._handle_pending_tasks(do_meal=True)
                 elif stage == "ad":
@@ -699,6 +723,8 @@ class FishingBot:
             self._log(f"Вываживание не запущено: текущая стадия {label}")
             return None, 0.0
         self._publish_stage("Вываживание")
+        reeling_debug_log = self._new_reeling_debug_log()
+        self._append_reeling_debug_log(reeling_debug_log, "start", stage=stage)
         last_reeling_focus_attempt_at = self._restore_reeling_focus(0.0)
         self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
         self.reeling_tracker.start()
@@ -712,6 +738,7 @@ class FishingBot:
         started_at = time.time()
         ad_missing_since: float | None = None
         last_reeling_menu_log_at = 0.0
+        finish_reason = "timeout"
         deadline = time.time() + 180.0
         while time.time() < deadline and not self._stop_event.is_set():
             self._update_focus_state_notification()
@@ -724,8 +751,10 @@ class FishingBot:
                         self._log("Вываживание: меню игры обнаружено, Esc не нажимаю")
                         last_reeling_menu_log_at = now
                     continue
+                self._scan_tackle_for_active_stage("ad", frame)
                 catch_result = self.catch_detector.detect(frame)
                 if catch_result.visible:
+                    finish_reason = "catch_screen"
                     self._last_catch_result = catch_result
                     self._save_catch_panel_snapshot(frame, catch_result)
                     fish_label = fish_display_name(catch_result.fish_id) if catch_result.fish_id else catch_result.fish_text or "unknown"
@@ -733,6 +762,14 @@ class FishingBot:
                         "Стадия: пойманная рыба "
                         f"name={fish_label} id={catch_result.fish_id or 'unknown'} "
                         f"weight={catch_result.weight_text or 'unknown'} confidence={catch_result.fish_confidence:.2f}"
+                    )
+                    self._append_reeling_debug_log(
+                        reeling_debug_log,
+                        "catch_screen",
+                        fish_id=catch_result.fish_id,
+                        fish_name=fish_label,
+                        weight=catch_result.weight_text,
+                        confidence=catch_result.fish_confidence,
                     )
                     break
                 self._last_trigger_matches = self.trigger_monitor.find_detections(frame)
@@ -742,18 +779,24 @@ class FishingBot:
                     seen_ad_stage = True
                     ad_missing_since = None
                 elif current_stage is not None:
+                    finish_reason = f"stage_{current_stage}"
                     label = self._stage_label(current_stage)
                     self._publish_stage(label)
                     self._log(f"Вываживание: обнаружена другая стадия {label}, останавливаю вываживание")
+                    self._append_reeling_debug_log(reeling_debug_log, "stage_changed", stage=current_stage, label=label)
                     break
                 elif any(name in self._last_triggers for name in ("changed_bait", "gear", "pereves", "thirst", "hunger")):
                     state_name = next(name for name in ("changed_bait", "gear", "pereves", "thirst", "hunger") if name in self._last_triggers)
+                    finish_reason = f"trigger_{state_name}"
                     self._log(f"Вываживание: обнаружено состояние {state_name}, останавливаю вываживание")
+                    self._append_reeling_debug_log(reeling_debug_log, "trigger_interrupt", trigger=state_name)
                     break
                 elif seen_ad_stage:
                     ad_missing_since = ad_missing_since or now
                     if now - ad_missing_since >= 1.5:
+                        finish_reason = "ad_stage_ended"
                         self._log("Вываживание: стадия закончилась")
+                        self._append_reeling_debug_log(reeling_debug_log, "ad_stage_ended")
                         break
             state = self.reeling_tracker.latest_state()
             if state.action == "input_blocked":
@@ -776,15 +819,25 @@ class FishingBot:
                 if state.player_pos_offset is not None and state.fish_pos_offset is not None:
                     details += f", pos_offsets=0x{state.player_pos_offset:X}/0x{state.fish_pos_offset:X}"
                 self._log(f"Вываживание: {state.action}{details}")
+                self._append_reeling_debug_log(reeling_debug_log, "state", state=state)
                 last_action_log_at = now
                 last_action_log_signature = action_log_signature
             if state.action == "target_search":
                 if not seen_ad_stage and now - started_at >= 20.0:
+                    finish_reason = "target_search_timeout"
+                    self._append_reeling_debug_log(reeling_debug_log, "target_search_timeout", state=state)
                     break
             if seen_ad_stage and now - last_recognition_at >= 1.0:
                 last_recognition_at = now
                 fish_name, confidence = self.fish_recognition.recognize_once()
                 if fish_name and confidence >= 0.55:
+                    self._append_reeling_debug_log(
+                        reeling_debug_log,
+                        "recognized",
+                        fish_id=fish_name,
+                        confidence=confidence,
+                        state=state,
+                    )
                     self.reeling_tracker.stop()
                     return fish_name, confidence
             if self._stop_event.is_set():
@@ -793,11 +846,78 @@ class FishingBot:
         self.reeling_tracker.stop()
         if self._last_catch_result and self._last_catch_result.visible:
             result = self._last_catch_result
+            self._append_reeling_debug_log(reeling_debug_log, "finish_catch", fish_id=result.fish_id, confidence=result.fish_confidence)
             return result.fish_id or fish_id_from_display(result.fish_text), result.fish_confidence
         fish_name, confidence = self._wait_for_catch_screen(timeout=REEL_CATCH_SCREEN_TIMEOUT_SECONDS)
         if fish_name:
+            self._append_reeling_debug_log(reeling_debug_log, "finish_catch_wait", fish_id=fish_name, confidence=confidence)
             return fish_name, confidence
+        self._append_reeling_debug_log(reeling_debug_log, "finish_lost", reason=finish_reason)
+        if not self._stop_event.is_set():
+            self._save_reeling_debug_log(reeling_debug_log, finish_reason)
         return None, 0.0
+
+    def _new_reeling_debug_log(self) -> list[dict[str, object]] | None:
+        if not self._debug_mode_enabled():
+            return None
+        return []
+
+    def _append_reeling_debug_log(
+        self,
+        records: list[dict[str, object]] | None,
+        event: str,
+        *,
+        state=None,
+        **extra: object,
+    ) -> None:
+        if records is None:
+            return
+        record: dict[str, object] = {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+        }
+        if state is not None:
+            record.update(self._reeling_debug_state_fields(state))
+        for key, value in extra.items():
+            if value is None:
+                continue
+            record[key] = value
+        records.append(record)
+
+    @staticmethod
+    def _reeling_debug_state_fields(state) -> dict[str, object]:
+        fields: dict[str, object] = {
+            "action": state.action,
+            "active": state.active,
+        }
+        for key in ("distance", "lateral", "move_val"):
+            value = getattr(state, key, None)
+            if value is not None:
+                fields[key] = round(float(value), 4)
+        for key in ("fish_addr", "player_addr", "player_pos_offset", "fish_pos_offset"):
+            value = getattr(state, key, None)
+            if value is not None:
+                fields[key] = f"0x{int(value):X}"
+        return fields
+
+    def _save_reeling_debug_log(self, records: list[dict[str, object]] | None, reason: str) -> Path | None:
+        if not records:
+            return None
+        try:
+            DEBUG_CAPTURE_REELING_LOSS_DIR.mkdir(parents=True, exist_ok=True)
+            stamp = int(time.time() * 1000)
+            safe_reason = self._safe_debug_filename_part(reason or "lost")
+            path = DEBUG_CAPTURE_REELING_LOSS_DIR / f"{stamp}_{safe_reason}.jsonl"
+            with path.open("w", encoding="utf-8") as handle:
+                for record in records:
+                    handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
+                    handle.write("\n")
+            debug_log(f"REELING_LOSS_LOG_SAVED reason={reason} path={path}")
+            self._log(f"Вываживание: debug-лог срыва сохранён {path}")
+            return path
+        except Exception as exc:
+            debug_log(f"REELING_LOSS_LOG_SAVE_FAILED {exc}")
+            return None
 
     def _restore_reeling_focus(self, last_attempt_at: float, now: float | None = None) -> float:
         current_time = time.time() if now is None else now
@@ -1084,6 +1204,7 @@ class FishingBot:
                 self._log("Подсечка: найден голод/жажда, выхожу из ожидания для питания")
                 return False
             frame = self.capture.capture()
+            self._scan_tackle_for_active_stage("start2", frame)
             if self.hooking_monitor is None:
                 self.hooking_monitor = create_hooking_monitor(frame, self.input_controller, self._force_focus_game)
             result = self.hooking_monitor.check_and_act(frame)
@@ -1244,6 +1365,7 @@ class FishingBot:
             result.xp_total,
             self.session_stats.totals(),
             image_bytes=catch_image_bytes,
+            released=not keep_fish,
         )
         if keep_fish:
             self._add_kept_fish_weight_to_inventory_estimate(result.weight_kg)
@@ -1473,6 +1595,10 @@ class FishingBot:
         return os.environ.get("SONAR_DEBUG_CAPTURE") == "1" or "--debug" in sys.argv
 
     @staticmethod
+    def _debug_mode_enabled() -> bool:
+        return os.environ.get("SONAR_DEBUG_MODE") == "1" or FishingBot._debug_capture_enabled()
+
+    @staticmethod
     def _is_trophy_quality(quality: str | None) -> bool:
         return bool(quality and any(marker in quality.lower() for marker in ("троф", "рекорд")))
 
@@ -1499,6 +1625,70 @@ class FishingBot:
             do_meal=requested_meal,
             do_backpack=self.settings.store_in_backpack,
         )
+
+    def _handle_player_status_scan_request(self, stage: str | None) -> bool:
+        if not getattr(self, "_player_status_scan_requested", False):
+            return False
+        if stage == "ad":
+            return False
+        self._player_status_scan_requested = False
+        self._do_player_status_inventory_scan()
+        return True
+
+    def _do_player_status_inventory_scan(self) -> PlayerStatus | None:
+        self.state.phase = BotPhase.INVENTORY
+        self._log("Показатели: открываю инвентарь для сканирования")
+        if not self._open_inventory():
+            self._log("Показатели: инвентарь не открыт, сканирование пропущено")
+            return None
+        status: PlayerStatus | None = None
+        try:
+            frame = self.capture.capture()
+            status = self.meal_system.detect_player_status(frame)
+            self._remember_player_status(status, inventory_scan=True)
+            estimated = self.estimated_player_status() or status
+            self._publish_player_status(estimated)
+            if estimated is None or not estimated.has_any_value():
+                self._log("Показатели: не удалось прочитать еду, воду или вес")
+            else:
+                self._log(f"Показатели: {self._format_player_status_for_log(estimated)}")
+            return estimated
+        except Exception as exc:
+            debug_log(f"PLAYER_STATUS_SCAN_FAILED {exc}")
+            self._log(f"Показатели: ошибка сканирования: {exc}")
+            return None
+        finally:
+            if self.state.running and not self._stop_event.is_set():
+                self._return_to_fishing()
+
+    @staticmethod
+    def _format_player_status_for_log(status: PlayerStatus) -> str:
+        parts: list[str] = []
+        if status.food is not None:
+            parts.append(f"еда={status.food}%")
+        if status.water is not None:
+            parts.append(f"вода={status.water}%")
+        if status.health is not None:
+            parts.append(f"HP={status.health}%")
+        if status.inventory_weight is not None or status.inventory_weight_max is not None:
+            parts.append(
+                "инвентарь="
+                f"{FishingBot._format_status_weight_for_log(status.inventory_weight)}/"
+                f"{FishingBot._format_status_weight_for_log(status.inventory_weight_max)} кг"
+            )
+        if status.backpack_weight is not None or status.backpack_weight_max is not None:
+            parts.append(
+                "рюкзак="
+                f"{FishingBot._format_status_weight_for_log(status.backpack_weight)}/"
+                f"{FishingBot._format_status_weight_for_log(status.backpack_weight_max)} кг"
+            )
+        return ", ".join(parts) or "нет данных"
+
+    @staticmethod
+    def _format_status_weight_for_log(value: float | None) -> str:
+        if value is None:
+            return "?"
+        return f"{value:.2f}".rstrip("0").rstrip(".")
 
     def _do_combined_inventory_tasks(self, do_meal: bool, do_backpack: bool) -> None:
         if not do_meal and not do_backpack:
@@ -2100,6 +2290,28 @@ class FishingBot:
             return False
         self._log("Снаряжение после перепроверки:\n" + format_tackle_items(scan.items))
         return not self._handle_tackle_depletion(scan)
+
+    def _scan_tackle_for_active_stage(self, stage: str, frame=None) -> None:
+        if stage not in {"start2", "ad"}:
+            return
+        now = time.time()
+        if now - self._last_active_tackle_scan_at.get(stage, 0.0) < TACKLE_ACTIVE_STAGE_SCAN_INTERVAL_SECONDS:
+            return
+        self._last_active_tackle_scan_at[stage] = now
+        label = self._stage_label(stage)
+        try:
+            current_frame = self.capture.capture() if frame is None else frame
+            scan = self.tackle_detector.detect(current_frame)
+            if scan.obscured:
+                self._log(f"Снаряжение ({label}): перекрыто уведомлением")
+                return
+            if self._is_empty_tackle_scan(scan):
+                self._log(f"Снаряжение ({label}): не прочитано")
+                return
+            self._store_tackle_scan(scan, current_frame)
+            self._log(f"Снаряжение ({label}):\n" + format_tackle_items(scan.items))
+        except Exception as exc:
+            debug_log(f"TACKLE_ACTIVE_STAGE_SCAN_FAILED stage={stage} error={exc}")
 
     def _read_tackle_until_clear(self, frame=None) -> TackleScanResult | None:
         waits = [0.0, TACKLE_OBSCURED_INITIAL_WAIT_SECONDS]
