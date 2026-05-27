@@ -27,10 +27,10 @@ TRIM_PASSES = 2
 MERGED_TOP_SCAN_HEIGHT = 32
 TITLE_REGION_HEIGHT = 58
 WEIGHT_REGION_HEIGHT = 44
-OCR_PADDING_LEFT = 16
-OCR_PADDING_TOP = 8
-OCR_PADDING_RIGHT = 8
-OCR_PADDING_BOTTOM = 5
+OCR_PADDING_LEFT = 4
+OCR_PADDING_TOP = 2
+OCR_PADDING_RIGHT = 4
+OCR_PADDING_BOTTOM = 2
 BASE_TOOLTIP_WIDTH = 312
 OCR_WORD_CONFIDENCE = 18
 OCR_RECT_MIN_SCORE = 6.0
@@ -144,7 +144,7 @@ class ItemInfoParser:
         lines = [line for line in lines if line]
         if not lines:
             return ParsedItemInfo(text="")
-        title = ItemInfoDetector._clean_title(lines[0])
+        title = cls._normalize_category_title(ItemInfoDetector._clean_title(lines[0]))
         labeled = cls._labeled_values(lines)
         item_name = cls._extract_item_name(title, lines)
         description = cls._extract_description(title, item_name, lines)
@@ -158,24 +158,44 @@ class ItemInfoParser:
         )
         standalone_modifications = tuple(modifications) if not names else ()
         if not effects:
-            heuristic_effects, heuristic_modifications = cls._extract_heuristic_effects(lines)
+            heuristic_effects, heuristic_modifications = cls._extract_heuristic_effects(lines, title, item_name)
             if heuristic_effects or heuristic_modifications:
                 effects = heuristic_effects
                 standalone_modifications = tuple(heuristic_modifications) if not effects else ()
+        weight = ItemInfoDetector._extract_weight(lines)
+        satiety_change = cls._extract_change(lines, "сытост")
+        thirst_change = cls._extract_change(lines, "жажд")
+        condition_percent = cls._normalize_percent(labeled.get("condition_percent", ""))
+        poison_chance = cls._normalize_poison_chance(labeled.get("poison_chance", ""))
+        strength = labeled.get("strength", "")
+        gender = cls._extract_gender(lines)
         return ParsedItemInfo(
             title=title,
             item_name=item_name,
-            weight=ItemInfoDetector._extract_weight(lines),
+            weight=weight,
             description=description,
-            satiety_change=cls._extract_change(lines, "сытост"),
-            thirst_change=cls._extract_change(lines, "жажд"),
-            condition_percent=cls._normalize_percent(labeled.get("condition_percent", "")),
-            poison_chance=labeled.get("poison_chance", ""),
+            satiety_change=satiety_change,
+            thirst_change=thirst_change,
+            condition_percent=condition_percent,
+            poison_chance=poison_chance,
             effects=effects,
             standalone_parameter_modifications=standalone_modifications,
-            strength=labeled.get("strength", ""),
-            gender=cls._extract_gender(lines),
-            text="\n".join(lines),
+            strength=strength,
+            gender=gender,
+            text=cls._canonical_text(
+                title=title,
+                description=description,
+                satiety_change=satiety_change,
+                thirst_change=thirst_change,
+                poison_chance=poison_chance,
+                effects=effects,
+                standalone_modifications=standalone_modifications,
+                condition_percent=condition_percent,
+                strength=strength,
+                gender=gender,
+                weight=weight,
+                fallback_lines=lines,
+            ),
         )
 
     @staticmethod
@@ -190,13 +210,22 @@ class ItemInfoParser:
             for label, key in cls.SECTION_LABELS.items():
                 match = re.search(rf"(?:^|\s){re.escape(label)}(?![A-Za-zА-Яа-яЁёβΒ])\s*:?\s*(.+)$", line, flags=re.IGNORECASE)
                 if match:
-                    values[key] = cls._clean_value(match.group(1))
+                    value = cls._clean_value(match.group(1))
+                    if value and cls._value_score(value) > cls._value_score(values.get(key, "")):
+                        values[key] = value
                     break
         return values
 
     @staticmethod
+    def _value_score(value: str) -> tuple[int, int]:
+        letters = len(re.findall(r"[A-Za-zА-Яа-яЁёβΒ]", value))
+        digits = len(re.findall(r"\d", value))
+        return letters + digits, len(value.strip())
+
+    @staticmethod
     def _clean_value(value: str) -> str:
         value = value.strip()
+        value = re.sub(r"^[^0-9A-Za-zА-Яа-яЁёβΒ+\-~]+|[^0-9A-Za-zА-Яа-яЁёβΒ.%+\-~]+$", "", value)
         return re.sub(r"\s+", " ", value)
 
     @staticmethod
@@ -207,34 +236,109 @@ class ItemInfoParser:
 
     @classmethod
     def _extract_item_name(cls, title: str, lines: list[str]) -> str:
-        if title in cls.CATEGORY_TITLES:
+        if cls._is_category_title(title):
+            name_lines: list[str] = []
             for line in lines[1:]:
-                if not cls._is_metadata_line(line):
-                    return line
+                raw_line = cls._normalize_ocr_text(cls._clean_line(line))
+                clean_line = cls._normalize_category_title(ItemInfoDetector._clean_title(raw_line)) if not name_lines else raw_line
+                if not clean_line or cls._is_metadata_line(clean_line) or cls._is_noise_line(clean_line):
+                    if name_lines:
+                        break
+                    continue
+                if cls._parse_effect_header(clean_line) is not None:
+                    if name_lines:
+                        break
+                    continue
+                if name_lines and not cls._looks_like_name_continuation(clean_line):
+                    break
+                name_lines.append(clean_line)
+            if name_lines:
+                return cls._normalize_ocr_text(" ".join(name_lines))
         return title
+
+    @staticmethod
+    def _looks_like_name_continuation(line: str) -> bool:
+        if re.search(r"[.:;!?\d]", line):
+            return False
+        words = line.split()
+        if not words or len(words) > 4:
+            return False
+        return bool(re.match(r'^[а-яёa-z("\']', words[0]))
+
+    @classmethod
+    def _is_category_title(cls, value: str) -> bool:
+        value_casefold = value.casefold()
+        return any(title.casefold() == value_casefold for title in cls.CATEGORY_TITLES)
+
+    @classmethod
+    def _normalize_category_title(cls, value: str) -> str:
+        value = value.strip()
+        value_casefold = value.casefold()
+        for title in cls.CATEGORY_TITLES:
+            if title.casefold() == value_casefold:
+                return title
+        return value
 
     @classmethod
     def _extract_description(cls, title: str, item_name: str, lines: list[str]) -> str:
         values: list[str] = []
         start_index = 1
-        if title in cls.CATEGORY_TITLES and len(lines) > 1 and lines[1] == item_name:
+        if cls._is_category_title(title):
             return item_name
         for line in lines[start_index:]:
             if cls._is_metadata_line(line):
                 break
-            values.append(line)
-        return " ".join(values).strip()
+            if cls._same_clean_title(line, title) or cls._same_clean_title(line, item_name) or cls._looks_like_title_duplicate(line, title) or cls._looks_like_title_duplicate(line, item_name) or cls._is_noise_line(line) or ItemInfoDetector._suspicious_title(line):
+                continue
+            values.append(cls._normalize_ocr_text(line))
+        description = " ".join(values).strip()
+        return re.sub(r",$", ".", description)
+
+    @staticmethod
+    def _looks_like_title_duplicate(line: str, title: str) -> bool:
+        line_clean = ItemInfoDetector._clean_title(line)
+        title_clean = ItemInfoDetector._clean_title(title)
+        if not line_clean or not title_clean or any(mark in line_clean for mark in ",.;:!?"):
+            return False
+        line_words = re.findall(r"[A-Za-zА-Яа-яЁёβΒ0-9-]+", line_clean.casefold())
+        title_words = re.findall(r"[A-Za-zА-Яа-яЁёβΒ0-9-]+", title_clean.casefold())
+        if len(line_words) > len(title_words) + 1:
+            return False
+        if not line_words or not title_words:
+            return False
+        overlap = len(set(line_words) & set(title_words))
+        return overlap >= max(1, min(len(title_words), 2))
+
+    @staticmethod
+    def _same_clean_title(left: str, right: str) -> bool:
+        left_clean = ItemInfoDetector._clean_title(left).casefold()
+        right_clean = ItemInfoDetector._clean_title(right).casefold()
+        return bool(left_clean and right_clean and left_clean == right_clean)
+
+    @staticmethod
+    def _looks_like_weight_line(line: str) -> bool:
+        lowered = line.lower()
+        lowered = re.sub(r"(?<![A-Za-zА-Яа-яЁёβΒ])[oо](?=[.,:]?\d)", "0", lowered)
+        return bool(re.fullmatch(r"[^0-9A-Za-zА-Яа-яЁёβΒ]*(?:\d+(?:[.,:]\d+)?)\s*(?:кг|kg|кз|кс|ке|кё|кв|кб|ke|xs|me|«g|@|&|№|®|м|m)[^A-Za-zА-Яа-яЁёβΒ]*", lowered))
 
     @classmethod
     def _is_metadata_line(cls, line: str) -> bool:
         lowered = line.lower()
-        if re.fullmatch(r"[^0-9]*(?:\d+(?:[.,:]\d+)?)\s*(?:кг|kg|кз|кс|ке|кё|кв|кб|ke|xs|me|«g)[^A-Za-zА-Яа-яЁёβΒ]*", lowered):
+        if cls._looks_like_weight_line(line):
             return True
-        if re.match(r"^[+-]?\d+\s+к\s+(?:с[ыьiі]тост|ж[аеи]жд)", lowered):
+        if re.match(r"^[^A-Za-zА-Яа-яЁёβΒ]*\d+(?:[.,:]\d+)?\s*(?:кг|kg|кз|кс|ке|кё|кв|кб|ke|xs|me|«g|@|&|№)", lowered):
+            return True
+        if re.match(r"^[+\-~]?\s*\d+\s*к\s*(?:с[ыьiі]тост|ж[аеи]жд)", lowered):
+            return True
+        if re.fullmatch(r"[^0-9A-Za-zА-Яа-яЁёβΒ]*\d+(?:[.,:]\d+)?\s*[кk8][^A-Za-zА-Яа-яЁёβΒ]*", lowered):
+            return True
+        if re.search(r"(?:^|\s)к\s*(?:с[ыьiі]тост|ж[аеи]жд)", lowered):
             return True
         if re.search(r"для\s+(?:мужчин|женщин)\b", lowered):
             return True
-        if any(lowered.startswith(label.lower() + ":") for label in cls.SECTION_LABELS):
+        if re.search(r"\b(?:состояние|шанс\s+отравления)\b", lowered):
+            return True
+        if any(lowered.startswith(label.lower()) for label in cls.SECTION_LABELS):
             return True
         return False
 
@@ -253,6 +357,9 @@ class ItemInfoParser:
         for value in matches:
             if value.startswith("+") and f"-{value[1:]}" in matches:
                 return value
+        positives = [value for value in matches if value.startswith("+")]
+        if positives:
+            return max(positives, key=lambda value: int(re.sub(r"\D", "", value) or "0"))
         return matches[0]
 
     @staticmethod
@@ -269,6 +376,42 @@ class ItemInfoParser:
         return match.group(1) if match else ""
 
     @staticmethod
+    def _normalize_poison_chance(value: str) -> str:
+        lowered = value.lower()
+        if "низ" in lowered:
+            return "Низкий"
+        if "сред" in lowered:
+            return "Средний"
+        if "выс" in lowered:
+            return "Высокий"
+        return value if len(value) > 2 else ""
+
+    @staticmethod
+    def _normalize_ocr_text(value: str) -> str:
+        value = value.replace("Иэ", "Из").replace("иэ", "из")
+        value = value.replace("отровления", "отравления").replace("Отровления", "Отравления")
+        value = re.sub(r"\b(?:kg|кз|кс|ке|кё|кв|кб|ke|xs|me)\b", "кг", value, flags=re.IGNORECASE)
+        value = re.sub(r"\$\s*-\s*(\d)", r"S-\1", value)
+        value = re.sub(r",\s+([A-ZА-ЯЁ])", r". \1", value)
+        value = re.sub(r"\s+([.,;:!?])", r"\1", value)
+        return re.sub(r"\s+", " ", value).strip()
+
+    @staticmethod
+    def _is_noise_line(line: str) -> bool:
+        cleaned = line.strip()
+        if not cleaned:
+            return True
+        letters = re.sub(r"[^A-Za-zА-Яа-яЁёβΒ]", "", cleaned)
+        digits = re.sub(r"\D", "", cleaned)
+        if not letters:
+            return True
+        if digits:
+            return False
+        if len(cleaned) <= 8 and len(letters) <= 3 and re.search(r"[^A-Za-zА-Яа-яЁёβΒ\s]", cleaned):
+            return True
+        return False
+
+    @staticmethod
     def _extract_gender(lines: list[str]) -> str:
         for line in lines:
             match = re.search(r"для\s+(мужчин|женщин)\b", line, flags=re.IGNORECASE)
@@ -277,26 +420,228 @@ class ItemInfoParser:
         return ""
 
     @classmethod
-    def _extract_heuristic_effects(cls, lines: list[str]) -> tuple[tuple[ItemEffect, ...], tuple[str, ...]]:
+    def _extract_heuristic_effects(
+        cls,
+        lines: list[str],
+        title: str,
+        item_name: str,
+    ) -> tuple[tuple[ItemEffect, ...], tuple[str, ...]]:
+        effects_by_name: dict[str, ItemEffect] = {}
         modifications: list[str] = []
+        current_name = ""
+        current_duration = ""
+        current_description: list[str] = []
+        effect_zone = False
         in_modifications = False
-        for line in lines:
-            if re.search(r"модификация\s+параметров", line, flags=re.IGNORECASE):
+        recent_lines: list[str] = []
+        blocked_titles = {ItemInfoDetector._clean_title(title).casefold(), ItemInfoDetector._clean_title(item_name).casefold()}
+
+        def flush_effect() -> None:
+            nonlocal current_name, current_duration, current_description
+            if not current_name:
+                return
+            description = cls._normalize_ocr_text(" ".join(current_description))
+            existing = effects_by_name.get(current_name)
+            effect = ItemEffect(current_name, current_duration, description)
+            if existing is None or cls._effect_score(effect) > cls._effect_score(existing):
+                effects_by_name[current_name] = effect
+            current_name = ""
+            current_duration = ""
+            current_description = []
+
+        for line in lines[1:]:
+            clean_line = cls._normalize_ocr_text(cls._clean_line(line))
+            if not clean_line or ItemInfoDetector._clean_title(clean_line).casefold() in blocked_titles or cls._is_noise_line(clean_line):
+                continue
+            if re.search(r"модификация\s+параметров", clean_line, flags=re.IGNORECASE):
+                if not current_name:
+                    current_name = cls._infer_effect_name_before_modification(recent_lines)
+                flush_effect()
+                effect_zone = True
                 in_modifications = True
+                recent_lines.append(clean_line)
                 continue
-            if not in_modifications:
+            modification = cls._parse_parameter_modification(clean_line)
+            if in_modifications and modification:
+                if modification not in modifications:
+                    modifications.append(modification)
                 continue
-            lowered = line.lower()
-            if re.search(r"\sк\s*(?:с[ыьiі]тост|ж[аеи]жд)", lowered):
+            if cls._is_change_line(clean_line) or re.search(r"шанс\s+отравления", clean_line, flags=re.IGNORECASE):
+                effect_zone = True
                 continue
-            if cls._is_metadata_line(line):
+            if cls._is_metadata_line(clean_line):
+                flush_effect()
+                if cls._looks_like_weight_line(clean_line):
+                    break
+                recent_lines.append(clean_line)
                 continue
-            modification_match = re.match(r"^([+\-~]\s*\d+%?\s+.+)$", line)
-            if modification_match:
-                value = modification_match.group(1).replace("~", "+")
-                if value not in modifications:
-                    modifications.append(value)
-        return (), tuple(modifications)
+            header = cls._parse_effect_header(clean_line)
+            if header is not None:
+                header_name, header_duration = header
+                if ItemInfoDetector._clean_title(header_name).casefold() in blocked_titles:
+                    continue
+                flush_effect()
+                current_name, current_duration = header_name, header_duration
+                in_modifications = False
+                recent_lines.append(clean_line)
+                continue
+            if current_name:
+                if not current_duration and not current_description and cls._looks_like_effect_name_continuation(clean_line):
+                    current_name = f"{current_name} {clean_line}"
+                    continue
+                current_description.append(clean_line)
+            recent_lines.append(clean_line)
+
+        flush_effect()
+        effects = cls._dedupe_heuristic_effects(list(effects_by_name.values()))
+        if effects and modifications:
+            first = effects[0]
+            effects[0] = ItemEffect(
+                first.name,
+                first.duration,
+                first.description,
+                tuple(modifications),
+            )
+            return tuple(effects), ()
+        return tuple(effects), tuple(modifications)
+
+    @staticmethod
+    def _effect_score(effect: ItemEffect) -> tuple[int, int, int]:
+        return (
+            int(bool(effect.description)),
+            len(re.findall(r"[A-Za-zА-Яа-яЁёβΒ]", effect.description)),
+            int(bool(effect.duration)),
+        )
+
+    @staticmethod
+    def _infer_effect_name_before_modification(lines: list[str]) -> str:
+        candidates = [line for line in lines[-4:] if line and not ItemInfoParser._is_metadata_line(line) and not ItemInfoParser._is_noise_line(line)]
+        if not candidates:
+            return ""
+        last = candidates[-1]
+        if ItemInfoParser._looks_like_effect_name_continuation(last) and len(candidates) >= 2:
+            previous = candidates[-2]
+            if re.match(r"^[A-ZА-ЯЁ]", previous) and not re.search(r"[.:;!?\d]", previous):
+                return f"{previous} {last}"
+        if re.match(r"^[A-ZА-ЯЁ]", last) and not re.search(r"[.:;!?\d]", last):
+            return last
+        return ""
+
+    @staticmethod
+    def _looks_like_effect_name_continuation(line: str) -> bool:
+        if re.search(r"[.:;!?]", line):
+            return False
+        if re.search(r"\d|[+\-~]", line):
+            return False
+        words = line.split()
+        if not words or len(words) > 4:
+            return False
+        return bool(re.match(r"^[а-яёa-z]", words[0]))
+
+    @staticmethod
+    def _dedupe_heuristic_effects(effects: list[ItemEffect]) -> list[ItemEffect]:
+        result: list[ItemEffect] = []
+        for effect in effects:
+            duplicate_index = None
+            for index, existing in enumerate(result):
+                same_duration = bool(effect.duration and effect.duration == existing.duration)
+                same_description = bool(effect.description and existing.description and ItemInfoParser._similar_text(effect.description, existing.description))
+                same_name = ItemInfoParser._similar_effect_name(effect.name, existing.name)
+                if same_name or same_duration and (same_description or not effect.parameter_modifications and not existing.parameter_modifications):
+                    duplicate_index = index
+                    break
+            if duplicate_index is None:
+                result.append(effect)
+                continue
+            if ItemInfoParser._effect_name_score(effect.name) > ItemInfoParser._effect_name_score(result[duplicate_index].name):
+                result[duplicate_index] = effect
+        return result
+
+    @staticmethod
+    def _similar_effect_name(left: str, right: str) -> bool:
+        left_norm = re.sub(r"\s+", " ", left.casefold()).strip()
+        right_norm = re.sub(r"\s+", " ", right.casefold()).strip()
+        if not left_norm or not right_norm:
+            return False
+        return left_norm.startswith(right_norm) or right_norm.startswith(left_norm)
+
+    @staticmethod
+    def _similar_text(left: str, right: str) -> bool:
+        left_words = set(re.findall(r"[A-Za-zА-Яа-яЁёβΒ]{3,}", left.casefold()))
+        right_words = set(re.findall(r"[A-Za-zА-Яа-яЁёβΒ]{3,}", right.casefold()))
+        if not left_words or not right_words:
+            return False
+        overlap = len(left_words & right_words)
+        return overlap / max(1, min(len(left_words), len(right_words))) >= 0.5
+
+    @staticmethod
+    def _effect_name_score(name: str) -> tuple[int, int, int]:
+        cyrillic = len(re.findall(r"[А-Яа-яЁё]", name))
+        latin = len(re.findall(r"[A-Za-z]", name))
+        letters = len(re.findall(r"[A-Za-zА-Яа-яЁёβΒ]", name))
+        return cyrillic - latin, letters, -len(re.findall(r"[^A-Za-zА-Яа-яЁёβΒ\s-]", name))
+
+    @staticmethod
+    def _parse_parameter_modification(line: str) -> str:
+        if ItemInfoParser._is_change_line(line):
+            return ""
+        line = re.sub(r"^[4AА]\s*(?=\d+%?\s+к)", "+", line)
+        match = re.match(r"^([+\-~]\s*\d+%?\s+.+)$", line)
+        if not match:
+            return ""
+        value = match.group(1).replace("~", "+")
+        return re.sub(r"\s+", " ", value).strip()
+
+    @staticmethod
+    def _is_change_line(line: str) -> bool:
+        return bool(re.match(r"^[^0-9+\-~]*[+\-~]?\s*\d+\s*к\s*(?:с[ыьiі]тост|ж[аеи]жд)", line, flags=re.IGNORECASE))
+
+    @staticmethod
+    def _parse_effect_header(line: str) -> tuple[str, str] | None:
+        raw_line = line.strip()
+        if not raw_line:
+            return None
+        has_icon_prefix = bool(re.match(r"^\s*[^A-Za-zА-Яа-яЁёβΒ0-9]+", raw_line))
+        has_short_prefix = bool(re.match(r"^\s*[A-Za-zА-Яа-яЁёβΒ0-9]\s+[A-ZА-ЯЁ]", raw_line))
+        if re.search(r"#\s*\d", raw_line):
+            return None
+        candidate = re.sub(r"^[^A-Za-zА-Яа-яЁёβΒ0-9]+", "", raw_line).strip()
+        parts = candidate.split()
+        if len(parts) > 1 and len(re.sub(r"[^A-Za-zА-Яа-яЁёβΒ]", "", parts[0])) <= 1 and re.match(r"^[A-ZА-ЯЁ]", parts[1]):
+            candidate = " ".join(parts[1:])
+            has_short_prefix = True
+        duration = ""
+        duration_match = re.search(r"(?:[©@®oО0]\s*)*(\d+)\s*([мmчh])\.?", candidate, flags=re.IGNORECASE)
+        if duration_match:
+            number = duration_match.group(1)
+            unit = "ч" if duration_match.group(2).lower() in {"ч", "h"} else "м"
+            duration = f"{number} {unit}."
+            name_part = candidate[:duration_match.start()]
+        else:
+            fallback_duration = re.search(r"(?:[©@®oО0]\s*)*(\d+)4\.", candidate, flags=re.IGNORECASE)
+            if fallback_duration:
+                duration = f"{fallback_duration.group(1)} ч."
+                name_part = candidate[:fallback_duration.start()]
+            else:
+                name_part = candidate
+        if not duration and not (has_icon_prefix or has_short_prefix):
+            return None
+        name = re.sub(r"[©@®0]+", " ", name_part)
+        name = re.sub(r"[^A-Za-zА-Яа-яЁёβΒ\-\s]", " ", name)
+        name = re.sub(r"\s+", " ", name).strip(" -")
+        if len(re.sub(r"[^A-Za-zА-Яа-яЁёβΒ]", "", name)) < 3:
+            return None
+        if duration and not re.match(r"^[A-ZА-ЯЁ]", name):
+            return None
+        if duration and len(re.findall(r"[А-Яа-яЁё]", name)) < len(re.findall(r"[A-Za-z]", name)):
+            return None
+        if re.search(r"(?:с[ыьiі]тост|ж[аеи]жд)", name, flags=re.IGNORECASE):
+            return None
+        if not duration and not re.match(r"^[A-ZА-ЯЁ]", name):
+            return None
+        if not duration and len(name.split()) > 3:
+            return None
+        return name, duration
 
     @staticmethod
     def _build_effects(names: list[str], durations: list[str], descriptions: list[str], modifications: list[str]) -> tuple[ItemEffect, ...]:
@@ -319,6 +664,66 @@ class ItemInfoParser:
                 )
             )
         return tuple(result)
+
+    @staticmethod
+    def _canonical_text(
+        *,
+        title: str,
+        description: str,
+        satiety_change: str,
+        thirst_change: str,
+        poison_chance: str,
+        effects: tuple[ItemEffect, ...],
+        standalone_modifications: tuple[str, ...],
+        condition_percent: str,
+        strength: str,
+        gender: str,
+        weight: str,
+        fallback_lines: list[str],
+    ) -> str:
+        lines: list[str] = []
+        if title:
+            lines.append(title)
+        if description and description != title:
+            lines.append(description)
+        if satiety_change:
+            lines.append(f"{satiety_change} к сытости")
+        if thirst_change:
+            lines.append(f"{thirst_change} к жажде")
+        if poison_chance:
+            lines.append(f"Шанс отравления: {poison_chance}")
+        if effects:
+            lines.append("Эффекты: " + " | ".join(effect.name for effect in effects))
+            durations = [effect.duration for effect in effects if effect.duration]
+            if durations:
+                lines.append("Длительность эффектов: " + " | ".join(durations))
+            descriptions = [effect.description for effect in effects if effect.description]
+            if descriptions:
+                lines.append("Описание эффектов: " + " | ".join(descriptions))
+            modifications = [value for effect in effects for value in effect.parameter_modifications]
+            if modifications:
+                lines.append("Модификация параметров: " + " | ".join(modifications))
+        elif standalone_modifications:
+            lines.append("Модификация параметров: " + " | ".join(standalone_modifications))
+        if strength:
+            lines.append(f"Прочность: {strength}")
+        if gender:
+            lines.append(gender)
+        if condition_percent:
+            lines.append(f"Состояние: {condition_percent}%")
+        if weight:
+            lines.append(f"{weight} кг")
+        if not lines:
+            return "\n".join(fallback_lines)
+        result: list[str] = []
+        seen: set[str] = set()
+        for line in lines:
+            normalized = re.sub(r"\s+", " ", line.casefold()).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(line)
+        return "\n".join(result)
 
 
 class ItemInfoDetector:
@@ -380,14 +785,32 @@ class ItemInfoDetector:
         except Exception:
             return "", "", ""
         self._configure_tesseract(pytesseract)
+        rect = self._refine_rect_for_ocr(frame, rect)
         title_lines = self._ocr_lines(pytesseract, self._title_crop(frame, rect), region="title")
         weight_lines = self._ocr_lines(pytesseract, self._weight_crop(frame, rect), region="weight")
         text_lines = self._ocr_lines(pytesseract, self._text_crop(frame, rect), region="full")
-        title = self._extract_title(text_lines) or self._extract_title(title_lines)
+        title_from_title = self._extract_title(title_lines)
+        title_from_text = self._extract_title(text_lines)
+        title = title_from_text if title_from_text and self._suspicious_title(title_from_title) else title_from_title or title_from_text
         weight = self._extract_weight(weight_lines) or self._extract_weight(text_lines)
         title_group = [title] if title else []
         merged_lines = self._merge_ocr_lines(title_group, text_lines, title_lines, weight_lines)
         return title, weight, "\n".join(merged_lines)
+
+    @staticmethod
+    def _suspicious_title(title: str) -> bool:
+        if not title:
+            return True
+        letters = re.findall(r"[A-Za-zА-Яа-яЁёβΒ]", title)
+        cyrillic = re.findall(r"[А-Яа-яЁё]", title)
+        latin = re.findall(r"[A-Za-z]", title)
+        if len(letters) <= 4 and len(latin) >= len(letters) - 1 and not cyrillic:
+            return True
+        if title.endswith(".") and latin and not cyrillic:
+            return True
+        if not cyrillic and " " in title and (re.search(r"[a-z]", title) or re.search(r"\d", title)):
+            return True
+        return False
 
     @staticmethod
     def _merge_ocr_lines(*groups: list[str]) -> list[str]:
@@ -908,6 +1331,27 @@ class ItemInfoDetector:
         return rect
 
     @staticmethod
+    def _refine_rect_for_ocr(frame: np.ndarray, rect: Rect) -> Rect:
+        height, width = frame.shape[:2]
+        clamped = rect.clamp(width, height)
+        crop = frame[clamped.slice()]
+        if crop.size == 0 or crop.shape[0] < 80:
+            return clamped
+        gray = cv2.cvtColor(crop[:, :, :3], cv2.COLOR_BGR2GRAY)
+        dark_ratio = np.mean(gray < 35, axis=1)
+        window = max(8, min(18, crop.shape[0] // 10))
+        top_window = min(24, crop.shape[0])
+        top_dark = float(np.mean(dark_ratio[:top_window]))
+        best_start = 0
+        for index in range(0, max(1, len(dark_ratio) - window)):
+            if float(np.mean(dark_ratio[index:index + window])) >= 0.88:
+                best_start = index
+                break
+        if best_start > 12 and top_dark < 0.78:
+            return Rect(clamped.x, clamped.y + best_start, clamped.width, clamped.height - best_start).clamp(width, height)
+        return clamped
+
+    @staticmethod
     def _text_crop(frame: np.ndarray, rect: Rect) -> np.ndarray:
         height, width = frame.shape[:2]
         clamped = rect.clamp(width, height)
@@ -921,7 +1365,7 @@ class ItemInfoDetector:
     def _title_crop(frame: np.ndarray, rect: Rect) -> np.ndarray:
         height, width = frame.shape[:2]
         clamped = rect.clamp(width, height)
-        x1 = min(clamped.right, clamped.x + OCR_PADDING_RIGHT)
+        x1 = clamped.x
         y1 = clamped.y
         x2 = max(x1, clamped.right - OCR_PADDING_RIGHT)
         y2 = min(clamped.bottom, clamped.y + TITLE_REGION_HEIGHT)
@@ -931,7 +1375,7 @@ class ItemInfoDetector:
     def _weight_crop(frame: np.ndarray, rect: Rect) -> np.ndarray:
         height, width = frame.shape[:2]
         clamped = rect.clamp(width, height)
-        x1 = min(clamped.right, clamped.x + OCR_PADDING_RIGHT)
+        x1 = clamped.x
         y1 = max(clamped.y, clamped.bottom - WEIGHT_REGION_HEIGHT)
         x2 = min(clamped.right, clamped.x + 130)
         y2 = clamped.bottom
@@ -957,9 +1401,7 @@ class ItemInfoDetector:
         if not groups:
             return crop
         if first:
-            first_group = groups[0]
-            first_ratio = float(np.mean(gray[first_group[0]:first_group[1], :] > 90))
-            top, bottom = first_group if first_ratio >= 0.08 else max(groups, key=lambda group: float(np.mean(gray[group[0]:group[1], :] > 90)))
+            top, bottom = groups[0]
         else:
             top, bottom = groups[-1]
         top = max(0, top - 4)
@@ -979,11 +1421,11 @@ class ItemInfoDetector:
         _, value_threshold = cv2.threshold(value, 50, 255, cv2.THRESH_BINARY)
         _, max_threshold = cv2.threshold(max_channel, 45, 255, cv2.THRESH_BINARY)
         if region == "full":
-            candidates = (value_threshold, gray)
+            candidates = (gray, value_threshold)
         elif region == "title":
-            candidates = (value_threshold,)
+            candidates = (gray, value_threshold)
         else:
-            candidates = (value_threshold,)
+            candidates = (gray, value_threshold)
         best_lines: list[str] = []
         collected_lines: list[str] = []
         for lang, config in cls._ocr_configs(region):
@@ -1056,6 +1498,8 @@ class ItemInfoDetector:
                 continue
             if ItemInfoParser._is_metadata_line(cleaned):
                 continue
+            if cls._suspicious_title(cleaned):
+                continue
             if re.search(r"[><|\[\]{}]", cleaned):
                 continue
             letters = len(re.findall(r"[A-Za-zА-Яа-яЁёβΒ]", cleaned))
@@ -1090,7 +1534,12 @@ class ItemInfoDetector:
 
     @classmethod
     def _extract_weight(cls, lines: list[str]) -> str:
-        unit_pattern = r"(\d+(?:[.,:]\d+)?)\s*(?:кг|kg|кз|кс|ке|кё|кв|кб|ke|xs|me|«g|@|&|№)"
+        unit_pattern = r"(\d+(?:[.,:]\d+)?)\s*(?:кг|kg|кз|кс|ке|кё|кв|кб|ke|xs|me|«g|@|&|№)(?![A-Za-zА-Яа-яЁёβΒ])"
+        for line in reversed(lines):
+            normalized_line = line.replace("O", "0").replace("О", "0")
+            match = re.search(r"^\s*(\d+(?:[.,:]?\d+)?)\s+[^0-9]*(?:состояние|cocтoяние)", normalized_line, flags=re.IGNORECASE)
+            if match:
+                return cls._normalize_weight(match.group(1))
         for line in reversed(lines):
             normalized_line = line.replace("O", "0").replace("О", "0")
             match = re.search(unit_pattern, normalized_line, flags=re.IGNORECASE)

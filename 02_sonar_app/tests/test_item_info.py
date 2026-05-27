@@ -66,6 +66,69 @@ def geometry_rows() -> list[dict[str, str]]:
     return ocr_crop_rows()
 
 
+OCR_SCREENSHOT_EXPECTATIONS = [
+    (
+        "20260524202218_1.jpg",
+        {
+            "title": "Энергетик",
+            "weight": "0.45",
+            "satiety_change": "",
+            "thirst_change": "+50",
+            "condition_percent": "",
+            "poison_chance": "",
+            "effects": ("Ускорение",),
+            "effect_durations": ("15 м.",),
+            "effect_descriptions": ("Ускорение скорости передвижения.",),
+            "parameter_modifications": ("+10% к скорости бега", "+100 к выносливости"),
+            "description": "Напиток, содержащий компоненты обеспечивающие физическую стимуляцию.",
+        },
+    ),
+    (
+        "20260524202315_1.jpg",
+        {
+            "title": "Жаркое из зайца по-домашнему",
+            "weight": "0.85",
+            "satiety_change": "+45",
+            "thirst_change": "+4",
+            "condition_percent": "75",
+            "poison_chance": "Низкий",
+            "effects": ("Вакцина", "Противовирусное", "Детокс"),
+            "effect_durations": (),
+            "effect_descriptions": (
+                "Подавление инфекции и возвращение жизненной силы.",
+                "Избавление от простуды и её симптомов.",
+                "Лечение отравления путём вывода токсинов из организма.",
+            ),
+            "parameter_modifications": (),
+            "description": (
+                "Сытное домашнее блюдо для уютного ужина. Диетическое мясо зайца, медленно "
+                "тушенное в закрытой посуде с молодой картошкой, сладкой морковью и репчатым "
+                "луком. Блюдо можно продать у любого бармена в городе!"
+            ),
+        },
+    ),
+    (
+        "20260524202323_1.jpg",
+        {
+            "title": "BIOLINK",
+            "weight": "0.4",
+            "satiety_change": "+100",
+            "thirst_change": "+100",
+            "condition_percent": "",
+            "poison_chance": "",
+            "effects": ("Анабиоз",),
+            "effect_durations": ("5 ч.",),
+            "effect_descriptions": ("Избавление от жажды и голода.",),
+            "parameter_modifications": (),
+            "description": (
+                "Инновационный продукт, утоляющий жажду и голод. "
+                "Революционное решение для управления потребностями организма."
+            ),
+        },
+    ),
+]
+
+
 def expected_rect(row: dict[str, str], scale: float = 1.0) -> Rect:
     width = int(row["block_width"])
     height = int(row["block_height"])
@@ -165,6 +228,27 @@ def test_item_info_detector_reads_crop_metadata(row: dict[str, str]):
     assert " | ".join(parsed.parameter_modifications) == row["parameter_modifications"]
     assert parsed.strength == row["strength"]
     assert parsed.gender == row["gender"]
+
+
+@pytest.mark.parametrize("source_image, expected", OCR_SCREENSHOT_EXPECTATIONS, ids=[item[0] for item in OCR_SCREENSHOT_EXPECTATIONS])
+def test_item_info_detector_reads_problematic_screenshot_ocr(source_image: str, expected: dict[str, object]):
+    frame = cv2.imread(str(FIXTURE_DIR / "images" / source_image))
+    assert frame is not None
+
+    item_info = ItemInfoDetector().detect(frame, read_text=True)
+
+    assert item_info is not None
+    assert item_info.title == expected["title"]
+    assert item_info.weight == expected["weight"]
+    assert item_info.satiety_change == expected["satiety_change"]
+    assert item_info.thirst_change == expected["thirst_change"]
+    assert item_info.condition_percent == expected["condition_percent"]
+    assert item_info.poison_chance == expected["poison_chance"]
+    assert item_info.effect_names == expected["effects"]
+    assert item_info.effect_durations == expected["effect_durations"]
+    assert item_info.effect_descriptions == expected["effect_descriptions"]
+    assert item_info.parameter_modifications == expected["parameter_modifications"]
+    assert item_info.description == expected["description"]
 
 
 @pytest.mark.parametrize("row", low_res_rows(), ids=lambda row: row["source_image"])
