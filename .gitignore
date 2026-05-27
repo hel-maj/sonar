@@ -50,6 +50,14 @@ dist/
 /02_sonar_app/logs/
 /02_sonar_app/debug_capture/
 /02_sonar_app/training_data/TEMP_DELETE_LATER*/
+/02_sonar_app/test_info_ocr/**/*.jpg
+/02_sonar_app/test_info_ocr/**/*.jpeg
+/02_sonar_app/test_info_ocr/**/*.png
+/02_sonar_app/test_info_ocr/**/*.webp
+/02_sonar_app/test_info_ocr/**/*.bmp
+/02_sonar_app/test_info_ocr/**/*.gif
+/02_sonar_app/test_info_ocr/result/*
+/02_sonar_app/test_info_ocr/results/*
 *.runtime
 *.tmp
 *.bak
