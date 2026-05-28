@@ -43,7 +43,11 @@ python scripts\upload_build_archives.py
 
 ## Можно ли просто создать `.env`
 
-Да. Сейчас `scripts\build_secure.ps1` через `prepare_build_branding.py` и `scripts\upload_build_archives.py` читают `.env` без дополнительных пакетов.
+Да. Сейчас `.env` читают:
+
+- запуск из исходников `python -m sonar`;
+- `scripts\build_secure.ps1` через `prepare_build_branding.py`;
+- `scripts\upload_build_archives.py`.
 
 Создайте файл:
 
@@ -62,6 +66,7 @@ SONAR_UPLOAD_HOST=m-sonar-addr.ru
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
+python -m sonar --debug --keep-debug-capture
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 1 -NoLto
 python scripts\upload_build_archives.py
 ```
