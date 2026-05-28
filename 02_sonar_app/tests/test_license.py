@@ -6,7 +6,7 @@ from sonar.config.manager import ConfigManager
 from sonar.license.client import KeygenLicenseClient, LicenseStatus, _extract_ip_address, mask_license_key, parse_keygen_status
 from sonar.license.hwid import machine_fingerprint
 from sonar.license.manager import LicenseManager
-from sonar.license.secrets import decrypt_license_server_url
+from sonar.license.secrets import decrypt_license_account_id, decrypt_license_server_url
 
 
 def test_license_key_mask_matches_ui_format():
@@ -131,8 +131,50 @@ def test_machine_fingerprint_is_sha256_hex():
     assert all(char in "0123456789abcdef" for char in fingerprint)
 
 
-def test_license_server_url_is_decrypted_at_runtime():
+def test_license_server_url_is_decrypted_at_runtime(monkeypatch, tmp_path):
+    monkeypatch.setenv("SONAR_DOTENV_PATH", str(tmp_path / "missing.env"))
+    monkeypatch.delenv("SONAR_LICENSE_SERVER_URL", raising=False)
+    monkeypatch.delenv("SONAR_LICENSE_ACCOUNT_ID", raising=False)
+    import sonar.env as sonar_env
+
+    sonar_env.load_dotenv.cache_clear()
+
     assert decrypt_license_server_url() == "https://updates.example.invalid"
+
+
+def test_license_server_url_can_come_from_dotenv(monkeypatch, tmp_path):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "\n".join(
+            [
+                "SONAR_LICENSE_SERVER_URL=https://m-sonar-addr.ru/",
+                "SONAR_LICENSE_ACCOUNT_ID=account-from-dotenv",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SONAR_DOTENV_PATH", str(dotenv))
+    monkeypatch.delenv("SONAR_LICENSE_SERVER_URL", raising=False)
+    monkeypatch.delenv("SONAR_LICENSE_ACCOUNT_ID", raising=False)
+    import sonar.env as sonar_env
+
+    sonar_env.load_dotenv.cache_clear()
+
+    assert decrypt_license_server_url() == "https://m-sonar-addr.ru"
+    assert decrypt_license_account_id() == "account-from-dotenv"
+
+
+def test_license_server_url_prefers_environment_over_dotenv(monkeypatch, tmp_path):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("SONAR_LICENSE_SERVER_URL=https://dotenv.example.test\n", encoding="utf-8")
+    monkeypatch.setenv("SONAR_DOTENV_PATH", str(dotenv))
+    monkeypatch.setenv("SONAR_LICENSE_SERVER_URL", "https://env.example.test/")
+    import sonar.env as sonar_env
+
+    sonar_env.load_dotenv.cache_clear()
+
+    assert decrypt_license_server_url() == "https://env.example.test"
 
 
 class FakeResponse:

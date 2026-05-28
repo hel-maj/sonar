@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from sonar.env import env_value
 from sonar.security.runtime import decrypt_text_literal
 
 
 def decrypt_license_server_url() -> str:
-    return decrypt_text_literal("license_server_url").rstrip("/")
+    return (env_value("SONAR_LICENSE_SERVER_URL") or decrypt_text_literal("license_server_url")).rstrip("/")
 
 
 def decrypt_license_account_id() -> str:
-    return decrypt_text_literal("license_account_id")
+    return env_value("SONAR_LICENSE_ACCOUNT_ID") or decrypt_text_literal("license_account_id")
