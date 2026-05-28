@@ -19,7 +19,9 @@ import numpy as np
 
 from sonar.automation.input_controller import InputController
 from sonar.core.logging import debug_log
+from sonar.fishing.constants import PROCESS_NAME
 from sonar.paths import LOG_DIR
+from sonar.security.runtime import decrypt_json_literal
 
 
 PROCESS_ALL_READ = 0x0410
@@ -59,45 +61,37 @@ STATIONARY_TARGET_SECONDS = 0.45
 STATIONARY_TARGET_MIN_DISTANCE = 5.0
 UNREADABLE_REJECT_SECONDS = 0.08
 UNREADABLE_REJECT_COUNT = 3
-POS_OFFSETS = (0x50, 0x40, 0x60, 0x30)
-FISH_POS_OFFSETS = (0x130, 0x120, 0x90, 0x110, 0x160)
+_MEMORY_CONFIG = decrypt_json_literal("memory_reeling")
+POS_OFFSETS = tuple(int(item) for item in _MEMORY_CONFIG["pos_offsets"])
+FISH_POS_OFFSETS = tuple(int(item) for item in _MEMORY_CONFIG["fish_pos_offsets"])
 FISH_LOCAL_X_RANGE = (1.5, 45.0)
 FISH_LOCAL_Y_RANGE = (1.0, 12.0)
 FISH_LOCAL_Z_RANGE = (-0.75, 0.75)
 FISH_DIRECTION_MAX_ABS = 4.0
-FISH_PRIMARY_DIRECTION_OFFSETS = frozenset({0x304, 0x68, 0x300, 0x70})
-FISH_DIRECTION_SOURCE_RANK = {0x304: 0, 0x68: 1, 0x300: 2, 0x70: 3}
+FISH_PRIMARY_DIRECTION_OFFSETS = frozenset(int(item) for item in _MEMORY_CONFIG["fish_primary_direction_offsets"])
+FISH_DIRECTION_SOURCE_RANK = {int(offset): int(rank) for offset, rank in _MEMORY_CONFIG["fish_direction_source_rank"]}
 ALLOW_UNKNOWN_FISH_CANDIDATES = False
 DIRECTION_STALE_EPS = 0.01
 DIRECTION_STALE_SECONDS = 1.6
 FISH_DIRECTION_CONSENSUS_EPS = 1.5
 FISH_DIRECTION_CONSENSUS_MAX_CONTRIBUTION = 3.0
 FISH_DIRECTION_ALIGNMENT_THRESHOLD = 12
-FISH_DIRECTION_ANCHOR_OFFSET = 0x68
+FISH_DIRECTION_ANCHOR_OFFSET = int(_MEMORY_CONFIG["fish_direction_anchor_offset"])
 FISH_DIRECTION_ANCHOR_SCALE = 0.0017
 FISH_DIRECTION_ANCHOR_WEIGHT = 1.5
 CONFIRMED_DEAD_DIRECTION_EPS = 0.05
 CONFIRMED_DEAD_DIRECTION_SECONDS = 1.0
 CONFIRMED_DEAD_DIRECTION_COUNT = 6
-FISH_DIRECTION_FIELDS = (
-    (0x304, 0.08, 1.0),
-    (0x68, 0.0012, 1.0),
-    (0x300, 0.08, 1.0),
-    (0x70, 0.08, 1.0),
-    (0x80, 0.08, -1.0),
-    (0x64, 0.08, -1.0),
-    (0x314, 0.08, -1.0),
+FISH_DIRECTION_FIELDS = tuple(
+    (int(offset), float(eps), float(polarity))
+    for offset, eps, polarity in _MEMORY_CONFIG["fish_direction_fields"]
 )
 # Confirmed fish direction fields have different numeric ranges and their
 # polarity can change with the fishing local frame. 0x68 is the anchor; the
 # broader heading fields learn same/opposite polarity relative to it per fish.
-FISH_DIRECTION_ADAPTIVE_FIELDS = (
-    (0x304, 0.68, 0.4),
-    (0x300, 0.68, 0.75),
-    (0x70, 0.68, 0.75),
-    (0x80, 0.25, 0.9),
-    (0x64, 0.68, 0.75),
-    (0x314, 1.36, 0.25),
+FISH_DIRECTION_ADAPTIVE_FIELDS = tuple(
+    (int(offset), float(anchor_eps), float(weight))
+    for offset, anchor_eps, weight in _MEMORY_CONFIG["fish_direction_adaptive_fields"]
 )
 FISH_DIRECTION_FIELD_CONFIG = {offset: (eps, polarity) for offset, eps, polarity in FISH_DIRECTION_FIELDS}
 MANUAL_REELING_ENV = "SONAR_REELING_MANUAL_MODE"
@@ -120,51 +114,18 @@ MAX_REGION_BYTES = 536_870_912
 MARKER_REGION_CHUNK = 32 * 1024 * 1024
 SCAN_HALF_RANGE = 0x20000000
 
-REPLAY_PATTERNS: tuple[tuple[tuple[int | None, ...], int, int, tuple[int, ...]], ...] = (
-    ((72, 139, 5, None, None, None, None, 72, 139, 72, 8, 72, 133, 201), 3, 7, (8,)),
-    ((72, 139, 5, None, None, None, None, 243, 15, 16, 80), 3, 7, (8, 16)),
-    ((72, 139, 5, None, None, None, None, 72, 133, 192), 3, 7, (8, 16, 24)),
-    ((72, 139, 13, None, None, None, None, 72, 133, 201), 3, 7, (8,)),
-    ((72, 139, 5, None, None, None, None, 51, 255), 3, 7, (8,)),
+REPLAY_PATTERNS: tuple[tuple[tuple[int | None, ...], int, int, tuple[int, ...]], ...] = tuple(
+    (
+        tuple(None if value is None else int(value) for value in pattern),
+        int(rel_off),
+        int(insn_len),
+        tuple(int(offset) for offset in offsets),
+    )
+    for pattern, rel_off, insn_len, offsets in _MEMORY_CONFIG["replay_patterns"]
 )
 
-CPED_PATTERN: tuple[int | None, ...] = (
-    72,
-    141,
-    13,
-    None,
-    None,
-    None,
-    None,
-    72,
-    139,
-    215,
-    232,
-    None,
-    None,
-    None,
-    None,
-    72,
-    141,
-    13,
-    None,
-    None,
-    None,
-    None,
-    138,
-    216,
-    232,
-    None,
-    None,
-    None,
-    None,
-    132,
-    219,
-    117,
-    19,
-    72,
-    141,
-    13,
+CPED_PATTERN: tuple[int | None, ...] = tuple(
+    None if value is None else int(value) for value in _MEMORY_CONFIG["cped_pattern"]
 )
 
 
@@ -218,7 +179,7 @@ class MEMORY_BASIC_INFORMATION(ctypes.Structure):
 class MemoryReelingTracker:
     def __init__(
         self,
-        process_name: str = "gta5.exe",
+        process_name: str = PROCESS_NAME,
         input_controller: InputController | None = None,
         log_callback: Callable[[str], None] | None = None,
         manual_input_mode: bool | None = None,

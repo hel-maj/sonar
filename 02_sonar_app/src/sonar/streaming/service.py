@@ -22,6 +22,7 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from sonar.paths import CONFIG_DIR, PROJECT_DIR, RESOURCE_DIR
+from sonar.security.runtime import decrypt_json_literal, decrypt_text_literal
 from sonar.streaming.chat import CHAT_COMMANDS, ChatActionResult, ChatCommand, ChatDetection, ChatTab
 from sonar.vision.geometry import Rect
 
@@ -33,8 +34,9 @@ STREAMING_RESOURCE_DIR = RESOURCE_DIR / "streaming"
 CHAT_ICON_DIR = RESOURCE_DIR / "chat_icons"
 STREAMING_CACHE_DIR = CONFIG_DIR / "streaming"
 LEGACY_STREAMING_CACHE_DIR = PROJECT_DIR / "02_sonar_app" / "config" / "streaming"
-FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-CLOUDFLARED_DOWNLOAD_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+FFMPEG_DOWNLOAD_URL = decrypt_text_literal("ffmpeg_download_url")
+CLOUDFLARED_DOWNLOAD_URL = decrypt_text_literal("cloudflared_download_url")
+WEBENGINE_PROCESS_NAME = str(decrypt_json_literal("player_status")["webengine_process_name"])
 DOWNLOAD_TIMEOUT_SECONDS = 180.0
 HLS_READY_TIMEOUT_SECONDS = 15.0
 HLS_READY_POLL_SECONDS = 0.1
@@ -1876,7 +1878,7 @@ class StreamingService:
                 self._chat_confirm_scan_running = False
 
     def _find_chat_confirmation_hit(self, query: str, process_hint: tuple[str, int] | None) -> dict[str, object] | None:
-        process_value = str(process_hint[1]) if process_hint is not None else "majestic-webengine.exe"
+        process_value = str(process_hint[1]) if process_hint is not None else WEBENGINE_PROCESS_NAME
         command = [
             sys.executable,
             "-m",

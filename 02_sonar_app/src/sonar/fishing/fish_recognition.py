@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from sonar.fishing.constants import FISH_MATCH_THRESHOLD, fish_roi_for_resolution, resolution_name
+from sonar.fishing.constants import FISH_MATCH_THRESHOLD, PROCESS_NAME, fish_roi_for_resolution, resolution_name
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.capture import WindowCapture
 from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
@@ -13,7 +13,7 @@ from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
 
 @dataclass(slots=True)
 class FishRecognition:
-    process_name: str = "gta5.exe"
+    process_name: str = PROCESS_NAME
     resource_dir: Path = FISHING_RESOURCE_DIR
     threshold: float = FISH_MATCH_THRESHOLD
     capture: WindowCapture = field(init=False)

@@ -27,7 +27,7 @@ from sonar.core.sounds import play_sound
 from sonar.core.events import UiEventMessage, event_bus
 from sonar.core.state import BotPhase, BotState
 from sonar.fishing.catch_screen import CatchScreenDetector, CatchScreenResult
-from sonar.fishing.constants import BOT_DELAYS, TRIGGER_ROIS_FHD, resolution_name
+from sonar.fishing.constants import BOT_DELAYS, PROCESS_NAME, TRIGGER_ROIS_FHD, resolution_name
 from sonar.fishing.casting_a_fishing_rod import GreenPixelMonitor, create_monitor_for_frame as create_casting_monitor
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
 from sonar.fishing.fish_recognition import FishRecognition
@@ -143,7 +143,7 @@ class FishingBot:
     session_stats: FishingSessionStats = field(
         default_factory=lambda: FishingSessionStats(default_prices=parse_fish_prices_from_markdown())
     )
-    process_name: str = "gta5.exe"
+    process_name: str = PROCESS_NAME
     keep_debug_capture: bool = False
     manual_reeling_mode: bool = False
     state: BotState = field(default_factory=BotState)

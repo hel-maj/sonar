@@ -1,6 +1,6 @@
-# Offline wheelhouse for Python 3.12
+# Offline wheelhouse для Python 3.12
 
-Эта схема нужна, чтобы тесты Sonar ставили PySide6 и остальные зависимости без интернета.
+Эта схема нужна, чтобы ставить зависимости Sonar без интернета.
 
 ## Структура
 
@@ -21,20 +21,12 @@
     test.sh
 ```
 
-`.venv/` не коммитится. `wheelhouse/**/*.whl` коммитится через Git LFS.
+`.venv` не коммитится. Wheels хранятся в `wheelhouse`.
 
-## Один раз включить Git LFS
-
-```bash
-git lfs install
-git lfs pull
-```
-
-## Скачать wheelhouse для Windows
-
-Запускать из `02_sonar_app` на Windows с Python 3.12:
+## Скачать wheelhouse на Windows
 
 ```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
 .\scripts\download_wheelhouse.ps1
 ```
 
@@ -44,11 +36,10 @@ git lfs pull
 wheelhouse/windows-py312/
 ```
 
-## Скачать wheelhouse для Linux
-
-Запускать из `02_sonar_app` на Linux с Python 3.12:
+## Скачать wheelhouse на Linux
 
 ```bash
+cd 02_sonar_app
 chmod +x scripts/download_wheelhouse.sh
 ./scripts/download_wheelhouse.sh
 ```
@@ -59,16 +50,10 @@ chmod +x scripts/download_wheelhouse.sh
 wheelhouse/linux-py312/
 ```
 
-## Закоммитить wheelhouse
-
-```bash
-git add .gitattributes 02_sonar_app/requirements-offline-py312.txt 02_sonar_app/requirements-test.txt 02_sonar_app/wheelhouse 02_sonar_app/scripts 02_sonar_app/docs/offline_wheelhouse_py312.md
-git commit -m "Add offline Python 3.12 wheelhouse workflow"
-```
-
 ## Установить зависимости без интернета на Windows
 
 ```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
 .\scripts\install_venv_offline.ps1
 ```
 
@@ -77,13 +62,14 @@ git commit -m "Add offline Python 3.12 wheelhouse workflow"
 ## Установить зависимости без интернета на Linux
 
 ```bash
+cd 02_sonar_app
 chmod +x scripts/install_venv_offline.sh
 ./scripts/install_venv_offline.sh
 ```
 
 Скрипт создаст `.venv` через `python3.12` и установит проект с test-зависимостями из `wheelhouse/linux-py312`.
 
-## Запустить тесты
+## Запустить тесты через локальный venv
 
 Windows:
 
@@ -97,8 +83,6 @@ Linux:
 chmod +x scripts/test.sh
 ./scripts/test.sh
 ```
-
-Эти test-скрипты всегда используют локальный `.venv`, а не глобальный Python.
 
 ## Важно
 

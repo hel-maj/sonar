@@ -9,6 +9,7 @@ from pathlib import Path
 import psutil
 
 from sonar.fishing.memory_reeling import PROCESS_ALL_READ
+from sonar.fishing.constants import PROCESS_NAME
 from sonar.paths import LOG_DIR
 
 
@@ -28,7 +29,7 @@ class InventoryMemoryCandidate:
 class InventoryMemoryDetector:
     _candidate_re = re.compile(r"addr=0x([0-9A-Fa-f]+)\s+byte\s+closed=(\d+)\s+open=(\d+)")
 
-    def __init__(self, process_name: str = "gta5.exe", report_dir: Path | None = None) -> None:
+    def __init__(self, process_name: str = PROCESS_NAME, report_dir: Path | None = None) -> None:
         self.process_name = process_name
         self.report_dir = report_dir or LOG_DIR / "memory_snapshots"
         self._report_path: Path | None = None

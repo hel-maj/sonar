@@ -20,6 +20,7 @@ from sonar.fishing.item_info import ItemInfo
 from sonar.fishing.player_status import PlayerStatus
 from sonar.fishing.statistics import FishStatsRow, SessionTotals, format_catch_summary, format_duration, format_money, format_money_range, format_weight
 from sonar.fishing.tackle_detection import TackleItemCount, format_tackle_items
+from sonar.security.runtime import decrypt_text_literal
 
 
 def _h(value: object) -> str:
@@ -872,7 +873,7 @@ class NotificationManager:
         return self.send_message(text, chat_id=chat_id, reply_markup=reply_markup)
 
     def _api_url(self, method: str) -> str:
-        return f"https://api.telegram.org/bot{self.settings.bot_token}/{method}"
+        return f"{decrypt_text_literal('telegram_api_base')}/bot{self.settings.bot_token}/{method}"
 
     def _api_post(self, method: str, **kwargs) -> requests.Response | None:
         if not self.settings.bot_token:

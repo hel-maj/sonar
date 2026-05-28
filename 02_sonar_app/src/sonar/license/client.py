@@ -10,7 +10,9 @@ from typing import Any
 
 import requests
 
-from sonar.build_metadata import APP_BUILD_HASH, APP_NAME
+from sonar.build_metadata import APP_BUILD_HASH, APP_BUILD_KEY, APP_NAME
+from sonar.license.features import entitlements_from_metadata
+from sonar.security.runtime import decrypt_json_literal
 
 
 JSON_API_HEADERS = {
@@ -26,13 +28,6 @@ ACTIVATION_CODES = {
     "NO_MACHINES",
 }
 
-PUBLIC_IP_SERVICES = (
-    "https://api.ipify.org",
-    "https://ifconfig.me/ip",
-    "https://ident.me",
-    "https://icanhazip.com",
-    "https://ipinfo.io/ip",
-)
 PUBLIC_IP_TIMEOUT = 1.5
 
 
@@ -45,7 +40,11 @@ class LicenseStatus:
     expires_at: datetime | None = None
     latest_version: str = ""
     update_message: str = ""
+    download_link: str = ""
     role: str = "user"
+    group: str = "legacy"
+    features: tuple[str, ...] = ()
+    denied_features: tuple[str, ...] = ()
     error: str = ""
     code: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
@@ -62,6 +61,7 @@ class KeygenLicenseClient:
         account_id: str = "",
         *,
         build_hash: str = APP_BUILD_HASH,
+        build_key: str = APP_BUILD_KEY,
         app_name: str = APP_NAME,
         timeout: float = 8.0,
         session: requests.Session | None = None,
@@ -69,6 +69,7 @@ class KeygenLicenseClient:
         self.server_url = server_url.rstrip("/")
         self.account_id = account_id.strip()
         self.build_hash = build_hash.strip() or "dev"
+        self.build_key = build_key.strip() or "dev"
         self.app_name = app_name.strip() or "Sonar"
         self.timeout = timeout
         self.session = session or requests.Session()
@@ -97,7 +98,7 @@ class KeygenLicenseClient:
         }
         try:
             response = self.session.post(
-                self._url("/licenses/actions/validate-key"),
+                self._url("/licenses/actions/validate-key?include=policy"),
                 headers=self._headers(),
                 json=payload,
                 timeout=self.timeout,
@@ -172,6 +173,7 @@ class KeygenLicenseClient:
         if include_metadata:
             attributes["metadata"] = {
                 "build_hash": self.build_hash,
+                "build_key": self.build_key,
                 "app_name": self.app_name,
                 "windows_user": _windows_username(),
                 "local_ip": local_ip,
@@ -184,6 +186,7 @@ class KeygenLicenseClient:
             **JSON_API_HEADERS,
             "User-Agent": f"{self.app_name}/1.0 SonarBuild/{self.build_hash}",
             "X-Sonar-Build-Hash": self.build_hash,
+            "X-Sonar-Build-Key": self.build_key,
         }
         if extra:
             headers.update(extra)
@@ -199,7 +202,33 @@ class KeygenLicenseClient:
                 masked_key=mask_license_key(license_key),
                 error=f"Сервер лицензий вернул HTTP {response.status_code}",
             )
-        return parse_keygen_status(body, license_key, http_status=response.status_code)
+        status = parse_keygen_status(body, license_key, http_status=response.status_code)
+        if status.valid:
+            _apply_release_metadata(status, self._fetch_release_metadata())
+        return status
+
+    def _fetch_release_metadata(self) -> dict[str, Any]:
+        url = (os.environ.get("SONAR_RELEASE_METADATA_URL") or self._release_metadata_url()).strip()
+        if not url:
+            return {}
+        try:
+            response = self.session.get(
+                url,
+                headers=self._headers({"Accept": "application/json"}),
+                timeout=min(self.timeout, 3.0),
+            )
+        except (AttributeError, requests.RequestException):
+            return {}
+        if not getattr(response, "ok", False):
+            return {}
+        try:
+            body = response.json()
+        except ValueError:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    def _release_metadata_url(self) -> str:
+        return f"{self.server_url}/sonar-release.json"
 
 
 def parse_keygen_status(body: dict[str, Any], license_key: str = "", *, http_status: int = 200) -> LicenseStatus:
@@ -215,17 +244,22 @@ def parse_keygen_status(body: dict[str, Any], license_key: str = "", *, http_sta
     if not valid and not error and http_status >= 400:
         error = f"Сервер лицензий вернул HTTP {http_status}"
     expires_at = parse_keygen_datetime(attributes.get("expiry") or attributes.get("expires") or attributes.get("expiresAt"))
-    latest_version, update_message = _version_fields(attributes)
-    role = _license_role(attributes)
+    metadata = _merged_metadata(body, data, attributes)
+    role = _license_role(metadata, attributes)
+    entitlements = entitlements_from_metadata(metadata, role=role)
     return LicenseStatus(
         valid=valid,
         license_key=key,
         license_id=license_id,
         masked_key=mask_license_key(key),
         expires_at=expires_at,
-        latest_version=latest_version,
-        update_message=update_message,
-        role=role,
+        latest_version="",
+        update_message="",
+        download_link="",
+        role=entitlements.role,
+        group=entitlements.group,
+        features=tuple(sorted(entitlements.allowed)),
+        denied_features=tuple(sorted(entitlements.denied)),
         error=error,
         code=code,
         raw=body,
@@ -257,8 +291,8 @@ def mask_license_key(key: str) -> str:
     return f"{text[:5]}*****{text[-5:]}"
 
 
-def _version_fields(attributes: dict[str, Any]) -> tuple[str, str]:
-    metadata = attributes.get("metadata") if isinstance(attributes.get("metadata"), dict) else {}
+def _version_fields(metadata: dict[str, Any], attributes: dict[str, Any] | None = None) -> tuple[str, str, str]:
+    attributes = attributes or {}
     latest_version = str(
         metadata.get("latest_version")
         or metadata.get("latestVersion")
@@ -276,11 +310,20 @@ def _version_fields(attributes: dict[str, Any]) -> tuple[str, str]:
         or attributes.get("description")
         or ""
     )
-    return latest_version, update_message
+    download_link = str(
+        metadata.get("download_link")
+        or metadata.get("downloadLink")
+        or metadata.get("download_url")
+        or metadata.get("downloadUrl")
+        or metadata.get("release_url")
+        or metadata.get("releaseUrl")
+        or ""
+    ).strip()
+    return latest_version, update_message, download_link
 
 
-def _license_role(attributes: dict[str, Any]) -> str:
-    metadata = attributes.get("metadata") if isinstance(attributes.get("metadata"), dict) else {}
+def _license_role(metadata: dict[str, Any], attributes: dict[str, Any] | None = None) -> str:
+    attributes = attributes or {}
     raw_role = (
         metadata.get("role")
         or metadata.get("sonar_role")
@@ -294,6 +337,52 @@ def _license_role(attributes: dict[str, Any]) -> str:
         raw_role = "admin"
     role = str(raw_role or "user").strip().lower()
     return role or "user"
+
+
+def _merged_metadata(body: dict[str, Any], data: dict[str, Any], attributes: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    metadata.update(_included_relationship_metadata(body, data))
+    license_metadata = attributes.get("metadata") if isinstance(attributes.get("metadata"), dict) else {}
+    metadata.update(license_metadata)
+    return metadata
+
+
+def _included_relationship_metadata(body: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    included = body.get("included") if isinstance(body.get("included"), list) else []
+    relationships = data.get("relationships") if isinstance(data.get("relationships"), dict) else {}
+    related_keys: set[tuple[str, str]] = set()
+    for relation in relationships.values():
+        if not isinstance(relation, dict):
+            continue
+        related_data = relation.get("data")
+        items = related_data if isinstance(related_data, list) else [related_data]
+        for item in items:
+            if isinstance(item, dict):
+                related_keys.add((str(item.get("type") or ""), str(item.get("id") or "")))
+
+    metadata: dict[str, Any] = {}
+    for item in included:
+        if not isinstance(item, dict):
+            continue
+        item_key = (str(item.get("type") or ""), str(item.get("id") or ""))
+        if related_keys and item_key not in related_keys:
+            continue
+        attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+        item_metadata = attrs.get("metadata") if isinstance(attrs.get("metadata"), dict) else {}
+        metadata.update(item_metadata)
+    return metadata
+
+
+def _apply_release_metadata(status: LicenseStatus, metadata: dict[str, Any]) -> None:
+    if not metadata:
+        return
+    latest_version, update_message, download_link = _version_fields(metadata)
+    if latest_version:
+        status.latest_version = latest_version
+    if update_message:
+        status.update_message = update_message
+    if download_link:
+        status.download_link = download_link
 
 
 def _error_detail(errors: list[Any]) -> str:
@@ -327,7 +416,7 @@ def _detect_local_ip() -> str:
 
 def _detect_public_ip() -> str:
     headers = {"User-Agent": f"{APP_NAME}/1.0"}
-    for url in PUBLIC_IP_SERVICES:
+    for url in decrypt_json_literal("public_ip_services"):
         try:
             response = requests.get(url, headers=headers, timeout=PUBLIC_IP_TIMEOUT)
             if not response.ok:

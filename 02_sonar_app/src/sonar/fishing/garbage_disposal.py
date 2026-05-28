@@ -10,6 +10,7 @@ from sonar.fishing.constants import (
     GARBAGE_MATCH_THRESHOLD,
     GARBAGE_TEMPLATE_FILES_2K,
     GARBAGE_TEMPLATE_FILES_FHD,
+    PROCESS_NAME,
     garbage_roi_for_resolution,
     resolution_name,
 )
@@ -27,7 +28,7 @@ GARBAGE_NAMES = {
 
 @dataclass(slots=True)
 class GarbageDisposal:
-    process_name: str = "gta5.exe"
+    process_name: str = PROCESS_NAME
     resource_dir: Path = FISHING_RESOURCE_DIR
     threshold: float = GARBAGE_MATCH_THRESHOLD
     input_controller: InputController = field(default_factory=InputController)
