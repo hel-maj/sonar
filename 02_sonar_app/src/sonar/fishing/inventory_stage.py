@@ -17,7 +17,7 @@ from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
 
 INVENTORY_REFERENCE_WIDTH = 1920
 INVENTORY_REFERENCE_HEIGHT = 1080
-INVENTORY_TITLE_MATCH_THRESHOLD = 0.62
+INVENTORY_TITLE_MATCH_THRESHOLD = 0.86
 INVENTORY_CLOSE_MATCH_THRESHOLD = 0.72
 
 
@@ -44,7 +44,9 @@ class InventoryStageDetector:
         if self._last_cache_signature == signature and now - self._last_cache_at < 0.35:
             return self._last_cache_result
 
-        result = self._detect_by_text(frame, roi)
+        result = self._detect_by_template(frame, roi)
+        if result is None:
+            result = self._detect_by_text(frame, roi)
         self._last_cache_at = now
         self._last_cache_signature = signature
         self._last_cache_result = result
@@ -78,6 +80,18 @@ class InventoryStageDetector:
         crop = frame[roi.slice()]
         sample = crop[:: max(1, crop.shape[0] // 32), :: max(1, crop.shape[1] // 64)]
         return (frame.shape[1], frame.shape[0], int(np.mean(sample)), int(np.std(sample)))
+
+    def _detect_by_template(self, frame: np.ndarray, roi: Rect) -> TemplateMatch | None:
+        if self.title_template is None:
+            return None
+        height, width = frame.shape[:2]
+        return self.title_matcher.find_best_scaled(
+            frame,
+            self.title_template,
+            roi=roi,
+            name="inventory_text",
+            scales=self._scales_for_frame(width, height),
+        )
 
     def _detect_by_text(self, frame: np.ndarray, roi: Rect) -> TemplateMatch | None:
         text = self._read_top_text(frame, roi)

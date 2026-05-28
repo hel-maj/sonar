@@ -52,9 +52,18 @@ def stage_from_detections(matches: dict[str, float]) -> str | None:
         "inventory_487.jpg",
         "inventory_490.jpg",
         "inventory_492.jpg",
+        "inventory_irp_481.jpg",
+        "inventory_irp_482.jpg",
+        "inventory_irp_483.jpg",
+        "inventory_irp_484.jpg",
+        "inventory_irp_485.jpg",
+        "inventory_irp_489.jpg",
+        "inventory_no_irp_479.jpg",
+        "inventory_no_irp_480.jpg",
+        "inventory_no_irp_491.jpg",
     ],
 )
-def test_inventory_open_is_detected_by_top_text(fixture):
+def test_inventory_open_is_detected(fixture):
     assert InventoryStageDetector().is_open(load_frame(fixture)) is True
 
 
