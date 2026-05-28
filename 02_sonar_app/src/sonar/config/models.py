@@ -164,6 +164,9 @@ class LicenseSettings:
     last_validated_at: str = ""
     expires_at: str = ""
     role: str = "user"
+    group: str = "legacy"
+    features: list[str] = field(default_factory=list)
+    denied_features: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LicenseSettings":
@@ -174,10 +177,23 @@ class LicenseSettings:
             last_validated_at=str(data.get("last_validated_at", defaults.last_validated_at)).strip(),
             expires_at=str(data.get("expires_at", defaults.expires_at)).strip(),
             role=str(data.get("role", defaults.role)).strip() or defaults.role,
+            group=str(data.get("group", defaults.group)).strip() or defaults.group,
+            features=_string_list(data.get("features", defaults.features)),
+            denied_features=_string_list(data.get("denied_features", defaults.denied_features)),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.replace(";", ",").split(",") if item.strip()]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
 
 
 @dataclass(slots=True)

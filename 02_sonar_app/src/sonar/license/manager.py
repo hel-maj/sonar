@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sonar.config.manager import ConfigManager
 from sonar.license.client import KeygenLicenseClient, LicenseStatus, mask_license_key, parse_keygen_datetime
+from sonar.license.features import entitlements_from_cached_fields
 from sonar.license.hwid import machine_fingerprint
 from sonar.license.secrets import decrypt_license_account_id, decrypt_license_server_url
 
@@ -16,13 +17,22 @@ class LicenseManager:
         settings = self.config_manager.load().license
         expires_at = parse_keygen_datetime(settings.expires_at)
         valid = bool(settings.license_key and expires_at and expires_at > datetime.now(timezone.utc))
+        entitlements = entitlements_from_cached_fields(
+            role=settings.role,
+            group=settings.group,
+            features=settings.features,
+            denied_features=settings.denied_features,
+        )
         return LicenseStatus(
             valid=valid,
             license_key=settings.license_key,
             license_id=settings.license_id,
             masked_key=mask_license_key(settings.license_key),
             expires_at=expires_at,
-            role=settings.role or "user",
+            role=entitlements.role,
+            group=entitlements.group,
+            features=tuple(sorted(entitlements.allowed)),
+            denied_features=tuple(sorted(entitlements.denied)),
         )
 
     def check_saved_license(self) -> LicenseStatus:
@@ -41,5 +51,8 @@ class LicenseManager:
             settings.license.last_validated_at = datetime.now(timezone.utc).isoformat()
             settings.license.expires_at = status.expires_at.isoformat() if status.valid and status.expires_at else ""
             settings.license.role = status.role or settings.license.role or "user"
+            settings.license.group = status.group or settings.license.group or "legacy"
+            settings.license.features = list(status.features)
+            settings.license.denied_features = list(status.denied_features)
             self.config_manager.save(settings)
         return status

@@ -15,15 +15,18 @@ import cv2
 import numpy as np
 import psutil
 
+from sonar.fishing.constants import PROCESS_NAME
 from sonar.fishing.memory_reeling import MEM_COMMIT, PAGE_GUARD, PAGE_NOACCESS, PROCESS_ALL_READ
 from sonar.paths import LOG_DIR
+from sonar.security.runtime import decrypt_json_literal
 
 
 STATUS_BAR_WIDTH_AT_1080P = 288.0
 STATUS_BAR_MIN_WIDTH_AT_1080P = 55.0
 STATUS_SEARCH_ROI = (0.30, 0.35, 0.70, 0.62)
 MEMORY_PROFILE_GLOB = "player_status_memory_profile_*.json"
-WEBENGINE_PROCESS_NAME = "majestic-webengine.exe"
+_PLAYER_STATUS_CONFIG = decrypt_json_literal("player_status")
+WEBENGINE_PROCESS_NAME = str(_PLAYER_STATUS_CONFIG["webengine_process_name"])
 WEBENGINE_PROCESS_SCAN_LIMIT = 4
 WEBENGINE_SCAN_COOLDOWN_SECONDS = 2.5
 WEBENGINE_SCAN_CHUNK_BYTES = 4 * 1024 * 1024
@@ -33,11 +36,7 @@ WEBENGINE_WINDOW_AFTER_BYTES = 160 * 1024
 WEBENGINE_INDICATOR_RECORD_BYTES = 52
 WEBENGINE_INDICATOR_SCORE_MIN = 60
 WEBENGINE_MAX_MARKER_HITS_PER_REGION = 96
-WEBENGINE_MARKERS = (
-    b"inventory/indicators/v2/health.svg",
-    b"inventory-interface full-width full-height router-view",
-    b"weight__text-current",
-)
+WEBENGINE_MARKERS = tuple(str(item).encode("utf-8") for item in _PLAYER_STATUS_CONFIG["webengine_markers"])
 READABLE_PROTECT_MASK = 0x02 | 0x04 | 0x08 | 0x20 | 0x40 | 0x80
 FOOD_DECAY_SECONDS = 5 * 60.0
 WATER_DECAY_SECONDS = 3 * 60.0
@@ -397,7 +396,7 @@ class WebengineStatusWindow:
 class PlayerStatusMemoryDetector:
     def __init__(
         self,
-        process_name: str = "gta5.exe",
+        process_name: str = PROCESS_NAME,
         *,
         report_dir: Path | None = None,
     ) -> None:
@@ -714,7 +713,9 @@ class PlayerStatusMemoryDetector:
         max_value: float,
         excluded_positions: set[int],
     ) -> tuple[int, float] | None:
-        marker_positions = [data.find(marker) for marker in (b"inventory/indicators/v2/health.svg", b"indicators/v2/health.svg")]
+        health_marker = WEBENGINE_MARKERS[0]
+        short_health_marker = health_marker.split(b"inventory/", 1)[-1]
+        marker_positions = [data.find(marker) for marker in (health_marker, short_health_marker)]
         marker_positions = [position for position in marker_positions if position >= 0]
         if not marker_positions:
             return None

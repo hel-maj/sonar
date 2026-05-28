@@ -63,12 +63,23 @@ from sonar.fishing.statistics import (
 from sonar.fishing.statistics_export import default_stats_csv_path, write_stats_csv
 from sonar.fishing.tackle_detection import format_tackle_items
 from sonar.license.client import LicenseStatus
+from sonar.license.context import LicenseContext
+from sonar.license.features import (
+    FEATURE_FISHING,
+    FEATURE_OVERVIEW,
+    FEATURE_SETTINGS,
+    FEATURE_STATISTICS,
+    FEATURE_STREAM,
+    FEATURE_STREAM_CHAT,
+    FEATURE_TELEGRAM,
+)
 from sonar.license.manager import LicenseManager
 from sonar.paths import APP_DIR, RESOURCE_DIR
 from sonar.self_uninstall import get_uninstall_availability, schedule_self_uninstall
 from sonar.streaming import StreamingService
 from sonar.streaming.chat import ChatActionResult, ChatDetection, MajesticChatController
 from sonar.streaming.service import STREAM_QUALITIES
+from sonar.ui.feature_gate import apply_page_feature_gate, fallback_page
 from sonar.ui.widgets import (
     ActionButton,
     Badge,
@@ -163,6 +174,7 @@ def apply_app_font(app: QApplication) -> None:
 
 
 def format_update_message_html(text: str) -> str:
+    text = normalize_update_message_text(text)
     parts: list[str] = []
     last_end = 0
     for match in URL_RE.finditer(text):
@@ -179,6 +191,29 @@ def format_update_message_html(text: str) -> str:
         last_end = match.end()
     parts.append(html.escape(text[last_end:], quote=False))
     return "".join(parts).replace("\n", "<br>")
+
+
+def format_download_link_html(url: str, label: str = "Скачать обновление") -> str:
+    escaped_url = html.escape(url.strip(), quote=True)
+    escaped_label = html.escape(label, quote=False)
+    return f'<a href="{escaped_url}">{escaped_label}</a>'
+
+
+def normalize_update_message_text(text: str) -> str:
+    return str(text or "").replace("\r\n", "\n").replace("\r", "\n").replace("\\n", "\n")
+
+
+def is_update_available(latest_version: str, current_version: str = APP_VERSION) -> bool:
+    latest = _normalize_version_for_compare(latest_version)
+    current = _normalize_version_for_compare(current_version)
+    return bool(latest) and latest != current
+
+
+def _normalize_version_for_compare(value: str) -> str:
+    text = str(value or "").strip()
+    if text[:1].lower() == "v":
+        text = text[1:].strip()
+    return text
 
 
 class LogBridge(QObject):
@@ -252,7 +287,7 @@ class MainWindow(QMainWindow):
             log_callback=self.log_bridge.message.emit,
             config_manager=self.config_manager,
             session_stats=self.session_stats,
-            can_start_callback=self._has_active_license,
+            can_start_callback=self._can_start_fishing,
             start_command_callback=self._start_bot_from_remote,
             telegram_settings_changed_callback=self.telegram_settings_bridge.changed.emit,
             player_status_callback=self.player_status_bridge.updated.emit,
@@ -366,7 +401,7 @@ class MainWindow(QMainWindow):
 
         self._nav_buttons: dict[QWidget, NavButton] = {}
         self._page_titles: dict[QWidget, str] = {}
-        self._licensed_pages: list[QWidget] = []
+        self._licensed_page_features: dict[QWidget, str] = {}
         self._status_labels: list[QLabel] = []
         self._status_description_labels: list[QLabel] = []
         self._start_buttons: list[QPushButton] = []
@@ -384,13 +419,13 @@ class MainWindow(QMainWindow):
         self.stream_tab = self._build_stream_tab()
         self.telegram_tab = self._build_telegram_tab()
 
-        self._register_page(self.overview_tab, "Обзор", ui_icon("menu.svg"), licensed=True)
+        self._register_page(self.overview_tab, "Обзор", ui_icon("menu.svg"), licensed=True, feature_key=FEATURE_OVERVIEW)
         self._register_page(self.license_tab, "Лицензия", ui_icon("id_card.svg"), licensed=False)
-        self._register_page(self.fishing_tab, "Рыбалка", ui_icon("fishing_rod.svg"), licensed=True)
-        self._register_page(self.settings_tab, "Настройки", ui_icon("settings.svg"), licensed=True)
-        self._register_page(self.statistics_tab, "Статистика", ui_icon("chart.svg"), licensed=True)
-        self._register_page(self.stream_tab, "Стрим", ui_icon("stream.svg"), licensed=True)
-        self._register_page(self.telegram_tab, "Telegram", ui_icon("telegram_outline.svg"), licensed=True)
+        self._register_page(self.fishing_tab, "Рыбалка", ui_icon("fishing_rod.svg"), licensed=True, feature_key=FEATURE_FISHING)
+        self._register_page(self.settings_tab, "Настройки", ui_icon("settings.svg"), licensed=True, feature_key=FEATURE_SETTINGS)
+        self._register_page(self.statistics_tab, "Статистика", ui_icon("chart.svg"), licensed=True, feature_key=FEATURE_STATISTICS)
+        self._register_page(self.stream_tab, "Стрим", ui_icon("stream.svg"), licensed=True, feature_key=FEATURE_STREAM)
+        self._register_page(self.telegram_tab, "Telegram", ui_icon("telegram_outline.svg"), licensed=True, feature_key=FEATURE_TELEGRAM)
         self._select_page(self.license_tab)
         self._apply_license_gate()
 
@@ -475,7 +510,7 @@ class MainWindow(QMainWindow):
         version_label.setStyleSheet("font-size: 11px;")
         layout.addWidget(version_label)
 
-    def _register_page(self, page: QWidget, title: str, icon: str | Path, *, licensed: bool) -> None:
+    def _register_page(self, page: QWidget, title: str, icon: str | Path, *, licensed: bool, feature_key: str | None = None) -> None:
         self.stack.addWidget(page)
         button = NavButton(title, icon)
         button.clicked.connect(lambda checked=False, page=page: self._select_page(page))
@@ -483,12 +518,13 @@ class MainWindow(QMainWindow):
         self._nav_buttons[page] = button
         self._page_titles[page] = title
         if licensed:
-            self._licensed_pages.append(page)
+            self._licensed_page_features[page] = feature_key or title.lower()
 
     def _select_page(self, page: QWidget) -> None:
         if not hasattr(self, "stack"):
             return
-        if page in self._licensed_pages and not self._has_active_license():
+        feature_key = self._licensed_page_features.get(page)
+        if feature_key and not self._can_use_feature(feature_key):
             page = self.license_tab
         self.stack.setCurrentWidget(page)
         page.installEventFilter(self)
@@ -528,6 +564,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self._build_fishing_control_card(), 3)
         top.addWidget(self._build_system_state_card(), 2)
         layout.addLayout(top)
+        layout.addWidget(self._build_update_card())
         layout.addWidget(self._build_player_status_card())
 
         session_card = Card()
@@ -561,6 +598,33 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self._build_recent_events_card(), 2)
         layout.addLayout(bottom, 1)
         return page
+
+    def _build_update_card(self) -> QWidget:
+        card = Card(soft=True)
+        card.hide()
+        self.update_group = card
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
+        layout.addWidget(icon_widget(ui_icon("download.svg"), 30, color="#1677ff"), 0, Qt.AlignmentFlag.AlignTop)
+        text_box = QVBoxLayout()
+        text_box.setContentsMargins(0, 0, 0, 0)
+        text_box.setSpacing(6)
+        self.update_label = QLabel("")
+        self.update_label.setWordWrap(True)
+        self.update_label.setTextFormat(Qt.TextFormat.RichText)
+        self.update_label.setOpenExternalLinks(True)
+        self.update_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.update_label.setProperty("muted", True)
+        self.update_download_link = QLabel("")
+        self.update_download_link.setTextFormat(Qt.TextFormat.RichText)
+        self.update_download_link.setOpenExternalLinks(True)
+        self.update_download_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.update_download_link.setStyleSheet("font-size: 13px; font-weight: 800;")
+        text_box.addWidget(self.update_label)
+        text_box.addWidget(self.update_download_link)
+        layout.addLayout(text_box, 1)
+        return card
 
     def _build_player_status_card(self) -> QWidget:
         card = Card()
@@ -1474,6 +1538,15 @@ class MainWindow(QMainWindow):
     def _has_active_license(self) -> bool:
         return self.license_status.valid and not self.license_status.expired
 
+    def _license_context(self) -> LicenseContext:
+        return LicenseContext.from_status(self.license_status)
+
+    def _can_use_feature(self, feature_key: str) -> bool:
+        return self._license_context().can(feature_key)
+
+    def _can_start_fishing(self) -> bool:
+        return self._can_use_feature(FEATURE_FISHING)
+
     def _schedule_next_license_refresh(self, status: LicenseStatus) -> None:
         now = datetime.now(timezone.utc)
         next_refresh = now.timestamp() + LICENSE_REFRESH_INTERVAL_SECONDS
@@ -1492,19 +1565,26 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "stack") or not hasattr(self, "license_tab"):
             return
         active = self._has_active_license()
-        for page in getattr(self, "_licensed_pages", []):
-            button = self._nav_buttons.get(page)
-            if button is not None:
-                button.setVisible(active)
-                button.setEnabled(active)
+        context = self._license_context()
+        allowed_pages = apply_page_feature_gate(
+            page_features=getattr(self, "_licensed_page_features", {}),
+            nav_buttons=self._nav_buttons,
+            license_context=context,
+        )
         if not active:
             self._select_page(self.license_tab)
             if hasattr(self, "bot") and self.bot.state.running:
                 self.bot.stop()
             if hasattr(self, "stream_service"):
                 self.stream_service.stop_stream("license inactive")
-        elif self.stack.currentWidget() is self.license_tab:
-            self._select_page(self.overview_tab)
+        elif self.stack.currentWidget() in self._licensed_page_features and self.stack.currentWidget() not in allowed_pages:
+            self._select_page(allowed_pages[0] if allowed_pages else self.license_tab)
+        if active and not self._can_use_feature(FEATURE_FISHING) and hasattr(self, "bot") and self.bot.state.running:
+            self.bot.stop()
+        if active and not self._can_use_feature(FEATURE_STREAM) and hasattr(self, "stream_service"):
+            self.stream_service.stop_stream("stream feature inactive")
+        if active and self.stack.currentWidget() is self.license_tab:
+            self._select_page(fallback_page(preferred=self.overview_tab, license_page=self.license_tab, allowed_pages=allowed_pages))
 
     def _refresh_license_ui(self) -> None:
         if not hasattr(self, "license_summary_label"):
@@ -1559,12 +1639,19 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "update_group"):
             return
         latest = self.license_status.latest_version.strip()
-        if self._has_active_license() and latest and latest != APP_VERSION:
-            message = self.license_status.update_message.strip()
+        if self._has_active_license() and is_update_available(latest):
+            message = normalize_update_message_text(self.license_status.update_message).strip()
+            download_link = self.license_status.download_link.strip()
             text = f"💡 Вышла новая версия: {latest}!"
             if message:
                 text = f"{text}\n{message}"
             self.update_label.setText(format_update_message_html(text))
+            if download_link:
+                self.update_download_link.setText(format_download_link_html(download_link))
+                self.update_download_link.setToolTip(download_link)
+                self.update_download_link.show()
+            else:
+                self.update_download_link.hide()
             self.update_group.show()
         else:
             self.update_group.hide()
@@ -1709,7 +1796,7 @@ class MainWindow(QMainWindow):
 
     def _start_bot_now(self) -> None:
         try:
-            if not self._has_active_license():
+            if not self._can_use_feature(FEATURE_FISHING):
                 self._select_page(self.license_tab)
                 self.status_label.setText("Лицензия не активна")
                 self.append_log("Лицензия не активна")
@@ -1734,7 +1821,7 @@ class MainWindow(QMainWindow):
         self.license_status = status
         self._schedule_next_license_refresh(status)
         self.license_bridge.result.emit(status)
-        if not status.valid or status.expired:
+        if not status.valid or status.expired or not self._can_use_feature(FEATURE_FISHING):
             self.log_bridge.message.emit("Лицензия не активна")
             return False
         return self.bot.start(skip_license_check=True)
@@ -1794,7 +1881,7 @@ class MainWindow(QMainWindow):
         if self._hotkey_capture_is_active():
             self._suppress_hotkey_until_release()
             return
-        if not self._has_active_license():
+        if not self._can_use_feature(FEATURE_FISHING):
             self._hotkey_down = False
             return
         vks = self._current_hotkey_vks()
@@ -2117,10 +2204,14 @@ class MainWindow(QMainWindow):
 
     def _refresh_status_label(self) -> None:
         active_license = self._has_active_license()
-        running = bool(active_license and self.bot.state.running)
+        fishing_allowed = self._can_use_feature(FEATURE_FISHING)
+        running = bool(fishing_allowed and self.bot.state.running)
         if not active_license:
             title = "Лицензия не активна"
             description = "Активируйте ключ, чтобы запустить рыбалку"
+        elif not fishing_allowed:
+            title = "Рыбалка недоступна"
+            description = "Функция отключена для этой лицензии"
         elif running:
             title = "Работает"
             description = self.bot.state.detected_stage or "Бот выполняет текущий цикл"
@@ -2132,14 +2223,14 @@ class MainWindow(QMainWindow):
         for label in getattr(self, "_status_description_labels", []):
             label.setText(description)
         for button in getattr(self, "_start_buttons", []):
-            button.setEnabled(active_license and not running and not self._license_checking)
+            button.setEnabled(fishing_allowed and not running and not self._license_checking)
         for button in getattr(self, "_stop_buttons", []):
             button.setEnabled(running)
         for badge in getattr(self, "_ready_badges", []):
             if running:
                 badge.setText("Активен")
                 badge.set_tone("green")
-            elif active_license:
+            elif fishing_allowed:
                 badge.setText("Готов к работе")
                 badge.set_tone("green")
             else:
@@ -2307,7 +2398,7 @@ class MainWindow(QMainWindow):
         self._refresh_stats_tab()
 
     def _start_stream_from_remote(self) -> bool:
-        if not self._has_active_license():
+        if not self._can_use_feature(FEATURE_STREAM):
             self.log_bridge.message.emit("Лицензия не активна: стрим не запущен")
             return False
         return self.stream_service.start_stream()
@@ -2345,11 +2436,17 @@ class MainWindow(QMainWindow):
         self._refresh_stream_tab()
 
     def enable_chat_mode(self) -> None:
+        if not self._can_use_feature(FEATURE_STREAM_CHAT):
+            self.log_bridge.message.emit("Режим чата недоступен для этой лицензии")
+            return
         snapshot = self.stream_service.snapshot()
         self.stream_service.set_chat_mode_enabled(not (snapshot.chat_active or snapshot.chat_mode_enabled))
         self._refresh_stream_tab()
 
     def _enable_chat_mode_from_stream(self) -> ChatActionResult:
+        if not self._can_use_feature(FEATURE_STREAM_CHAT):
+            detection = ChatDetection(error="Режим чата недоступен для этой лицензии")
+            return ChatActionResult(False, detection.error, detection)
         was_running = getattr(self, "bot", None) is not None and self.bot.state.running
         self._resume_bot_after_chat = was_running
         if was_running:
@@ -2441,7 +2538,7 @@ class MainWindow(QMainWindow):
 
     def _license_role(self) -> str:
         try:
-            return self.license_manager.cached_status().role
+            return self._license_context().role
         except Exception:
             return "user"
 
@@ -2474,10 +2571,13 @@ class MainWindow(QMainWindow):
             self.stream_quality_combo.blockSignals(quality_block)
             self.stream_chat_zoom_check.blockSignals(chat_block)
             self.stream_snapshot_mode_check.blockSignals(snapshot_block)
-        self.stream_start_button.setEnabled((not snapshot.active) and snapshot.status not in {"starting", "preparing"})
+        stream_allowed = self._can_use_feature(FEATURE_STREAM)
+        chat_allowed = self._can_use_feature(FEATURE_STREAM_CHAT)
+        self.stream_start_button.setEnabled(stream_allowed and (not snapshot.active) and snapshot.status not in {"starting", "preparing"})
         self.stream_stop_button.setEnabled(snapshot.active or snapshot.status in {"starting", "preparing", "error"})
         self.stream_chat_mode_button.setText("Выйти из режима чата" if snapshot.chat_active or snapshot.chat_mode_enabled else "Включить режим чата")
-        self.stream_chat_mode_button.setEnabled(snapshot.active or snapshot.chat_active or snapshot.chat_mode_enabled)
+        self.stream_chat_mode_button.setVisible(chat_allowed)
+        self.stream_chat_mode_button.setEnabled(chat_allowed and (snapshot.active or snapshot.chat_active or snapshot.chat_mode_enabled))
         quality = STREAM_QUALITIES.get(snapshot.quality)
         fps = 10 if snapshot.snapshot_mode_enabled else 30
         self.stream_fps_metric.set_value(str(fps))

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from sonar.fishing.constants import PROCESS_NAME
+
 
 @dataclass(slots=True)
 class WindowInfo:
@@ -13,7 +15,7 @@ class WindowInfo:
 
 
 class WindowCapture:
-    def __init__(self, process_name: str = "gta5.exe") -> None:
+    def __init__(self, process_name: str = PROCESS_NAME) -> None:
         self.process_name = process_name
         self.hwnd: int | None = None
 

@@ -64,6 +64,12 @@ dist/
 *.orig
 *.rej
 
+# Downloaded during secure builds
+/02_sonar_app/src/sonar/resources/streaming/*.exe
+/02_sonar_app/src/sonar/resources/streaming/*.zip
+/02_sonar_app/build_logs/
+/02_sonar_app/builds/
+
 # Memory/chat extraction artifacts
 **/process_memory_dump_*/
 **/chat_memory_search_*.json

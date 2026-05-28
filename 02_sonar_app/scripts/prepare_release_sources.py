@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 from pathlib import Path
 
 
@@ -423,9 +424,17 @@ STREAM_PAGE_HTML_RELEASE = r'''<!doctype html>
 
 def prepare_release_sources(source_root: Path) -> None:
     sonar_root = source_root / "sonar"
+    tools_path = sonar_root / "tools"
     chat_path = sonar_root / "streaming" / "chat.py"
     service_path = sonar_root / "streaming" / "service.py"
     notifier_path = sonar_root / "telegram" / "notifier.py"
+
+    if tools_path.exists():
+        shutil.rmtree(tools_path)
+    for cache_dir in sonar_root.rglob("__pycache__"):
+        shutil.rmtree(cache_dir, ignore_errors=True)
+    for pyc_path in sonar_root.rglob("*.pyc"):
+        pyc_path.unlink(missing_ok=True)
 
     chat_path.write_text(CHAT_STUB, encoding="utf-8")
 

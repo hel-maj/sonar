@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from sonar.fishing.constants import PROCESS_NAME
+
 
 class WindowActivator:
-    def __init__(self, process_name: str = "gta5.exe") -> None:
+    def __init__(self, process_name: str = PROCESS_NAME) -> None:
         self.process_name = process_name
 
     def activate_window(self) -> bool:

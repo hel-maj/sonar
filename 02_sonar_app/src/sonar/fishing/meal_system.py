@@ -10,6 +10,7 @@ from sonar.automation.input_controller import InputController
 from sonar.fishing.constants import (
     MEAL_MATCH_THRESHOLD,
     MEAL_MAX_CONSUME,
+    PROCESS_NAME,
     food_check_roi_for_resolution,
     inventory_roi_for_resolution,
     resolution_name,
@@ -74,7 +75,7 @@ class MealRunResult:
 
 @dataclass
 class MealSystem:
-    process_name: str = "gta5.exe"
+    process_name: str = PROCESS_NAME
     resource_dir: Path = FISHING_RESOURCE_DIR
     threshold: float = MEAL_MATCH_THRESHOLD
     input_controller: InputController = field(default_factory=InputController)

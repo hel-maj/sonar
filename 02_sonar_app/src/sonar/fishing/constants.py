@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from sonar.security.runtime import decrypt_text_literal
 from sonar.vision.geometry import Rect
 
 
-PROCESS_NAME = "gta5.exe"
+PROCESS_NAME = decrypt_text_literal("gta_process_name")
 
 FISH_ROI_FHD = Rect(778, 373, 368, 232)
 FISH_ROI_2K = Rect(1037, 497, 492, 310)

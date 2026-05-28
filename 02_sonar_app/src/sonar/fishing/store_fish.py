@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from sonar.automation.input_controller import InputController
-from sonar.fishing.constants import STORE_FISH_MATCH_THRESHOLD, inventory_roi_for_resolution, resolution_name
+from sonar.fishing.constants import PROCESS_NAME, STORE_FISH_MATCH_THRESHOLD, inventory_roi_for_resolution, resolution_name
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.capture import WindowCapture
 from sonar.vision.matching import TemplateMatcher, load_template
@@ -14,7 +14,7 @@ from sonar.vision.matching import TemplateMatcher, load_template
 
 @dataclass
 class FishStorer:
-    process_name: str = "gta5.exe"
+    process_name: str = PROCESS_NAME
     resource_dir: Path = FISHING_RESOURCE_DIR
     threshold: float = STORE_FISH_MATCH_THRESHOLD
     input_controller: InputController = field(default_factory=InputController)

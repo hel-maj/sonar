@@ -13,7 +13,7 @@ def test_license_key_mask_matches_ui_format():
     assert mask_license_key("FA5B1-ABCDE-G2K34") == "FA5B1-*****-G2K34"
 
 
-def test_keygen_status_extracts_license_and_release_metadata():
+def test_keygen_status_ignores_license_update_metadata():
     status = parse_keygen_status(
         {
             "meta": {"valid": True, "code": "VALID"},
@@ -34,8 +34,9 @@ def test_keygen_status_extracts_license_and_release_metadata():
     assert status.valid is True
     assert status.license_id == "license-id"
     assert status.masked_key == "FA5B1-*****-G2K34"
-    assert status.latest_version == "1.2.1"
-    assert status.update_message == "Новая версия\n🐟 быстрее"
+    assert status.latest_version == ""
+    assert status.update_message == ""
+    assert status.download_link == ""
     assert status.role == "user"
 
 
@@ -54,6 +55,73 @@ def test_keygen_status_extracts_license_role_from_metadata():
     )
 
     assert status.role == "admin"
+    assert "stream_chat" in status.features
+
+
+def test_keygen_status_extracts_group_features_and_overrides():
+    status = parse_keygen_status(
+        {
+            "meta": {"valid": True, "code": "VALID"},
+            "data": {
+                "id": "license-id",
+                "attributes": {
+                    "key": "FA5B1-ABCDE-G2K34",
+                    "metadata": {
+                        "license_group": "basic",
+                        "allow_features": ["telegram"],
+                        "deny_features": "statistics",
+                    },
+                },
+            },
+        }
+    )
+
+    assert status.group == "basic"
+    assert "fishing" in status.features
+    assert "telegram" in status.features
+    assert "stream" not in status.features
+    assert "statistics" not in status.features
+    assert status.denied_features == ("statistics",)
+
+
+def test_keygen_status_merges_policy_metadata_before_license_overrides():
+    status = parse_keygen_status(
+        {
+            "meta": {"valid": True, "code": "VALID"},
+            "data": {
+                "id": "license-id",
+                "attributes": {
+                    "key": "FA5B1-ABCDE-G2K34",
+                    "metadata": {
+                        "allow_features": ["stream_chat"],
+                        "update_message": "Индивидуальный текст",
+                    },
+                },
+                "relationships": {"policy": {"data": {"type": "policies", "id": "policy-id"}}},
+            },
+            "included": [
+                {
+                    "type": "policies",
+                    "id": "policy-id",
+                    "attributes": {
+                        "metadata": {
+                            "license_group": "streamer",
+                            "latest_version": "1.5.0",
+                            "update_message": "Групповой текст",
+                            "download_link": "https://example.com/group.exe",
+                        }
+                    },
+                }
+            ],
+        }
+    )
+
+    assert status.group == "streamer"
+    assert "stream" in status.features
+    assert "stream_chat" in status.features
+    assert status.latest_version == ""
+    assert status.update_message == ""
+    assert status.download_link == ""
 
 
 def test_machine_fingerprint_is_sha256_hex():
@@ -64,7 +132,7 @@ def test_machine_fingerprint_is_sha256_hex():
 
 
 def test_license_server_url_is_decrypted_at_runtime():
-    assert decrypt_license_server_url() == "https://sonar-keygen.31.172.71.133.nip.io"
+    assert decrypt_license_server_url() == "https://updates.example.invalid"
 
 
 class FakeResponse:
@@ -98,10 +166,61 @@ def test_keygen_validation_sends_build_hash():
     client.validate_key("ABC", "fingerprint")
 
     call = session.calls[0]
+    assert "include=policy" in call["url"]
     assert call["headers"]["X-Sonar-Build-Hash"] == "hash-123"
     assert call["headers"]["User-Agent"] == "Build Name/1.0 SonarBuild/hash-123"
     assert set(call["json"]["meta"]) == {"key", "scope"}
     assert call["json"]["meta"]["scope"]["fingerprint"] == "fingerprint"
+
+
+def test_keygen_validation_uses_global_release_metadata_over_keygen_metadata(monkeypatch):
+    class ReleaseSession(FakeSession):
+        def post(self, url, *, headers, json, timeout):
+            self.calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
+            return FakeResponse(
+                {
+                    "meta": {"valid": True},
+                    "data": {
+                        "id": "license-id",
+                        "attributes": {
+                            "key": "ABC",
+                            "metadata": {
+                                "latest_version": "1.0.0",
+                                "update_message": "license metadata should not drive updates",
+                                "download_link": "https://example.com/license.exe",
+                            },
+                        },
+                    },
+                }
+            )
+
+        def get(self, url, *, headers, timeout):
+            self.calls.append({"method": "GET", "url": url, "headers": headers, "timeout": timeout})
+            return FakeResponse(
+                {
+                    "latest_version": "9.9.9",
+                    "update_message": "Глобальный релиз\\n✅ готов",
+                    "download_link": "https://example.com/Sonar.exe",
+                }
+            )
+
+    monkeypatch.delenv("SONAR_RELEASE_METADATA_URL", raising=False)
+    session = ReleaseSession()
+    client = KeygenLicenseClient("https://m-sonar-addr.ru", "account", build_hash="hash-123", app_name="Build Name", session=session)
+
+    status = client.validate_key("ABC", "fingerprint")
+
+    assert status.latest_version == "9.9.9"
+    assert status.update_message == "Глобальный релиз\\n✅ готов"
+    assert status.download_link == "https://example.com/Sonar.exe"
+    assert session.calls[1]["method"] == "GET"
+    assert session.calls[1]["url"] == "https://m-sonar-addr.ru/sonar-release.json"
+
+
+def test_keygen_release_metadata_url_uses_public_server_root():
+    client = KeygenLicenseClient("https://m-sonar-addr.ru/", "account")
+
+    assert client._release_metadata_url() == "https://m-sonar-addr.ru/sonar-release.json"
 
 
 def test_keygen_machine_activation_sends_build_hash_metadata(monkeypatch):
@@ -178,3 +297,31 @@ def test_license_manager_clears_cached_expiry_on_server_rejection(tmp_path, monk
     assert stored.license_key == "ABC"
     assert stored.license_id == "server-id"
     assert stored.expires_at == ""
+
+
+def test_license_manager_persists_feature_entitlements(tmp_path, monkeypatch):
+    config = ConfigManager(tmp_path)
+
+    class FeatureClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def validate_and_activate(self, license_key: str, fingerprint: str) -> LicenseStatus:
+            return LicenseStatus(
+                valid=True,
+                license_key=license_key,
+                license_id="license-id",
+                role="user",
+                group="basic",
+                features=("fishing", "overview"),
+                denied_features=("stream",),
+            )
+
+    monkeypatch.setattr("sonar.license.manager.KeygenLicenseClient", FeatureClient)
+
+    LicenseManager(config).validate_key("ABC")
+
+    stored = config.load().license
+    assert stored.group == "basic"
+    assert stored.features == ["fishing", "overview"]
+    assert stored.denied_features == ["stream"]
