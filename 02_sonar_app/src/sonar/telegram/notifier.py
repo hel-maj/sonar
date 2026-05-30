@@ -195,10 +195,19 @@ class NotificationManager:
             return
         self.send_message(self._format_session_stats_message("🚤 Рыбалка началась!", "📊 Текущая сессия", totals))
 
-    def notify_fishing_stopped(self, totals: SessionTotals, *, reason: str | None = None) -> None:
+    def notify_fishing_stopped(
+        self,
+        totals: SessionTotals,
+        *,
+        reason: str | None = None,
+        image_bytes: bytes | None = None,
+    ) -> None:
         if not self.settings.notify_start_stop:
             return
-        self.send_message(self._format_session_stats_message("🛑 Рыбалка остановлена!", "📊 Статистика сессии", totals, reason=reason))
+        message = self._format_session_stats_message("🛑 Рыбалка остановлена!", "📊 Статистика сессии", totals, reason=reason)
+        if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message):
+            return
+        self.send_message(message)
 
     def notify_meal_eaten(
         self,
@@ -892,8 +901,9 @@ class NotificationManager:
                 if width <= 0 or height <= 0:
                     return image_bytes
                 crop_x = min(width // 3, max(0, int(round(width * 0.02))))
-                if crop_x > 0 and width - crop_x * 2 > 1:
-                    original = original.crop((crop_x, 0, width - crop_x, height))
+                crop_top = min(height // 3, max(0, int(round(height * 0.01))))
+                if (crop_x > 0 or crop_top > 0) and width - crop_x * 2 > 1 and height - crop_top > 1:
+                    original = original.crop((crop_x, crop_top, width - crop_x, height))
                     width, height = original.size
                 canvas_width = max(width, int(round(width * 1.35)))
                 canvas_height = max(height, int(round(height * 1.35)))
@@ -1007,7 +1017,7 @@ class NotificationManager:
         *,
         released: bool | None = None,
     ) -> str:
-        trophy = quality_text and any(marker in quality_text.lower() for marker in ("троф", "рекорд"))
+        trophy = bool(quality_text and quality_text.strip().casefold() == "трофейная")
         lines = []
         if trophy:
             lines.append(f"🏆 <b>{_h(quality_text)}!</b>")

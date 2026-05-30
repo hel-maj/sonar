@@ -490,7 +490,7 @@ def test_caught_fish_notification_sends_photo_with_caption(monkeypatch):
     assert "Рустер" in photo_call[1]["data"]["caption"]
 
 
-def test_caught_fish_notification_includes_release_status_and_real_quality_title(monkeypatch):
+def test_caught_fish_notification_does_not_promote_record_quality(monkeypatch):
     calls = []
     manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
 
@@ -511,8 +511,33 @@ def test_caught_fish_notification_includes_release_status_and_real_quality_title
     )
 
     text = calls[0][1]["json"]["text"]
-    assert "Рекордный улов" in text
-    assert "Трофейный" not in text
+    assert "Рекордный улов" not in text
+    assert "Трофейная" not in text
+    assert "Статус:</b> отпущена" in text
+
+
+def test_caught_fish_notification_promotes_trophy_quality(monkeypatch):
+    calls = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_caught_fish(
+        "Рустер",
+        3.0,
+        "Трофейная",
+        10,
+        None,
+        SessionTotals(0, 1, 3.0, 1, 3.0, 100, 100),
+        released=True,
+    )
+
+    text = calls[0][1]["json"]["text"]
+    assert "Трофейная" in text
     assert "Статус:</b> отпущена" in text
 
 

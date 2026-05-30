@@ -1638,8 +1638,11 @@ class MainWindow(QMainWindow):
     def _refresh_update_block(self) -> None:
         if not hasattr(self, "update_group"):
             return
+        if not self._has_active_license():
+            self.update_group.hide()
+            return
         latest = self.license_status.latest_version.strip()
-        if self._has_active_license() and is_update_available(latest):
+        if is_update_available(latest):
             message = normalize_update_message_text(self.license_status.update_message).strip()
             download_link = self.license_status.download_link.strip()
             text = f"💡 Вышла новая версия: {latest}!"
@@ -1652,9 +1655,13 @@ class MainWindow(QMainWindow):
                 self.update_download_link.show()
             else:
                 self.update_download_link.hide()
-            self.update_group.show()
         else:
-            self.update_group.hide()
+            version = latest or APP_VERSION
+            self.update_label.setText(format_update_message_html(f"✅ Версия приложения: {version}"))
+            self.update_download_link.setText("")
+            self.update_download_link.setToolTip("")
+            self.update_download_link.hide()
+        self.update_group.show()
 
     @staticmethod
     def _format_license_expiry(value: datetime | None) -> str:

@@ -86,3 +86,4 @@ dist/
 # Keep extracted reverse-engineering snapshots versioned.
 !/01_reverse_engineering/kortexworker.exe_extracted*/
 !/01_reverse_engineering/kortexworker.exe_extracted*/**
+/02_sonar_app/code.zip

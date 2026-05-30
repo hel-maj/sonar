@@ -7,11 +7,8 @@ from pathlib import Path
 
 def _is_frozen() -> bool:
     executable_name = Path(sys.executable).name.lower()
-    return bool(
-        getattr(sys, "frozen", False)
-        or "__compiled__" in globals()
-        or executable_name not in {"python.exe", "pythonw.exe", "python", "pythonw"}
-    )
+    is_python_executable = executable_name in {"python.exe", "pythonw.exe", "python", "pythonw"} or executable_name.startswith("python")
+    return bool(getattr(sys, "frozen", False) or "__compiled__" in globals() or not is_python_executable)
 
 
 IS_FROZEN = _is_frozen()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import csv
+import hashlib
 import io
 import json
 import os
@@ -44,7 +46,7 @@ from sonar.fishing.store_fish import FishStorer
 from sonar.fishing.tackle_detection import TackleDetector, TackleScanResult, format_tackle_items
 from sonar.fishing.trigger_monitor import TriggerMonitor
 from sonar.telegram.notifier import NotificationManager
-from sonar.paths import APP_DIR, LOG_DIR, LOGS_ENABLED
+from sonar.paths import APP_DIR, IS_FROZEN, LOG_DIR, LOGS_ENABLED
 from sonar.vision.capture import WindowCapture
 from sonar.vision.geometry import Rect
 from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
@@ -67,6 +69,11 @@ STOP_REASON_START_FAILED = "не смог начать рыбалку в теч�
 STOP_REASON_NO_STAGE = "не в зоне рыбалки или не видно стадии рыбалки 40 секунд"
 STOP_REASON_WALKING_GUARD = "Сработала защита от ходьбы"
 STOP_REASON_TACKLE_UNREADABLE = "Не удалось прочитать снаряжение"
+AUTO_STOP_SCREENSHOT_REASONS = frozenset({STOP_REASON_NO_STAGE, STOP_REASON_START_FAILED})
+REELING_LOSS_RELEASE_LOG_KEY = "sonar"
+REELING_LOSS_RELEASE_LOG_MAGIC = b"SONAR_REELING_LOSS_LOG_V1\n"
+REELING_LOSS_RELEASE_LOG_GLOB = "reeling_loss_*.jsonl.enc"
+REELING_LOSS_RELEASE_LOG_LIMIT = 15
 REEL_CATCH_SCREEN_TIMEOUT_SECONDS = 3.0
 CATCH_SCREEN_CURRENT_TIMEOUT_SECONDS = 1.2
 CATCH_SCREEN_POLL_SECONDS = 0.05
@@ -122,6 +129,36 @@ REELING_KNOWN_INTERRUPTION_TRIGGERS = frozenset(
         "hunger",
     }
 )
+
+
+def _reeling_loss_keystream(key: str, nonce: bytes, length: int) -> bytes:
+    key_bytes = key.encode("utf-8")
+    blocks: list[bytes] = []
+    counter = 0
+    while sum(len(block) for block in blocks) < length:
+        blocks.append(hashlib.sha256(key_bytes + nonce + counter.to_bytes(8, "big")).digest())
+        counter += 1
+    return b"".join(blocks)[:length]
+
+
+def _xor_bytes(data: bytes, mask: bytes) -> bytes:
+    return bytes(byte ^ mask_byte for byte, mask_byte in zip(data, mask))
+
+
+def encrypt_reeling_loss_log(plaintext: bytes, *, key: str = REELING_LOSS_RELEASE_LOG_KEY) -> bytes:
+    nonce = os.urandom(16)
+    encrypted = _xor_bytes(plaintext, _reeling_loss_keystream(key, nonce, len(plaintext)))
+    return base64.b64encode(REELING_LOSS_RELEASE_LOG_MAGIC + nonce + encrypted)
+
+
+def decrypt_reeling_loss_log(payload: bytes, *, key: str = REELING_LOSS_RELEASE_LOG_KEY) -> bytes:
+    raw = base64.b64decode(payload)
+    if not raw.startswith(REELING_LOSS_RELEASE_LOG_MAGIC):
+        raise ValueError("Unsupported reeling loss log format")
+    body = raw[len(REELING_LOSS_RELEASE_LOG_MAGIC):]
+    nonce = body[:16]
+    encrypted = body[16:]
+    return _xor_bytes(encrypted, _reeling_loss_keystream(key, nonce, len(encrypted)))
 
 
 @dataclass
@@ -195,7 +232,7 @@ class FishingBot:
         self._last_confirmed_storage = ""
         self._inventory_space_low_notified = False
         self._player_status_scan_requested = False
-        self._last_active_tackle_scan_at: dict[str, float] = {}
+        self._active_tackle_scanned_stages: set[str] = set()
         self.inventory_full = False
         self.settings: FishingSettings = self.config_manager.load().fishing
         self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
@@ -326,7 +363,7 @@ class FishingBot:
         self._last_confirmed_storage = ""
         self._inventory_space_low_notified = False
         self._player_status_scan_requested = False
-        self._last_active_tackle_scan_at = {}
+        self._active_tackle_scanned_stages = set()
         self._last_catch_result = None
         self._no_stage_since = None
         self._start_attempt_since = None
@@ -354,11 +391,12 @@ class FishingBot:
 
     def _stop_from_brain(self, reason: str) -> None:
         was_running = self.state.running
+        screenshot_bytes = self._capture_auto_stop_screenshot(reason) if was_running else None
         self.state.phase = BotPhase.STOPPING
         self._stop_event.set()
-        self._finish_stop(was_running, reason)
+        self._finish_stop(was_running, reason, auto_stop_screenshot=screenshot_bytes)
 
-    def _finish_stop(self, was_running: bool, reason: str) -> None:
+    def _finish_stop(self, was_running: bool, reason: str, *, auto_stop_screenshot: bytes | None = None) -> None:
         if hasattr(self, "_chat_pause_event"):
             self._chat_pause_event.clear()
         self.reeling_tracker.stop()
@@ -385,7 +423,21 @@ class FishingBot:
         if was_running:
             if self.settings.start_stop_sound_enabled:
                 play_sound("bot_stop.wav", volume=START_STOP_SOUND_VOLUME)
-            self.notification_manager.notify_fishing_stopped(self.session_stats.totals(), reason=reason)
+            self.notification_manager.notify_fishing_stopped(
+                self.session_stats.totals(),
+                reason=reason,
+                image_bytes=auto_stop_screenshot,
+            )
+
+    def _capture_auto_stop_screenshot(self, reason: str) -> bytes | None:
+        if reason not in AUTO_STOP_SCREENSHOT_REASONS:
+            return None
+        try:
+            return self._capture_screenshot_bytes()
+        except Exception as exc:
+            debug_log(f"AUTO_STOP_SCREENSHOT_FAILED reason={reason} error={exc}")
+            self._log(f"Автостоп: не удалось сделать скриншот перед остановкой: {exc}")
+            return None
 
     def pause_for_chat(self, enabled: bool, *, restart_on_resume: bool = True) -> None:
         if not hasattr(self, "_chat_pause_event"):
@@ -612,7 +664,7 @@ class FishingBot:
                     if needs_meal and time.time() >= self._inventory_retry_after:
                         self._handle_pending_tasks(do_meal=True)
                     else:
-                        self._press_fishing_start()
+                        self._do_casting()
                 elif needs_meal:
                     if time.time() >= self._inventory_retry_after:
                         self._handle_pending_tasks(do_meal=True)
@@ -713,6 +765,7 @@ class FishingBot:
 
     def _run_reeling_module(self) -> tuple[str | None, float]:
         self.state.phase = BotPhase.REELING
+        self._reset_active_tackle_scan("ad")
         self._refresh_triggers()
         stage = self._detect_stage(self._last_triggers)
         if stage != "ad":
@@ -858,7 +911,7 @@ class FishingBot:
         return None, 0.0
 
     def _new_reeling_debug_log(self) -> list[dict[str, object]] | None:
-        if not self._debug_mode_enabled():
+        if not self._should_collect_reeling_loss_log():
             return None
         return []
 
@@ -903,21 +956,58 @@ class FishingBot:
     def _save_reeling_debug_log(self, records: list[dict[str, object]] | None, reason: str) -> Path | None:
         if not records:
             return None
+        if IS_FROZEN and not self._debug_mode_enabled():
+            return self._save_encrypted_reeling_loss_log(records, reason)
         try:
             DEBUG_CAPTURE_REELING_LOSS_DIR.mkdir(parents=True, exist_ok=True)
             stamp = int(time.time() * 1000)
             safe_reason = self._safe_debug_filename_part(reason or "lost")
             path = DEBUG_CAPTURE_REELING_LOSS_DIR / f"{stamp}_{safe_reason}.jsonl"
-            with path.open("w", encoding="utf-8") as handle:
-                for record in records:
-                    handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
-                    handle.write("\n")
+            path.write_bytes(self._serialize_reeling_loss_log(records))
             debug_log(f"REELING_LOSS_LOG_SAVED reason={reason} path={path}")
             self._log(f"Вываживание: debug-лог срыва сохранён {path}")
             return path
         except Exception as exc:
             debug_log(f"REELING_LOSS_LOG_SAVE_FAILED {exc}")
             return None
+
+    def _save_encrypted_reeling_loss_log(self, records: list[dict[str, object]], reason: str) -> Path | None:
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            stamp = int(time.time() * 1000)
+            safe_reason = self._safe_debug_filename_part(reason or "lost")
+            path = LOG_DIR / f"reeling_loss_{stamp}_{safe_reason}.jsonl.enc"
+            plaintext = self._serialize_reeling_loss_log(records)
+            path.write_bytes(encrypt_reeling_loss_log(plaintext, key=REELING_LOSS_RELEASE_LOG_KEY))
+            self._prune_encrypted_reeling_loss_logs()
+            debug_log(f"REELING_LOSS_ENCRYPTED_LOG_SAVED reason={reason} path={path}")
+            self._log(f"Вываживание: зашифрованный лог срыва сохранён {path}")
+            return path
+        except Exception as exc:
+            debug_log(f"REELING_LOSS_ENCRYPTED_LOG_SAVE_FAILED {exc}")
+            return None
+
+    @staticmethod
+    def _serialize_reeling_loss_log(records: list[dict[str, object]]) -> bytes:
+        text = "".join(f"{json.dumps(record, ensure_ascii=False, sort_keys=True)}\n" for record in records)
+        return text.encode("utf-8")
+
+    @staticmethod
+    def _prune_encrypted_reeling_loss_logs() -> None:
+        files = []
+        for path in LOG_DIR.glob(REELING_LOSS_RELEASE_LOG_GLOB):
+            if not path.is_file():
+                continue
+            try:
+                files.append((path.stat().st_mtime, path.name, path))
+            except OSError:
+                continue
+        files.sort(reverse=True)
+        for _, _, path in files[REELING_LOSS_RELEASE_LOG_LIMIT:]:
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     def _restore_reeling_focus(self, last_attempt_at: float, now: float | None = None) -> float:
         current_time = time.time() if now is None else now
@@ -1185,6 +1275,7 @@ class FishingBot:
 
     def _do_hooking(self) -> bool:
         self.state.phase = BotPhase.HOOKING
+        self._reset_active_tackle_scan("start2")
         self._log("Стадия: Подсечка")
         self._focus_game()
         deadline = time.time() + 60.0
@@ -1589,6 +1680,10 @@ class FishingBot:
         safe = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value.strip())
         safe = "_".join(part for part in safe.split("_") if part)
         return (safe or "unknown")[:80]
+
+    @staticmethod
+    def _should_collect_reeling_loss_log() -> bool:
+        return IS_FROZEN or FishingBot._debug_mode_enabled()
 
     @staticmethod
     def _debug_capture_enabled() -> bool:
@@ -2291,13 +2386,19 @@ class FishingBot:
         self._log("Снаряжение после перепроверки:\n" + format_tackle_items(scan.items))
         return not self._handle_tackle_depletion(scan)
 
+    def _reset_active_tackle_scan(self, stage: str) -> None:
+        if not hasattr(self, "_active_tackle_scanned_stages"):
+            self._active_tackle_scanned_stages = set()
+        self._active_tackle_scanned_stages.discard(stage)
+
     def _scan_tackle_for_active_stage(self, stage: str, frame=None) -> None:
         if stage not in {"start2", "ad"}:
             return
-        now = time.time()
-        if now - self._last_active_tackle_scan_at.get(stage, 0.0) < TACKLE_ACTIVE_STAGE_SCAN_INTERVAL_SECONDS:
+        if not hasattr(self, "_active_tackle_scanned_stages"):
+            self._active_tackle_scanned_stages = set()
+        if stage in self._active_tackle_scanned_stages:
             return
-        self._last_active_tackle_scan_at[stage] = now
+        self._active_tackle_scanned_stages.add(stage)
         label = self._stage_label(stage)
         try:
             current_frame = self.capture.capture() if frame is None else frame

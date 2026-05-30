@@ -190,6 +190,128 @@ def test_prepare_start_does_not_treat_bait_notice_as_active_stage():
     assert bot.input_controller.keys == ["e", "e"]
 
 
+def test_press_fishing_start_does_not_block_wrong_storage():
+    bot = FishingBot.__new__(FishingBot)
+    bot.input_controller = DummyInput()
+    bot.settings = FishingSettings(store_in_trunk=True)
+    bot._last_trigger_matches = {"start": DummyMatch(), "human": DummyMatch()}
+    bot._last_start_pressed_at = 0.0
+    bot._focus_game = lambda: True
+    bot._sleep_random = lambda minimum, extra: None
+    logs: list[str] = []
+    bot._log = logs.append
+
+    assert bot._press_fishing_start() is True
+    assert bot.input_controller.keys == ["e"]
+    assert not any("хранилище" in message.lower() for message in logs)
+
+
+def test_prepare_start_falls_through_when_storage_is_not_selected(monkeypatch):
+    monkeypatch.setattr(bot_module, "STORAGE_SELECTION_GIVE_UP_SECONDS", -1.0)
+    monkeypatch.setattr(bot_module, "STORAGE_SELECTION_RETRY_SECONDS", 0.0)
+    bot = FishingBot.__new__(FishingBot)
+    bot.input_controller = DummyInput()
+    bot.settings = FishingSettings(store_in_trunk=True)
+    bot.capture = DummyCapture()
+    bot.trigger_monitor = SequenceTriggerMonitor(
+        [
+            {"start": DummyMatch()},
+            {"start": DummyMatch(), "human": DummyMatch()},
+            {"start1": DummyMatch(), "human": DummyMatch()},
+        ]
+    )
+    bot._stop_event = threading.Event()
+    bot._last_trigger_matches = {}
+    bot._last_triggers = {}
+    bot._last_start_pressed_at = 0.0
+    bot._focus_game = lambda: True
+    bot._sleep = lambda seconds: None
+    bot._sleep_random = lambda minimum, extra: None
+    bot._log = lambda message: None
+    bot._check_tackle_before_start = lambda frame: True
+    bot._is_fishing_stage_active = lambda matches: "start" in matches
+    bot._mark_storage_from_matches = lambda matches: None
+    bot._format_precise_triggers = lambda matches: "start=1.00"
+    storage_calls: list[dict[str, DummyMatch]] = []
+
+    def ensure_storage_selection(matches, **kwargs):
+        storage_calls.append(matches)
+        return "missing", None
+
+    bot._ensure_storage_selection = ensure_storage_selection
+
+    assert bot._prepare_fishing_start(timeout=1.0) == "casting"
+    assert storage_calls
+    assert bot.input_controller.keys == ["e"]
+
+
+def test_storage_selection_opens_selector_from_wrong_current_storage():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(store_in_trunk=True)
+    bot._sleep_random = lambda minimum, extra: None
+    bot._log = lambda message: None
+    clicks: list[str] = []
+    human = TemplateMatch(20, 30, 1.0, 10, 10, "human")
+    matches = {
+        "start": TemplateMatch(1, 1, 1.0, 10, 10, "start"),
+        "human": human,
+    }
+
+    def click_match(match):
+        clicks.append(match.name or "")
+
+    bot._click_match = click_match
+
+    result, anchor_match = bot._ensure_storage_selection(
+        matches,
+        selector_opened=False,
+        anchor=None,
+    )
+
+    assert result == "opened"
+    assert anchor_match is human
+    assert clicks == ["human"]
+
+
+def test_start_stage_uses_casting_preparation_instead_of_direct_press():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(auto_meal=False)
+    bot.state = BotState()
+    bot._stop_event = threading.Event()
+    bot._meal_search_disabled_until_restart = False
+    bot._kickstart_requested = False
+    bot._inventory_retry_after = time.time() + 10.0
+    bot.is_paused_for_chat = lambda: False
+    bot._publish_stage = lambda stage: None
+    bot._sleep = lambda seconds: bot._stop_event.set()
+    bot._update_focus_state_notification = lambda: None
+    bot._get_triggers = lambda: {"start": 1.0, "human": 1.0}
+    bot._detect_stage = lambda triggers: "start"
+    bot._stage_label = lambda stage: "Выбор снастей"
+    bot._publish_estimated_player_status_if_changed = lambda: None
+    bot._status_indicates_needs_meal = lambda stage: False
+    bot._status_timer_needs_meal = lambda: False
+    bot._stop_if_no_stage_timed_out = lambda stage, needs_meal: False
+    bot._close_game_menu_if_open = lambda: False
+    bot._has_pending_catch = lambda: False
+    bot._probe_catch_screen = lambda: False
+    bot._handle_player_status_scan_request = lambda stage: False
+    bot._should_handle_meal_now = lambda stage, needs_meal: False
+    calls: list[str] = []
+
+    def do_casting() -> None:
+        calls.append("casting")
+        bot._stop_event.set()
+
+    bot._do_casting = do_casting
+    bot._press_fishing_start = lambda: calls.append("press")
+    bot._log = lambda message: None
+
+    bot._brain_loop()
+
+    assert calls == ["casting"]
+
+
 def test_chat_pause_keeps_running_state_and_releases_keys():
     bot = FishingBot.__new__(FishingBot)
     bot.input_controller = DummyInput()
@@ -553,7 +675,7 @@ def test_active_stage_tackle_scan_stores_waiting_stage_counts():
     stored: list[TackleScanResult] = []
     bot.tackle_detector = Detector()
     bot.capture = DummyCapture()
-    bot._last_active_tackle_scan_at = {}
+    bot._active_tackle_scanned_stages = set()
     bot._store_tackle_scan = lambda scan, frame: stored.append(scan)
     bot._log = lambda message: None
 
@@ -561,6 +683,60 @@ def test_active_stage_tackle_scan_stores_waiting_stage_counts():
 
     assert stored
     assert stored[0].count_for("bait") == 7
+
+
+def test_active_stage_tackle_scan_runs_once_per_stage_entry():
+    class Detector:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def detect(self, frame):
+            self.calls += 1
+            return make_tackle_scan({"bait": 7})
+
+    detector = Detector()
+    bot = FishingBot.__new__(FishingBot)
+    stored: list[TackleScanResult] = []
+    bot.tackle_detector = detector
+    bot.capture = DummyCapture()
+    bot._active_tackle_scanned_stages = set()
+    bot._store_tackle_scan = lambda scan, frame: stored.append(scan)
+    bot._log = lambda message: None
+
+    bot._scan_tackle_for_active_stage("start2", object())
+    bot._scan_tackle_for_active_stage("start2", object())
+    bot._reset_active_tackle_scan("start2")
+    bot._scan_tackle_for_active_stage("start2", object())
+
+    assert detector.calls == 2
+    assert len(stored) == 2
+
+
+def test_active_stage_tackle_scan_limits_waiting_and_reeling_separately():
+    class Detector:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def detect(self, frame):
+            self.calls += 1
+            return make_tackle_scan({})
+
+    detector = Detector()
+    bot = FishingBot.__new__(FishingBot)
+    stored: list[TackleScanResult] = []
+    bot.tackle_detector = detector
+    bot.capture = DummyCapture()
+    bot._active_tackle_scanned_stages = set()
+    bot._store_tackle_scan = lambda scan, frame: stored.append(scan)
+    bot._log = lambda message: None
+
+    bot._scan_tackle_for_active_stage("start2", object())
+    bot._scan_tackle_for_active_stage("start2", object())
+    bot._scan_tackle_for_active_stage("ad", object())
+    bot._scan_tackle_for_active_stage("ad", object())
+
+    assert detector.calls == 2
+    assert len(stored) == 2
 
 
 def test_tackle_depletion_is_rechecked_before_stop():
@@ -666,6 +842,91 @@ def test_reeling_loss_debug_log_is_saved_in_debug_mode(tmp_path, monkeypatch):
     assert path.exists()
     assert "target_search" in path.read_text(encoding="utf-8")
     assert any("debug-лог срыва" in message for message in logs)
+
+
+def test_reeling_loss_release_log_is_encrypted_and_rotated(tmp_path, monkeypatch):
+    bot = FishingBot.__new__(FishingBot)
+    bot._log = lambda _message: None
+    monkeypatch.setattr(bot_module, "IS_FROZEN", True)
+    monkeypatch.setattr(bot_module, "LOG_DIR", tmp_path)
+    monkeypatch.delenv("SONAR_DEBUG_MODE", raising=False)
+    monkeypatch.delenv("SONAR_DEBUG_CAPTURE", raising=False)
+
+    current_time = 1_770_000_000
+
+    def fake_time() -> float:
+        nonlocal current_time
+        current_time += 1
+        return float(current_time)
+
+    monkeypatch.setattr(bot_module.time, "time", fake_time)
+    records = [{"event": "state", "action": "target_search"}]
+
+    for index in range(17):
+        path = bot._save_reeling_debug_log(records, f"lost_{index}")
+        assert path is not None
+
+    files = sorted(tmp_path.glob("reeling_loss_*.jsonl.enc"))
+    assert len(files) == 15
+    payload = files[-1].read_bytes()
+    assert b"target_search" not in payload
+    assert b"target_search" in bot_module.decrypt_reeling_loss_log(payload, key="sonar")
+
+
+def test_auto_stop_sends_screenshot_with_stop_notification():
+    class DummyReelingTracker:
+        def stop(self) -> None:
+            pass
+
+    class DummyCloser:
+        def close(self) -> None:
+            pass
+
+    class DummyMealSystem:
+        status_memory_detector = DummyCloser()
+
+    class DummyInputController:
+        def release_all_keys(self) -> None:
+            pass
+
+    class DummySessionStats:
+        def __init__(self) -> None:
+            self.stopped = False
+
+        def stop_timer(self) -> None:
+            self.stopped = True
+
+        def totals(self):
+            return object()
+
+    class DummyNotifier:
+        def __init__(self) -> None:
+            self.image_bytes = None
+            self.reason = None
+
+        def notify_fishing_stopped(self, _totals, *, reason=None, image_bytes=None) -> None:
+            self.reason = reason
+            self.image_bytes = image_bytes
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot._stop_event = threading.Event()
+    bot.reeling_tracker = DummyReelingTracker()
+    bot.inventory_memory_detector = DummyCloser()
+    bot.meal_system = DummyMealSystem()
+    bot.input_controller = DummyInputController()
+    bot.settings = FishingSettings(start_stop_sound_enabled=False)
+    bot.session_stats = DummySessionStats()
+    bot.notification_manager = DummyNotifier()
+    bot._log = lambda _message: None
+    bot._publish_ui_event = lambda *_args, **_kwargs: None
+    bot._capture_screenshot_bytes = lambda: b"screen"
+
+    bot._stop_from_brain(bot_module.STOP_REASON_NO_STAGE)
+
+    assert bot.notification_manager.reason == bot_module.STOP_REASON_NO_STAGE
+    assert bot.notification_manager.image_bytes == b"screen"
+    assert bot.session_stats.stopped is True
 
 
 def test_debug_capture_writes_meal_item_info_crop_and_screen(tmp_path, monkeypatch):

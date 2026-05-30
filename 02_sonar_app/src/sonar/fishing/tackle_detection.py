@@ -154,10 +154,12 @@ class TackleDetector:
     def _scale(width: int, height: int) -> float:
         return min(width / TACKLE_REFERENCE_WIDTH, height / TACKLE_REFERENCE_HEIGHT)
 
-    @staticmethod
-    def _is_slot_occupied(crop: np.ndarray) -> bool:
+    @classmethod
+    def _is_slot_occupied(cls, crop: np.ndarray) -> bool:
         if crop.size == 0:
             return False
+        if cls._has_tier_badge(crop):
+            return True
         height, width = crop.shape[:2]
         body = crop[
             int(height * 0.12) : max(int(height * 0.12) + 1, int(height * 0.88)),
@@ -170,12 +172,41 @@ class TackleDetector:
         return float(gray.std()) >= 28.0 or colorful_ratio >= 0.03 or very_bright_ratio >= 0.02
 
     @classmethod
+    def _has_tier_badge(cls, crop: np.ndarray) -> bool:
+        crop = cls._normalize_slot_crop(crop)
+        height, width = crop.shape[:2]
+        corner = crop[
+            max(1, int(height * 0.03)) : max(2, int(height * 0.24)),
+            max(1, int(width * 0.03)) : max(2, int(width * 0.34)),
+        ]
+        if corner.size == 0:
+            return False
+        hsv = cv2.cvtColor(corner, cv2.COLOR_BGR2HSV)
+        mask = ((hsv[:, :, 2] > 105) & (hsv[:, :, 1] < 120)).astype("uint8") * 255
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        bright_pixels = 0
+        for contour in contours:
+            x, y, component_width, component_height = cv2.boundingRect(contour)
+            pixels = int(cv2.countNonZero(mask[y : y + component_height, x : x + component_width]))
+            if component_height < 4 or pixels < 4:
+                continue
+            if component_width > max(16, int(round(width * 0.24))):
+                continue
+            bright_pixels += pixels
+        return bright_pixels >= 4
+
+    @staticmethod
+    def _normalize_slot_crop(crop: np.ndarray) -> np.ndarray:
+        if crop.shape[0] == TACKLE_SLOT_SIZE and crop.shape[1] == TACKLE_SLOT_SIZE:
+            return crop
+        interpolation = cv2.INTER_AREA if max(crop.shape[:2]) > TACKLE_SLOT_SIZE else cv2.INTER_CUBIC
+        return cv2.resize(crop, (TACKLE_SLOT_SIZE, TACKLE_SLOT_SIZE), interpolation=interpolation)
+
+    @classmethod
     def _read_count(cls, crop: np.ndarray) -> int | None:
         if crop.size == 0:
             return None
-        if crop.shape[0] != TACKLE_SLOT_SIZE or crop.shape[1] != TACKLE_SLOT_SIZE:
-            interpolation = cv2.INTER_AREA if crop.shape[0] > TACKLE_SLOT_SIZE else cv2.INTER_CUBIC
-            crop = cv2.resize(crop, (TACKLE_SLOT_SIZE, TACKLE_SLOT_SIZE), interpolation=interpolation)
+        crop = cls._normalize_slot_crop(crop)
         height, width = crop.shape[:2]
         roi = crop[int(round(height * 0.65)) : height, int(round(width * 0.41)) : width]
         if roi.size == 0:
@@ -208,9 +239,11 @@ class TackleDetector:
         rows = np.where(clean[:, x_min:x_max].any(axis=1))[0]
         if len(rows) == 0:
             return None
+        if int(rows.max()) < int(clean.shape[0] * 0.55):
+            return None
         cluster = clean[int(rows.min()) : int(rows.max()) + 1, x_min:x_max]
         digits = cls._split_digit_cluster(cluster)
-        if not digits:
+        if not digits or any(digit.shape[0] < 5 for digit in digits):
             return None
         text = ""
         distances: list[int] = []
@@ -305,9 +338,11 @@ _HAND_DIGIT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("1", (".####", "#####", "#####", "#####", ".####", ".####", ".####", ".###.", ".####")),
     ("1", ("...##", "..###", "##.##", "#..##", "...##", "...##", "...##", "...##", "...##")),
     ("2", (".###.", ".#.##", "....#", "...##", "...#.", "..##.", ".##..", ".##..", "#####")),
+    ("2", ("#..#.", "...##", "...##", "...#.", "...#.", "..#..", ".##..", ".#...", "####.")),
     ("3", ("####.", "....#", "....#", "..###", "..###", "..###", "....#", "#...#", "####.")),
     ("4", ("..##.", "..##.", ".###.", ".#.#.", ".#.#.", "#####", "#####", "...#.", "...#.")),
     ("6", (".####", ".#...", ".#...", "#####", "#####", ".#..#", ".#..#", ".#..#", ".###.")),
+    ("6", (".###.", "##...", "##...", "##...", "##.#.", "#...#", "#...#", "#...#", ".###.")),
     ("8", ("####.", "#...#", "#...#", "#####", "#####", "#####", "#...#", "#...#", "####.")),
     ("8", (".###.", ".#..#", ".#..#", ".####", ".####", "#####", "##..#", ".#..#", ".###.")),
     ("9", (".###.", ".#..#", "##..#", "##..#", ".##.#", ".##.#", "....#", "...##", ".###.")),
