@@ -9,9 +9,12 @@ from sonar.fishing.statistics import (
     FishPrice,
     FishingSessionStats,
     format_base_price,
+    format_duration_hhmm,
+    format_session_title,
     format_money_range,
     parse_fish_prices_from_markdown,
 )
+from sonar.fishing.session_history import FishingSessionHistory
 
 
 def test_embedded_price_catalog_contains_markdown_prices():
@@ -110,3 +113,44 @@ def test_session_resets_catch_size_distribution():
     stats.reset()
 
     assert all(row.count == 0 for row in stats.catch_size_rows())
+
+
+def test_session_snapshot_roundtrip_and_aggregate(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(statistics.time, "time", lambda: now[0])
+    stats = FishingSessionStats(default_prices={"marlin": FishPrice(0.67, 0.73, 670.0, 730.0)})
+    stats.start_timer()
+    now[0] += 125.0
+    stats.record_catch("marlin", "Марлин", 3.1, kept=True, catch_size="Хороший улов")
+
+    restored = FishingSessionStats.from_dict(stats.to_dict(), default_prices=stats.default_prices)
+    aggregate = FishingSessionStats.aggregate([restored, restored], default_prices=stats.default_prices)
+
+    assert restored.totals().duration_seconds == pytest.approx(125.0)
+    assert restored.rows()[0].stat.caught_count == 1
+    assert aggregate.totals().caught_count == 2
+    assert aggregate.totals().duration_seconds == pytest.approx(250.0)
+
+
+def test_session_title_uses_date_duration_and_catch_count():
+    stats = FishingSessionStats()
+    stats.record_catch("marlin", "Марлин", 3.1, kept=True)
+    totals = statistics.SessionTotals(3660, 12, 10.0, 0, 0.0, 0, 0)
+
+    assert format_duration_hhmm(3660) == "01:01"
+    assert format_session_title(stats.started_at(), totals).endswith("01:01, 12шт.")
+
+
+def test_history_skips_empty_sessions_and_persists_non_empty(tmp_path):
+    history = FishingSessionHistory(tmp_path / "statistics_sessions.json")
+    empty = FishingSessionStats()
+    filled = FishingSessionStats()
+    filled.record_catch("marlin", "Марлин", 3.1, kept=True)
+
+    assert history.add_from_stats(empty) is None
+    record = history.add_from_stats(filled)
+
+    assert record is not None
+    loaded = history.load()
+    assert len(loaded) == 1
+    assert loaded[0].to_stats().totals().caught_count == 1

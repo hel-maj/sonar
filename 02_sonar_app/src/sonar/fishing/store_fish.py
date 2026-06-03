@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from sonar.automation.input_controller import InputController
-from sonar.fishing.constants import PROCESS_NAME, STORE_FISH_MATCH_THRESHOLD, inventory_roi_for_resolution, resolution_name
+from sonar.fishing.constants import PROCESS_NAME, STORE_FISH_MATCH_THRESHOLD, inventory_roi_for_resolution
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.capture import WindowCapture
 from sonar.vision.matching import TemplateMatcher, load_template
@@ -28,13 +28,11 @@ class FishStorer:
     def initialize(self) -> bool:
         if not self.capture.find_window_by_process():
             return False
-        width, height = self.capture.get_window_size()
-        self.load_templates(resolution_name(width, height))
+        self.load_templates()
         return True
 
-    def load_templates(self, resolution: str) -> None:
-        folder = "fish_inv_2k" if resolution == "2k" else "fish_inv_hd"
-        template_dir = self.resource_dir / folder
+    def load_templates(self) -> None:
+        template_dir = self.resource_dir / "fish"
         self.templates = {path.stem: load_template(path) for path in sorted(template_dir.glob("*.png")) if path.stem != "remove"}
         remove_path = template_dir / "remove.png"
         self.remove_template = load_template(remove_path) if remove_path.exists() else None
@@ -71,9 +69,8 @@ class FishStorer:
         if self.capture.hwnd is None and not self.initialize():
             return 0
         screenshot = self.capture.capture()
-        width, height = self.capture.get_window_size()
         if not self.templates:
-            self.load_templates(resolution_name(width, height))
+            self.load_templates()
         fish_positions = self.find_all_fish(screenshot, fish_to_keep)
         stored_count = 0
         for fish_info in fish_positions:

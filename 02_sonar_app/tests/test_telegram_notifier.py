@@ -180,6 +180,42 @@ def test_stream_menu_hides_open_button_until_public_link(monkeypatch):
     assert not any(button.get("url") for row in keyboard for button in row)
 
 
+def test_public_stream_url_normalizes_to_live_page():
+    snapshot = SimpleNamespace(
+        public_url="https://example.trycloudflare.com?token=old",
+        stream_url="https://example.trycloudflare.com/hls/live.m3u8?stream=local",
+    )
+
+    assert NotificationManager._public_stream_url(snapshot) == "https://example.trycloudflare.com/live/"
+
+
+def test_public_stream_url_keeps_existing_live_page():
+    snapshot = SimpleNamespace(
+        public_url="https://example.trycloudflare.com/live/",
+        stream_url="",
+    )
+
+    assert NotificationManager._public_stream_url(snapshot) == "https://example.trycloudflare.com/live/"
+
+
+def test_public_stream_url_converts_hls_playlist_to_live_page():
+    snapshot = SimpleNamespace(
+        public_url="",
+        stream_url="https://example.trycloudflare.com/hls/live.m3u8?stream=local",
+    )
+
+    assert NotificationManager._public_stream_url(snapshot) == "https://example.trycloudflare.com/live/"
+
+
+def test_public_stream_url_rejects_ipv6_loopback():
+    snapshot = SimpleNamespace(
+        public_url="http://[::1]:1000",
+        stream_url="http://[::1]:1000/live/",
+    )
+
+    assert NotificationManager._public_stream_url(snapshot) == ""
+
+
 def test_stream_menu_allows_cancelling_starting_stream(monkeypatch):
     snapshot = SimpleNamespace(
         active=False,
@@ -360,7 +396,7 @@ def test_send_stream_link_shows_menu_without_sending_local_link(monkeypatch):
     assert "127.0.0.1" not in text
 
 
-def test_stream_menu_marks_unreachable_cloudflare_link_as_forming(monkeypatch):
+def test_stream_menu_marks_unreachable_cloudflare_link_as_unavailable(monkeypatch):
     snapshot = SimpleNamespace(
         active=True,
         status="online",
@@ -387,7 +423,9 @@ def test_stream_menu_marks_unreachable_cloudflare_link_as_forming(monkeypatch):
     manager._send_stream_menu(1, message_id=42)
 
     payload = calls[0][1]["json"]
-    assert "Ссылка: Формируется..." in payload["text"]
+    assert "https://example.trycloudflare.com/live/" in payload["text"]
+    assert "Ссылка сформирована, но Cloudflare пока не отвечает" in payload["text"]
+    assert "Ссылка: Формируется..." not in payload["text"]
     keyboard = payload["reply_markup"]["inline_keyboard"]
     assert not any(button.get("url") for row in keyboard for button in row)
 

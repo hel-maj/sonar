@@ -32,7 +32,6 @@ from sonar.fishing.catch_screen import CatchScreenDetector, CatchScreenResult
 from sonar.fishing.constants import BOT_DELAYS, PROCESS_NAME, TRIGGER_ROIS_FHD, resolution_name
 from sonar.fishing.casting_a_fishing_rod import GreenPixelMonitor, create_monitor_for_frame as create_casting_monitor
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
-from sonar.fishing.fish_recognition import FishRecognition
 from sonar.fishing.garbage_disposal import GarbageDisposal
 from sonar.fishing.game_menu import GameMenuDetector
 from sonar.fishing.inventory_memory import InventoryMemoryDetector
@@ -195,8 +194,7 @@ class FishingBot:
         self.capture = WindowCapture(self.process_name)
         self.window_activator = WindowActivator(self.process_name)
         self.trigger_monitor = TriggerMonitor()
-        self.fish_recognition = FishRecognition(self.process_name)
-        self.catch_detector = CatchScreenDetector(fish_recognition=self.fish_recognition)
+        self.catch_detector = CatchScreenDetector()
         self.game_menu_detector = GameMenuDetector()
         self.inventory_detector = InventoryStageDetector()
         self.inventory_memory_detector = InventoryMemoryDetector(self.process_name)
@@ -860,7 +858,6 @@ class FishingBot:
         self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
         self.reeling_tracker.start()
         self.reeling_tracker.start_control_loop()
-        last_recognition_at = 0.0
         last_trigger_check_at = 0.0
         last_walking_guard_at = 0.0
         last_action_log_at = 0.0
@@ -958,19 +955,6 @@ class FishingBot:
                     finish_reason = "target_search_timeout"
                     self._append_reeling_debug_log(reeling_debug_log, "target_search_timeout", state=state)
                     break
-            if seen_ad_stage and now - last_recognition_at >= 1.0:
-                last_recognition_at = now
-                fish_name, confidence = self.fish_recognition.recognize_once()
-                if fish_name and confidence >= 0.55:
-                    self._append_reeling_debug_log(
-                        reeling_debug_log,
-                        "recognized",
-                        fish_id=fish_name,
-                        confidence=confidence,
-                        state=state,
-                    )
-                    self.reeling_tracker.stop()
-                    return fish_name, confidence
             if self._stop_event.is_set():
                 break
             self._sleep(0.003)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import ipaddress
 import random
 import re
 import threading
@@ -11,6 +12,7 @@ from io import BytesIO
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
+from urllib.parse import urlparse, urlunparse
 
 import requests
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
@@ -499,8 +501,14 @@ class NotificationManager:
         if active and auto_stop is not None:
             minutes, seconds = divmod(max(0, int(auto_stop)), 60)
             auto_stop_line = f"\n⏱ Автостоп: {minutes}:{seconds:02d} без зрителей"
-        link = self._verified_public_stream_url(snapshot) if active else ""
-        link_line = f"\n🔗 Ссылка: {link or 'Формируется...'}" if active else ""
+        formed_link = self._public_stream_url(snapshot) if active else ""
+        link = self._verified_public_stream_url(snapshot) if formed_link else ""
+        link_status = link or (
+            f"{formed_link}\n⚠️ Ссылка сформирована, но Cloudflare пока не отвечает"
+            if formed_link
+            else "Формируется..."
+        )
+        link_line = f"\n🔗 Ссылка: {link_status}" if active else ""
         status_icon = "🟢" if status == "online" else "🔴" if status == "offline" else "🟡"
         text = (
             "📺 Стрим игры\n\n"
@@ -772,10 +780,23 @@ class NotificationManager:
     @staticmethod
     def _public_stream_url(snapshot: Any | None) -> str:
         for field_name in ("public_url", "stream_url"):
-            url = str(getattr(snapshot, field_name, "") or "")
-            if NotificationManager._is_public_stream_url(url):
-                return url.rstrip("/") + "/live/" if not url.rstrip("/").endswith("/live") else url.rstrip("/") + "/"
+            url = NotificationManager._normalize_stream_page_url(str(getattr(snapshot, field_name, "") or ""))
+            if url:
+                return url
         return ""
+
+    @staticmethod
+    def _normalize_stream_page_url(url: str) -> str:
+        if not NotificationManager._is_public_stream_url(url):
+            return ""
+        parsed = urlparse(url.strip())
+        path = parsed.path.rstrip("/")
+        path_lower = path.lower()
+        if path_lower.startswith("/hls/") or path_lower.endswith(".m3u8"):
+            path = "/live"
+        elif not path_lower.endswith("/live"):
+            path = f"{path}/live" if path else "/live"
+        return urlunparse((parsed.scheme, parsed.netloc, f"{path}/", "", "", ""))
 
     def _verified_public_stream_url(self, snapshot: Any | None) -> str:
         url = self._public_stream_url(snapshot)
@@ -803,11 +824,17 @@ class NotificationManager:
 
     @staticmethod
     def _is_public_stream_url(url: str) -> bool:
-        normalized = url.strip().lower()
-        if not normalized.startswith(("http://", "https://")):
+        parsed = urlparse(url.strip())
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
             return False
-        parsed_host = normalized.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
-        return parsed_host not in {"127.0.0.1", "localhost", "::1"}
+        host = parsed.hostname.strip("[]").lower()
+        if host == "localhost":
+            return False
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return True
+        return not (address.is_loopback or address.is_unspecified)
 
     @staticmethod
     def _message_contains_stream_link(text: str) -> bool:

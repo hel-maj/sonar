@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 SONAR_QSS = """
 * {
-    font-family: "SF Pro Display", "SF Pro Text", "San Francisco", "Segoe UI", Arial, sans-serif;
+    font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
     color: #192342;
     outline: none;
 }
@@ -35,82 +35,82 @@ QWidget#startupWindow {
     background: transparent;
 }
 QFrame#sidebar {
-    background: rgba(255,255,255,0.72);
-    border-right: 1px solid rgba(213,224,241,0.86);
+    background: #fbfdff;
+    border-right: 1px solid #d9e5f3;
 }
 QFrame#contentShell {
     background: transparent;
 }
 QFrame[card="true"] {
-    background: rgba(255,255,255,0.92);
+    background: #ffffff;
     border: 1px solid #dde8f6;
-    border-radius: 18px;
+    border-radius: 10px;
 }
 QFrame[softCard="true"] {
-    background: rgba(248,251,255,0.94);
+    background: #fbfdff;
     border: 1px solid #e2ebf7;
-    border-radius: 14px;
+    border-radius: 8px;
 }
 QFrame[dangerCard="true"] {
     background: #fff4f4;
     border: 1px solid #ffd4d4;
-    border-radius: 18px;
+    border-radius: 10px;
 }
 QLabel[muted="true"] {
     color: #7583a2;
 }
 QLabel[title="true"] {
     color: #121a35;
-    font-size: 24px;
+    font-size: 19px;
     font-weight: 800;
 }
 QLabel[sectionTitle="true"] {
     color: #17203c;
-    font-size: 16px;
+    font-size: 13px;
     font-weight: 750;
 }
 QLabel[metricValue="true"] {
     color: #14203d;
-    font-size: 24px;
+    font-size: 18px;
     font-weight: 800;
 }
 QLabel[metricLabel="true"] {
     color: #7482a2;
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 600;
 }
 QLabel[badge="green"] {
     color: #17a34a;
     background: #eafaf0;
-    border-radius: 9px;
-    padding: 4px 10px;
+    border-radius: 7px;
+    padding: 3px 8px;
     font-weight: 700;
 }
 QLabel[badge="blue"] {
     color: #1268e8;
     background: #eaf2ff;
-    border-radius: 9px;
-    padding: 4px 10px;
+    border-radius: 7px;
+    padding: 3px 8px;
     font-weight: 700;
 }
 QLabel[badge="red"] {
     color: #e54848;
     background: #fff0f0;
-    border-radius: 9px;
-    padding: 4px 10px;
+    border-radius: 7px;
+    padding: 3px 8px;
     font-weight: 700;
 }
 QLabel[badge="gray"] {
     color: #697796;
     background: #f2f5fa;
-    border-radius: 9px;
-    padding: 4px 10px;
+    border-radius: 7px;
+    padding: 3px 8px;
     font-weight: 700;
 }
 QPushButton {
-    min-height: 38px;
-    padding: 8px 14px;
-    border-radius: 11px;
+    min-height: 30px;
+    padding: 5px 10px;
+    border-radius: 8px;
     background: #ffffff;
     border: 1px solid #dce6f3;
     color: #17203c;
@@ -157,41 +157,41 @@ QPushButton[role="ghostDanger"] {
     border: 1px solid #ffc6c8;
 }
 QPushButton[buttonSize="xxs"] {
-    min-height: 26px;
-    padding: 4px 9px;
-    border-radius: 8px;
-    font-size: 11px;
+    min-height: 22px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 10px;
 }
 QPushButton[buttonSize="xs"] {
-    min-height: 30px;
-    padding: 5px 10px;
-    border-radius: 9px;
-    font-size: 12px;
+    min-height: 25px;
+    padding: 4px 8px;
+    border-radius: 7px;
+    font-size: 11px;
 }
 QPushButton[buttonSize="s"] {
-    min-height: 34px;
-    padding: 6px 12px;
+    min-height: 28px;
+    padding: 5px 9px;
+    border-radius: 8px;
+    font-size: 12px;
+}
+QPushButton[buttonSize="l"] {
+    min-height: 36px;
+    padding: 7px 13px;
+    border-radius: 9px;
+    font-size: 13px;
+}
+QPushButton[buttonSize="xl"] {
+    min-height: 40px;
+    padding: 8px 16px;
     border-radius: 10px;
     font-size: 13px;
 }
-QPushButton[buttonSize="l"] {
-    min-height: 44px;
-    padding: 10px 18px;
-    border-radius: 13px;
-    font-size: 14px;
-}
-QPushButton[buttonSize="xl"] {
-    min-height: 52px;
-    padding: 12px 22px;
-    border-radius: 15px;
-    font-size: 15px;
-}
 QPushButton[nav="true"] {
-    min-height: 46px;
-    padding: 8px 14px;
+    min-height: 31px;
+    padding: 5px 9px;
     text-align: left;
     border: 0;
-    border-radius: 12px;
+    border-radius: 8px;
     background: transparent;
     color: #33405e;
     font-weight: 650;
@@ -205,9 +205,9 @@ QPushButton[nav="true"][selected="true"] {
     color: #0d67e9;
 }
 QLineEdit, QComboBox {
-    min-height: 38px;
-    padding: 6px 12px;
-    border-radius: 10px;
+    min-height: 30px;
+    padding: 4px 9px;
+    border-radius: 8px;
     background: #ffffff;
     border: 1px solid #dce6f3;
     color: #17203c;
@@ -219,7 +219,7 @@ QLineEdit:focus, QComboBox:focus {
 }
 QComboBox::drop-down {
     border: none;
-    width: 28px;
+    width: 24px;
 }
 QComboBox QAbstractItemView {
     background: #ffffff;
@@ -259,7 +259,7 @@ QHeaderView::section {
     background: #f6f9fd;
     border: 0;
     border-bottom: 1px solid #e2ebf7;
-    padding: 10px;
+    padding: 7px;
     color: #63718f;
     font-weight: 800;
 }
@@ -278,16 +278,16 @@ QAbstractScrollArea::corner {
     border: none;
 }
 QScrollBar:vertical {
-    width: 12px;
+    width: 9px;
     margin: 0;
     background: #edf3fb;
     border: none;
-    border-radius: 6px;
+    border-radius: 4px;
 }
 QScrollBar::handle:vertical {
     background: #b9c7dc;
-    min-height: 34px;
-    border-radius: 4px;
+    min-height: 28px;
+    border-radius: 3px;
     margin: 2px;
 }
 QScrollBar::handle:vertical:hover {
@@ -304,16 +304,16 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     border: none;
 }
 QScrollBar:horizontal {
-    height: 12px;
+    height: 9px;
     margin: 0;
     background: #edf3fb;
     border: none;
-    border-radius: 6px;
+    border-radius: 4px;
 }
 QScrollBar::handle:horizontal {
     background: #b9c7dc;
-    min-width: 34px;
-    border-radius: 4px;
+    min-width: 28px;
+    border-radius: 3px;
     margin: 2px;
 }
 QScrollBar::handle:horizontal:hover {
@@ -342,7 +342,7 @@ QWidget#fishKeepList {
 QFrame#fishKeepCard {
     background: #ffffff;
     border: 1px solid #e1eaf6;
-    border-radius: 12px;
+    border-radius: 8px;
 }
 QScrollArea#recentEventsScroll, QScrollArea#recentEventsScroll > QWidget, QScrollArea#recentEventsScroll > QWidget > QWidget, QWidget#recentEventsWidget {
     background: transparent;
@@ -359,12 +359,12 @@ QFrame#recentEventDivider {
 }
 QLabel[recentTitle="true"] {
     color: #17203c;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 400;
 }
 QLabel[recentTime="true"] {
     color: #7a88a8;
-    font-size: 12px;
+    font-size: 11px;
 }
 QLabel[recentDetail="true"] {
     color: #687696;
@@ -373,12 +373,12 @@ QLabel[recentDetail="true"] {
 }
 QLabel[recentExtraGreen="true"] {
     color: #1d9f52;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
 }
 QLabel[recentExtraRed="true"] {
     color: #e54848;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
 }
 QLabel[recentTime="true"] {
@@ -390,7 +390,7 @@ QFrame#startupLoader {
     border-radius: 20px;
 }
 QProgressBar {
-    height: 8px;
+    height: 7px;
     border: none;
     border-radius: 4px;
     background: #edf2f8;
@@ -399,6 +399,12 @@ QProgressBar {
 QProgressBar::chunk {
     border-radius: 4px;
     background: #1f7aff;
+}
+QLabel#fishingPreview {
+    background: #eef4fb;
+    border: 1px solid #d9e5f3;
+    border-radius: 10px;
+    color: #7583a2;
 }
 """
 
@@ -535,15 +541,21 @@ class Card(QFrame):
             self.setProperty("softCard", True)
         else:
             self.setProperty("card", True)
+        self.setAutoFillBackground(True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(18)
+        shadow.setOffset(0, 5)
+        shadow.setColor(QColor(32, 55, 95, 22))
+        self.setGraphicsEffect(shadow)
 
 
 class SectionHeader(QWidget):
     def __init__(self, title: str, subtitle: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 10)
-        layout.setSpacing(3)
+        layout.setContentsMargins(0, 0, 0, 7)
+        layout.setSpacing(2)
         title_label = QLabel(title)
         title_label.setProperty("title", True)
         layout.addWidget(title_label)
@@ -656,7 +668,7 @@ class ToggleSwitch(QCheckBox):
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(26)
+        self.setMinimumHeight(21)
         self._switch_position = 1.0 if self.isChecked() else 0.0
         self._switch_animation: QPropertyAnimation | None = None
         self.stateChanged.connect(self._animate_state_change)
@@ -690,10 +702,10 @@ class ToggleSwitch(QCheckBox):
 
     def sizeHint(self) -> QSize:  # type: ignore[override]
         metrics = QFontMetrics(self.font())
-        width = 44
+        width = 34
         if self.text():
-            width += 9 + metrics.horizontalAdvance(self.text())
-        return QSize(width, 26)
+            width += 7 + metrics.horizontalAdvance(self.text())
+        return QSize(width, 21)
 
     def hitButton(self, pos) -> bool:  # type: ignore[override]
         return self.rect().contains(pos)
@@ -713,8 +725,8 @@ class ToggleSwitch(QCheckBox):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
-        track_width = 44
-        track_height = 24
+        track_width = 34
+        track_height = 19
         track_x = 0
         track_y = (self.height() - track_height) / 2
         track_rect = QRectF(track_x, track_y, track_width, track_height)
@@ -727,8 +739,8 @@ class ToggleSwitch(QCheckBox):
         painter.setBrush(track_color)
         painter.drawRoundedRect(track_rect, track_height / 2, track_height / 2)
 
-        knob_size = 18
-        knob_margin = 3
+        knob_size = 15
+        knob_margin = 2
         knob_x = track_x + knob_margin + (track_width - knob_size - knob_margin * 2) * self._switch_position
         knob_rect = QRectF(knob_x, track_y + knob_margin, knob_size, knob_size)
         painter.setBrush(QColor("#ffffff"))
@@ -736,7 +748,7 @@ class ToggleSwitch(QCheckBox):
 
         if self.text():
             painter.setPen(QColor("#24304f" if self.isEnabled() else "#9aa6bb"))
-            text_rect = self.rect().adjusted(track_width + 9, 0, 0, 0)
+            text_rect = self.rect().adjusted(track_width + 7, 0, 0, 0)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
         painter.end()
 
@@ -801,23 +813,30 @@ class PageScrollArea(QScrollArea):
         return False
 
 
+class ContainedScrollArea(QScrollArea):
+    def wheelEvent(self, event) -> None:  # type: ignore[override]
+        delta = event.pixelDelta().y() if hasattr(event, "pixelDelta") and not event.pixelDelta().isNull() else event.angleDelta().y()
+        if delta:
+            bar = self.verticalScrollBar()
+            bar.setValue(bar.value() - delta)
+        event.accept()
+
+
 
 class HoverAnimatedButton(QPushButton):
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self._hover_progress = 0.0
         self._hover_animation: QPropertyAnimation | None = None
-        self._hover_shadow = QGraphicsDropShadowEffect(self)
-        self._hover_shadow.setBlurRadius(0)
-        self._hover_shadow.setOffset(0, 0)
-        self._hover_shadow.setColor(QColor(0, 0, 0, 0))
-        self.setGraphicsEffect(self._hover_shadow)
+        self._hover_shadow: QGraphicsDropShadowEffect | None = None
 
     def _get_hover_progress(self) -> float:
         return self._hover_progress
 
     def _set_hover_progress(self, value: float) -> None:
         self._hover_progress = max(0.0, min(1.0, float(value)))
+        if self._hover_shadow is None:
+            return
         alpha = round(42 * self._hover_progress)
         self._hover_shadow.setColor(QColor(31, 122, 255, alpha))
         self._hover_shadow.setBlurRadius(4 + 12 * self._hover_progress)
@@ -826,6 +845,9 @@ class HoverAnimatedButton(QPushButton):
     hoverProgress = Property(float, _get_hover_progress, _set_hover_progress)
 
     def _animate_hover(self, target: float) -> None:
+        if self._hover_shadow is None:
+            self._hover_progress = target
+            return
         if self._hover_animation is not None:
             self._hover_animation.stop()
         animation = QPropertyAnimation(self, b"hoverProgress", self)
@@ -850,8 +872,8 @@ class NavButton(HoverAnimatedButton):
         super().__init__(text, parent)
         self._icon_path = icon if isinstance(icon, Path) else None
         if self._icon_path is not None:
-            self.setIcon(tinted_icon_from_path(self._icon_path, "#52617e", 22))
-            self.setIconSize(QSize(22, 22))
+            self.setIcon(tinted_icon_from_path(self._icon_path, "#52617e", 17))
+            self.setIconSize(QSize(17, 17))
         elif icon:
             self.setText(f"{icon}  {text}")
         self.setProperty("nav", True)
@@ -860,7 +882,7 @@ class NavButton(HoverAnimatedButton):
     def set_selected(self, selected: bool) -> None:
         self.setProperty("selected", selected)
         if self._icon_path is not None:
-            self.setIcon(tinted_icon_from_path(self._icon_path, "#0d67e9" if selected else "#52617e", 22))
+            self.setIcon(tinted_icon_from_path(self._icon_path, "#0d67e9" if selected else "#52617e", 17))
         self.style().unpolish(self)
         self.style().polish(self)
 
@@ -880,8 +902,8 @@ class ActionButton(HoverAnimatedButton):
         self.setProperty("buttonSize", size)
         if icon is not None:
             color = "#ffffff" if role in {"primary", "danger"} else "#1677ff"
-            self.setIcon(tinted_icon_from_path(icon, color, 18))
-            self.setIconSize(QSize(18, 18))
+            self.setIcon(tinted_icon_from_path(icon, color, 15))
+            self.setIconSize(QSize(15, 15))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
 
@@ -1051,33 +1073,37 @@ class MetricCard(Card):
     def __init__(self, label: str, value: str = "—", icon: str | Path = "", parent: QWidget | None = None) -> None:
         super().__init__(parent, soft=True)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(7)
         if icon:
-            layout.addWidget(icon_widget(icon, 28))
+            layout.addWidget(icon_widget(icon, 20))
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
         self.value_label = QLabel(value)
         self.value_label.setProperty("metricValue", True)
         self.value_label.setMinimumWidth(0)
+        self.value_label.setWordWrap(True)
         self.label_label = QLabel(label)
         self.label_label.setProperty("metricLabel", True)
+        self.label_label.setWordWrap(True)
         text_layout.addWidget(self.value_label)
         text_layout.addWidget(self.label_label)
         layout.addLayout(text_layout, 1)
 
     def set_value(self, value: str) -> None:
+        if self.value_label.text() == value:
+            return
         self.value_label.setText(value)
         length = len(value)
         if length > 22:
-            size = 16
+            size = 12
         elif length > 16:
-            size = 18
+            size = 14
         elif length > 12:
-            size = 21
+            size = 16
         else:
-            size = 24
+            size = 18
         self.value_label.setStyleSheet(f"font-size: {size}px; font-weight: 800; color: #14203d;")
 
 
@@ -1085,12 +1111,12 @@ class SettingCard(Card):
     def __init__(self, title: str, subtitle: str = "", icon: str | Path = "", parent: QWidget | None = None) -> None:
         super().__init__(parent, soft=True)
         self.root_layout = QVBoxLayout(self)
-        self.root_layout.setContentsMargins(14, 12, 14, 12)
-        self.root_layout.setSpacing(9)
+        self.root_layout.setContentsMargins(10, 8, 10, 8)
+        self.root_layout.setSpacing(7)
         top = QHBoxLayout()
-        top.setSpacing(10)
+        top.setSpacing(7)
         if icon:
-            top.addWidget(icon_widget(icon, 28, "font-size: 21px; color: #1677ff;"))
+            top.addWidget(icon_widget(icon, 20, "font-size: 17px; color: #1677ff;"))
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
