@@ -94,6 +94,38 @@ def test_chat_mode_stays_enabled_when_exit_callback_fails(tmp_path):
     assert snapshot.error == "close failed"
 
 
+def test_forced_chat_mode_disable_clears_mode_when_exit_callback_fails(tmp_path):
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_exit_callback=lambda: ChatActionResult(False, "close failed"),
+    )
+    service._chat_mode_enabled = True
+
+    snapshot = service.disable_chat_mode(force=True)
+
+    assert snapshot.chat_mode_enabled is False
+    assert snapshot.error == "close failed"
+
+
+def test_stop_stream_exits_chat_mode_before_runtime_cleanup(tmp_path):
+    calls: list[str] = []
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_exit_callback=lambda: calls.append("close") or ChatActionResult(True, "closed"),
+    )
+    service._active = True
+    service._status = "online"
+    service._chat_mode_enabled = True
+
+    service.stop_stream("test")
+
+    assert calls == ["close"]
+    assert service.snapshot().chat_mode_enabled is False
+    assert service.snapshot().status == "offline"
+
+
 def test_snapshot_hides_chat_tabs_until_input_is_active(tmp_path):
     tabs = (ChatTab("0", "Все", True, Rect(1, 2, 3, 4)),)
     service = StreamingService(

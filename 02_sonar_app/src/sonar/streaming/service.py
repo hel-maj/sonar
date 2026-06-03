@@ -1416,6 +1416,7 @@ class StreamingService:
             return True
 
     def stop_stream(self, reason: str = "manual") -> None:
+        self._disable_chat_mode_before_stream_stop()
         with self._lock:
             if not self._active and self._status == "offline":
                 return
@@ -1423,6 +1424,7 @@ class StreamingService:
             self._stop_runtime_locked(clean_temp=True)
 
     def shutdown(self) -> None:
+        self._disable_chat_mode_before_stream_stop()
         with self._lock:
             self._stop_runtime_locked(clean_temp=True)
         shutil.rmtree(self._runtime_dir, ignore_errors=True)
@@ -1547,13 +1549,13 @@ class StreamingService:
         self._refresh_chat_memory_if_needed(force=True)
         return self.snapshot()
 
-    def disable_chat_mode(self) -> StreamSnapshot:
+    def disable_chat_mode(self, *, force: bool = False) -> StreamSnapshot:
         result: ChatActionResult | ChatDetection | None = None
         if self.chat_exit_callback is not None:
             with self._chat_action_lock:
                 result = self.chat_exit_callback()
         with self._lock:
-            self._chat_mode_enabled = isinstance(result, ChatActionResult) and not result.ok
+            self._chat_mode_enabled = not force and isinstance(result, ChatActionResult) and not result.ok
             self._apply_chat_result_locked(result)
             if not self._chat_mode_enabled:
                 self._chat_memory_loading = False
@@ -1564,6 +1566,12 @@ class StreamingService:
         if enabled:
             return self.enable_chat_mode()
         return self.disable_chat_mode()
+
+    def _disable_chat_mode_before_stream_stop(self) -> None:
+        with self._lock:
+            chat_mode_enabled = self._chat_mode_enabled
+        if chat_mode_enabled:
+            self.disable_chat_mode(force=True)
 
     def send_chat_message(self, tab_id: str | None, message: str) -> StreamSnapshot:
         if self.chat_send_callback is None:

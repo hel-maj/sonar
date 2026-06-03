@@ -6,7 +6,9 @@ from datetime import datetime
 
 import numpy as np
 
+import sonar.automation.input_controller as input_controller_module
 import sonar.fishing.bot as bot_module
+from sonar.automation.input_controller import SCAN_CODES, InputController
 from sonar.config.models import FishingSettings
 from sonar.core.state import BotPhase, BotState
 from sonar.fishing.bot import FishingBot
@@ -125,6 +127,16 @@ def make_tackle_scan(counts: dict[str, int]) -> TackleScanResult:
 
 def make_empty_tackle_scan() -> TackleScanResult:
     return make_tackle_scan({slot.key: 0 for slot in TACKLE_SLOTS})
+
+
+def make_obscured_tackle_scan() -> TackleScanResult:
+    scan = make_tackle_scan({})
+    return TackleScanResult(
+        items=scan.items,
+        obscured=True,
+        row_rect=scan.row_rect,
+        scanned_at=scan.scanned_at,
+    )
 
 
 def make_change_bait_bot(trigger_steps: list[dict[str, float]], *, auto_change_bait: bool = True):
@@ -273,6 +285,46 @@ def test_storage_selection_opens_selector_from_wrong_current_storage():
     assert clicks == ["human"]
 
 
+def test_storage_screenshot_click_uses_selector_anchor_when_start_is_temporarily_hidden(tmp_path, monkeypatch):
+    class Capture:
+        def capture(self):
+            return np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+    class TriggerMonitor:
+        resource_dir = tmp_path
+
+        def find_detections(self, _frame):
+            return {}
+
+    class Matcher:
+        def __init__(self, _threshold: float) -> None:
+            pass
+
+        def find_best_scaled(self, _frame, _template, *, roi, name, scales):
+            del roi, scales
+            if name == "change_boat":
+                return TemplateMatch(1199, 887, 1.0, 10, 10, name)
+            return None
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.capture = Capture()
+    bot.trigger_monitor = TriggerMonitor()
+    bot._sleep_random = lambda minimum, extra: None
+    clicks: list[str] = []
+    logs: list[str] = []
+    bot._click_match = lambda match: clicks.append(match.name or "")
+    bot._log = logs.append
+    monkeypatch.setattr(bot_module, "load_template", lambda _path: object())
+    monkeypatch.setattr(bot_module, "TemplateMatcher", Matcher)
+
+    assert bot._click_storage_option_from_screenshot(
+        "boat",
+        TemplateMatch(1199, 969, 1.0, 10, 10, "human"),
+    ) is True
+    assert clicks == ["change_boat"]
+    assert not any("menu is not confirmed" in message for message in logs)
+
+
 def test_start_stage_uses_casting_preparation_instead_of_direct_press():
     bot = FishingBot.__new__(FishingBot)
     bot.settings = FishingSettings(auto_meal=False)
@@ -310,6 +362,46 @@ def test_start_stage_uses_casting_preparation_instead_of_direct_press():
     bot._brain_loop()
 
     assert calls == ["casting"]
+
+
+def test_kickstart_does_not_cast_after_pending_inventory_tasks():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(auto_meal=True)
+    bot.state = BotState()
+    bot._stop_event = threading.Event()
+    bot._meal_search_disabled_until_restart = False
+    bot._kickstart_requested = True
+    bot._initial_status_scan_pending = False
+    bot._inventory_retry_after = 0.0
+    bot.is_paused_for_chat = lambda: False
+    bot._publish_stage = lambda stage: None
+    bot._sleep = lambda seconds: None
+    bot._update_focus_state_notification = lambda: None
+    bot._detect_stage = lambda triggers: None
+    bot._publish_estimated_player_status_if_changed = lambda: None
+    bot._status_indicates_needs_meal = lambda stage: False
+    bot._status_timer_needs_meal = lambda: False
+    bot._stop_if_no_stage_timed_out = lambda stage, needs_meal: False
+    bot._close_game_menu_if_open = lambda: False
+    bot._has_pending_catch = lambda: False
+    bot._probe_catch_screen = lambda: False
+    bot._handle_player_status_scan_request = lambda stage: False
+    bot._should_handle_meal_now = lambda stage, needs_meal: False
+    calls: list[str] = []
+
+    def get_triggers() -> dict[str, float]:
+        if calls:
+            bot._stop_event.set()
+            return {}
+        return {"hunger": 1.0}
+
+    bot._get_triggers = get_triggers
+    bot._handle_pending_tasks = lambda do_meal: calls.append("inventory")
+    bot._do_casting = lambda: calls.append("casting")
+
+    bot._brain_loop()
+
+    assert calls == ["inventory"]
 
 
 def test_chat_pause_keeps_running_state_and_releases_keys():
@@ -491,6 +583,7 @@ def test_meal_can_interrupt_non_reeling_stages_when_retry_is_due():
 def test_auto_stop_when_start_cannot_find_fishing_stage():
     bot = FishingBot.__new__(FishingBot)
     bot.state = BotState()
+    bot._stop_event = threading.Event()
     bot._start_attempt_since = time.time() - bot_module.AUTO_STOP_TIMEOUT_SECONDS - 1.0
     bot._prepare_fishing_start = lambda: None
     logs: list[str] = []
@@ -502,6 +595,25 @@ def test_auto_stop_when_start_cannot_find_fishing_stage():
 
     assert reasons == [bot_module.STOP_REASON_START_FAILED]
     assert any(bot_module.STOP_REASON_START_FAILED in message for message in logs)
+
+
+def test_casting_does_not_log_missing_stage_after_prepare_stops_bot():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState()
+    bot._stop_event = threading.Event()
+    bot._start_attempt_since = None
+    logs: list[str] = []
+    bot._log = logs.append
+
+    def stop_during_prepare():
+        bot._stop_event.set()
+        return None
+
+    bot._prepare_fishing_start = stop_during_prepare
+
+    bot._do_casting()
+
+    assert not any("стадия рыбалки не найдена" in message for message in logs)
 
 
 def test_reeling_walking_guard_stops_when_fish_state_is_problematic_and_stage_is_gone():
@@ -604,6 +716,164 @@ def test_reeling_idle_return_presses_e_and_accepts_new_fishing_stage():
     assert bot.input_controller.keys == ["e"]
 
 
+def test_fishing_entry_press_has_global_cooldown(monkeypatch):
+    current_time = 100.0
+    bot = FishingBot.__new__(FishingBot)
+    bot.input_controller = DummyInput()
+    bot._log = lambda _message: None
+    monkeypatch.setattr(bot_module.time, "time", lambda: current_time)
+
+    assert bot._press_fishing_entry("test") is True
+    current_time += bot_module.FISHING_ENTRY_MIN_INTERVAL_SECONDS - 0.1
+    assert bot._press_fishing_entry("test") is False
+    current_time += 0.1
+    assert bot._press_fishing_entry("test") is True
+    assert bot.input_controller.keys == ["e", "e"]
+
+
+def test_recover_does_not_move_character_forward():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState()
+    bot.input_controller = DummyInput()
+    bot._stop_event = threading.Event()
+    bot._last_triggers = {}
+    bot._refresh_triggers = lambda: None
+    bot._focus_game = lambda: None
+    bot._wait_for_start_phase = lambda timeout: True
+    bot._log = lambda _message: None
+    bot.notification_manager = type("Notifier", (), {"notify_fishing_restored": lambda self: None})()
+
+    assert bot._try_recover() is True
+    assert bot.input_controller.keys == ["e"]
+
+
+def test_inventory_brain_error_is_retried_without_fishing_recovery():
+    calls: list[str] = []
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True, phase=BotPhase.INVENTORY)
+    bot._inventory_retry_after = 0.0
+    bot._log = lambda message: calls.append(message)
+    bot._sleep = lambda seconds: calls.append(f"sleep:{seconds}")
+    bot._try_recover = lambda: calls.append("recover")
+
+    bot._handle_brain_error(RuntimeError("inventory failed"))
+
+    assert bot._inventory_tasks_retry_pending is True
+    assert bot._inventory_retry_after > time.time()
+    assert "recover" not in calls
+    assert "sleep:1.0" in calls
+
+
+def test_non_inventory_brain_error_still_uses_fishing_recovery():
+    calls: list[str] = []
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True, phase=BotPhase.CASTING)
+    bot._log = lambda message: calls.append(message)
+    bot._try_recover = lambda: calls.append("recover")
+
+    bot._handle_brain_error(RuntimeError("casting failed"))
+
+    assert "recover" in calls
+
+
+def test_inventory_open_waits_before_pressing_hotkey():
+    events: list[str] = []
+    inventory_states = iter([False, False, True])
+
+    class InputController:
+        def press_key(self, key: str) -> None:
+            events.append(f"key:{key}")
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings()
+    bot.input_controller = InputController()
+    bot._stop_event = threading.Event()
+    bot._focus_game = lambda: None
+    bot._close_game_menu_if_open = lambda: False
+    bot._is_inventory_open = lambda: next(inventory_states)
+    bot._exit_to_idle_before_inventory = lambda: events.append("idle") or True
+    bot._sleep = lambda seconds: events.append(f"sleep:{seconds}")
+    bot._log = lambda _message: None
+
+    assert bot._open_inventory() is True
+    assert events[:4] == ["idle", "sleep:1.0", "idle", "key:i"]
+
+
+def test_inventory_open_does_not_press_hotkey_when_stage_changes_during_pause():
+    events: list[str] = []
+    idle_checks = iter([True, False])
+
+    class InputController:
+        def press_key(self, key: str) -> None:
+            events.append(f"key:{key}")
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings()
+    bot.input_controller = InputController()
+    bot._stop_event = threading.Event()
+    bot._focus_game = lambda: None
+    bot._close_game_menu_if_open = lambda: False
+    bot._is_inventory_open = lambda: False
+    bot._exit_to_idle_before_inventory = lambda: next(idle_checks)
+    bot._sleep = lambda seconds: events.append(f"sleep:{seconds}")
+    bot._log = lambda _message: None
+
+    assert bot._open_inventory() is False
+    assert events == ["sleep:1.0"]
+
+
+def test_failed_inventory_tasks_are_retried_instead_of_casting():
+    events: list[str] = []
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(auto_meal=True)
+    bot.state = BotState()
+    bot._open_inventory = lambda: False
+    bot._log = lambda message: events.append(message)
+
+    bot._do_combined_inventory_tasks(do_meal=True, do_backpack=False)
+    assert bot._inventory_tasks_retry_pending is True
+
+    bot._inventory_retry_after = 0.0
+    bot._handle_pending_tasks = lambda do_meal: events.append(f"inventory:{do_meal}")
+    bot._prepare_fishing_start = lambda: events.append("casting") or None
+
+    bot._do_casting()
+
+    assert "inventory:True" in events
+    assert "casting" not in events
+
+
+def test_return_to_fishing_waits_after_inventory_is_closed():
+    events: list[str] = []
+    inventory_states = iter([True, False])
+
+    class InputController:
+        def press_key(self, key: str) -> None:
+            events.append(f"key:{key}")
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings()
+    bot.input_controller = InputController()
+    bot._stop_event = threading.Event()
+    bot._last_triggers = {}
+    bot._focus_game = lambda: None
+    bot._close_game_menu_if_open = lambda: False
+    bot._is_inventory_open = lambda: next(inventory_states)
+    bot._refresh_triggers = lambda: None
+    bot._sleep = lambda seconds: events.append(f"sleep:{seconds}")
+    bot._log = lambda _message: None
+
+    bot._return_to_fishing()
+
+    assert events == [
+        "key:i",
+        "sleep:1.0",
+        "sleep:0.12",
+        "sleep:1.5",
+        "key:e",
+    ]
+
+
 def test_missing_hook_stops_by_default_with_tackle_reason():
     bot = FishingBot.__new__(FishingBot)
     bot.settings = FishingSettings()
@@ -664,6 +934,46 @@ def test_empty_tackle_scan_is_retried_instead_of_missing_rod_stop():
 
     assert scan is not None
     assert scan.count_for("rod") == 1
+
+
+def test_obscured_tackle_scan_is_skipped_instead_of_stopping_fishing():
+    class ObscuredTackleDetector:
+        def detect(self, frame):
+            return make_obscured_tackle_scan()
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.capture = DummyCapture()
+    bot.tackle_detector = ObscuredTackleDetector()
+    bot._stop_event = threading.Event()
+    bot._sleep = lambda seconds: None
+    logs: list[str] = []
+    reasons: list[str] = []
+    bot._log = logs.append
+    bot._stop_from_brain = reasons.append
+    bot._store_tackle_scan = lambda scan, frame: None
+
+    assert bot._check_tackle_before_start(object()) is True
+    assert reasons == []
+    assert any("проверка пропущена" in message for message in logs)
+
+
+def test_unobscured_empty_tackle_scan_still_stops_fishing():
+    class EmptyTackleDetector:
+        def detect(self, frame):
+            return make_empty_tackle_scan()
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.capture = DummyCapture()
+    bot.tackle_detector = EmptyTackleDetector()
+    bot._stop_event = threading.Event()
+    bot._sleep = lambda seconds: None
+    reasons: list[str] = []
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+    bot._store_tackle_scan = lambda scan, frame: None
+
+    assert bot._check_tackle_before_start(object()) is False
+    assert reasons == [bot_module.STOP_REASON_TACKLE_UNREADABLE]
 
 
 def test_active_stage_tackle_scan_stores_waiting_stage_counts():
@@ -927,6 +1237,255 @@ def test_auto_stop_sends_screenshot_with_stop_notification():
     assert bot.notification_manager.reason == bot_module.STOP_REASON_NO_STAGE
     assert bot.notification_manager.image_bytes == b"screen"
     assert bot.session_stats.stopped is True
+
+
+def test_stop_async_returns_before_cleanup_finishes():
+    cleanup_started = threading.Event()
+    allow_cleanup = threading.Event()
+
+    class BlockingReelingTracker:
+        def stop(self) -> None:
+            cleanup_started.set()
+            assert allow_cleanup.wait(timeout=1.0)
+
+    class DummyCloser:
+        def close(self) -> None:
+            pass
+
+    class DummyMealSystem:
+        status_memory_detector = DummyCloser()
+
+    class DummyInputController:
+        def release_all_keys(self) -> None:
+            pass
+
+    class DummySessionStats:
+        def stop_timer(self) -> None:
+            pass
+
+        def totals(self):
+            return object()
+
+    class DummyNotifier:
+        def notify_fishing_stopped(self, _totals, *, reason=None, image_bytes=None) -> None:
+            del reason, image_bytes
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot._stop_event = threading.Event()
+    bot._brain_thread = None
+    bot.reeling_tracker = BlockingReelingTracker()
+    bot.inventory_memory_detector = DummyCloser()
+    bot.meal_system = DummyMealSystem()
+    bot.input_controller = DummyInputController()
+    bot.settings = FishingSettings(start_stop_sound_enabled=False)
+    bot.session_stats = DummySessionStats()
+    bot.notification_manager = DummyNotifier()
+    bot._log = lambda _message: None
+    bot._publish_ui_event = lambda *_args, **_kwargs: None
+
+    started_at = time.monotonic()
+    bot.stop_async()
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.2
+    assert cleanup_started.wait(timeout=0.5)
+    assert bot._stop_event.is_set()
+    assert bot.state.running is False
+    assert bot.state.phase == BotPhase.STOPPING
+
+    allow_cleanup.set()
+    deadline = time.monotonic() + 1.0
+    while bot.state.phase != BotPhase.IDLE and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert bot.state.phase == BotPhase.IDLE
+
+
+def test_begin_stop_immediately_blocks_worker_input(monkeypatch):
+    sent_keys: list[tuple[str, bool]] = []
+    controller = InputController()
+    monkeypatch.setattr(InputController, "_send_key", lambda _self, key, key_up: sent_keys.append((key, key_up)))
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot._stop_event = threading.Event()
+    bot._input_enabled_event = threading.Event()
+    bot._input_enabled_event.set()
+    bot._is_game_foreground = lambda: True
+    controller.input_allowed_callback = bot._is_fishing_input_allowed
+
+    assert controller.key_down("space") is True
+    sent_keys.clear()
+
+    bot._begin_stop()
+
+    assert controller.key_down("space") is False
+    assert controller.tap_key_fast("space") is False
+    assert sent_keys == []
+
+
+def test_input_controller_never_sends_automated_w(monkeypatch):
+    sent_keys: list[tuple[str, bool]] = []
+    monkeypatch.setattr(InputController, "_send_key", lambda _self, key, key_up: sent_keys.append((key, key_up)))
+    controller = InputController(input_allowed_callback=lambda: True)
+
+    assert controller.key_down("w") is False
+    assert controller.press_key("w") is False
+    assert controller.tap_key_fast("w") is False
+    assert controller.key_up("w") is False
+    controller.release_all_keys()
+
+    assert "w" not in SCAN_CODES
+    assert not any(key == "w" for key, _key_up in sent_keys)
+
+
+def test_input_controller_low_level_never_sends_automated_w(monkeypatch):
+    send_input_calls: list[tuple[object, ...]] = []
+
+    class User32:
+        def SendInput(self, *args):
+            send_input_calls.append(args)
+            return 1
+
+    monkeypatch.setattr(input_controller_module.ctypes, "windll", type("WinDll", (), {"user32": User32()})(), raising=False)
+
+    controller = InputController()
+    controller._send_key("w", key_up=False)
+    controller._send_key("w", key_up=True)
+
+    assert send_input_calls == []
+
+
+def test_stop_cleanup_failure_does_not_leave_bot_running():
+    events: list[str] = []
+    logs: list[str] = []
+
+    class FailingReelingTracker:
+        def stop(self) -> None:
+            raise RuntimeError("reeling cleanup failed")
+
+    class DummyCloser:
+        def close(self) -> None:
+            events.append("close")
+
+    class DummyMealSystem:
+        status_memory_detector = DummyCloser()
+
+    class DummyInputController:
+        def release_all_keys(self) -> None:
+            events.append("release_all")
+
+    class DummySessionStats:
+        def stop_timer(self) -> None:
+            events.append("timer_stop")
+
+        def totals(self):
+            return object()
+
+    class DummyNotifier:
+        def notify_fishing_stopped(self, _totals, *, reason=None, image_bytes=None) -> None:
+            del reason, image_bytes
+            events.append("notify_stop")
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot._stop_event = threading.Event()
+    bot._brain_thread = None
+    bot.reeling_tracker = FailingReelingTracker()
+    bot.inventory_memory_detector = DummyCloser()
+    bot.meal_system = DummyMealSystem()
+    bot.input_controller = DummyInputController()
+    bot.settings = FishingSettings(start_stop_sound_enabled=False)
+    bot.session_stats = DummySessionStats()
+    bot.notification_manager = DummyNotifier()
+    bot._log = logs.append
+    bot._publish_ui_event = lambda *_args, **_kwargs: None
+
+    bot.stop()
+
+    assert bot.state.running is False
+    assert bot.state.phase == BotPhase.IDLE
+    assert "release_all" in events
+    assert "timer_stop" in events
+    assert "notify_stop" in events
+    assert any("reeling tracker" in message for message in logs)
+
+
+def test_overweight_terminal_actions_finish_stop_lifecycle():
+    class DummyReelingTracker:
+        def __init__(self, events: list[str]) -> None:
+            self.events = events
+
+        def stop(self) -> None:
+            self.events.append("reeling_stop")
+
+    class DummyCloser:
+        def __init__(self, events: list[str], name: str) -> None:
+            self.events = events
+            self.name = name
+
+        def close(self) -> None:
+            self.events.append(self.name)
+
+    class DummyMealSystem:
+        def __init__(self, events: list[str]) -> None:
+            self.status_memory_detector = DummyCloser(events, "meal_close")
+
+    class DummyInputController:
+        def __init__(self, events: list[str]) -> None:
+            self.events = events
+
+        def release_all_keys(self) -> None:
+            self.events.append("release_all")
+
+    class DummySessionStats:
+        def __init__(self, events: list[str]) -> None:
+            self.events = events
+
+        def stop_timer(self) -> None:
+            self.events.append("timer_stop")
+
+        def totals(self):
+            return object()
+
+    class DummyNotifier:
+        def __init__(self, events: list[str]) -> None:
+            self.events = events
+            self.reason = None
+
+        def notify_fishing_stopped(self, _totals, *, reason=None, image_bytes=None) -> None:
+            del image_bytes
+            self.reason = reason
+            self.events.append("notify_stop")
+
+    for action in ("stop", "exit_game"):
+        events: list[str] = []
+        bot = FishingBot.__new__(FishingBot)
+        bot.state = BotState(running=True)
+        bot._stop_event = threading.Event()
+        bot.reeling_tracker = DummyReelingTracker(events)
+        bot.inventory_memory_detector = DummyCloser(events, "inventory_close")
+        bot.meal_system = DummyMealSystem(events)
+        bot.input_controller = DummyInputController(events)
+        bot.settings = FishingSettings(overweight_action=action, start_stop_sound_enabled=False)
+        bot.session_stats = DummySessionStats(events)
+        bot.notification_manager = DummyNotifier(events)
+        bot.inventory_full = True
+        bot._last_catch_result = None
+        bot._log = lambda _message: None
+        bot._publish_ui_event = lambda *_args, **_kwargs: None
+        bot._shutdown_game = lambda: events.append("shutdown_game")
+
+        bot._handle_overweight_action(previous_result=None)
+
+        assert bot._stop_event.is_set()
+        assert bot.state.running is False
+        assert bot.state.phase == BotPhase.IDLE
+        assert bot.inventory_full is False
+        assert bot.notification_manager.reason == bot_module.STOP_REASON_OVERWEIGHT
+        assert "reeling_stop" in events
+        assert "release_all" in events
+        assert ("shutdown_game" in events) is (action == "exit_game")
 
 
 def test_debug_capture_writes_meal_item_info_crop_and_screen(tmp_path, monkeypatch):

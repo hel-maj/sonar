@@ -4,6 +4,8 @@ import argparse
 import ctypes
 import json
 import math
+import re
+import struct
 import time
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +19,10 @@ from sonar.fishing.memory_reeling import (
     FISH_MODEL_HASH,
     FISH_POS_OFFSETS,
     FISH_PRIMARY_DIRECTION_OFFSETS,
+    FISH_REELING_ACTIVE_OFFSET,
+    FISH_REELING_ACTIVE_VALUE,
     MemoryReelingTracker,
+    PLAYER_MATRIX_OFFSETS,
     POS_OFFSETS,
     ReelingState,
 )
@@ -47,6 +52,70 @@ ENTITY_POS_OFFSETS = (
 )
 VK_A = 0x41
 VK_D = 0x44
+VK_LEFT = 0x25
+VK_RIGHT = 0x27
+LABEL_KEY_VKS = {
+    "ad": (VK_A, VK_D),
+    "arrows": (VK_LEFT, VK_RIGHT),
+}
+DEFAULT_FISH_BYTES = 0x4000
+DEFAULT_FISH_BEFORE_BYTES = 0x400
+DEFAULT_PLAYER_BYTES = 0x1000
+DEFAULT_CANDIDATE_BYTES = 0x1000
+DEFAULT_CANDIDATE_INTERVAL = 0.75
+DEFAULT_POINTER_INTERVAL = 0.20
+DEFAULT_POINTER_SCAN_BYTES = 0x1000
+DEFAULT_POINTER_TARGET_BYTES = 0x400
+DEFAULT_MAX_POINTER_TARGETS = 48
+DEFAULT_FIXTURE_SAMPLES = 1200
+DEFAULT_FIXTURE_COMPLETION_SAMPLES = 500
+FIXTURE_DIRECTION_TRANSITION_MARGIN_SECONDS = 0.18
+FIXTURE_DIRECTION_TAIL_EXCLUDE_SECONDS = 2.0
+DEFAULT_AUTO_STOP_IDLE_SECONDS = 5.0
+DEFAULT_AUTO_STOP_MIN_MANUAL_SAMPLES = 25
+FALLBACK_READ_CHUNK_BYTES = 0x400
+
+
+def _parse_non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected integer, got {value!r}") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("expected a non-negative integer")
+    return parsed
+
+
+def _safe_label(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"[^0-9A-Za-zА-Яа-яЁё_.-]+", "_", value).strip("._")
+
+
+def _capture_sizes(args: argparse.Namespace) -> tuple[int, int, int, int]:
+    legacy_bytes = getattr(args, "bytes", None)
+    if legacy_bytes is not None:
+        return legacy_bytes, legacy_bytes, legacy_bytes, min(legacy_bytes, DEFAULT_FISH_BEFORE_BYTES)
+    return args.fish_bytes, args.player_bytes, args.candidate_bytes, args.fish_before_bytes
+
+
+def _validate_args(args: argparse.Namespace) -> None:
+    if args.duration <= 0:
+        raise ValueError("--duration must be positive")
+    if args.interval <= 0:
+        raise ValueError("--interval must be positive")
+    if args.candidate_interval < 0 or args.pointer_interval < 0:
+        raise ValueError("capture intervals must be non-negative")
+    if args.max_candidates <= 0 or args.max_pointer_targets <= 0:
+        raise ValueError("capture limits must be positive")
+    if args.pointer_target_bytes <= 0:
+        raise ValueError("--pointer-target-bytes must be positive")
+    if not (0.0 <= args.fixture_min_accuracy <= 1.0):
+        raise ValueError("--fixture-min-accuracy must be between 0 and 1")
+    if args.auto_stop_idle < 0:
+        raise ValueError("--auto-stop-idle must be non-negative")
+    if args.auto_stop_min_manual_samples <= 0:
+        raise ValueError("--auto-stop-min-manual-samples must be positive")
 
 
 def _key_down(vk: int) -> bool:
@@ -55,16 +124,34 @@ def _key_down(vk: int) -> bool:
     return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
 
 
-def _keyboard_snapshot() -> tuple[int, bool, bool]:
-    a_down = _key_down(VK_A)
-    d_down = _key_down(VK_D)
-    if a_down and not d_down:
-        return -1, a_down, d_down
-    if d_down and not a_down:
-        return 1, a_down, d_down
-    if a_down and d_down:
-        return 2, a_down, d_down
-    return 0, a_down, d_down
+def _keyboard_snapshot(label_keys: str = "ad") -> tuple[int, bool, bool]:
+    left_vk, right_vk = LABEL_KEY_VKS[label_keys]
+    left_down = _key_down(left_vk)
+    right_down = _key_down(right_vk)
+    if left_down and not right_down:
+        return -1, left_down, right_down
+    if right_down and not left_down:
+        return 1, left_down, right_down
+    if left_down and right_down:
+        return 2, left_down, right_down
+    return 0, left_down, right_down
+
+
+def _should_auto_stop_idle(
+    elapsed: float,
+    key_label: int,
+    manual_key_samples: int,
+    last_manual_key_at: float | None,
+    idle_seconds: float,
+    minimum_manual_samples: int,
+) -> bool:
+    return (
+        idle_seconds > 0
+        and key_label == 0
+        and manual_key_samples >= minimum_manual_samples
+        and last_manual_key_at is not None
+        and elapsed - last_manual_key_at >= idle_seconds
+    )
 
 
 def _command_label_from_state(state: ReelingState, held_key: str | None) -> int:
@@ -88,10 +175,19 @@ def _read_bytes(tracker: MemoryReelingTracker, addr: int | None, size: int) -> n
     if not addr or size <= 0:
         return out
     data = tracker._read(addr, size)
-    if not data:
+    if data:
+        chunk = np.frombuffer(data[:size], dtype=np.uint8)
+        out[: len(chunk)] = chunk
         return out
-    chunk = np.frombuffer(data[:size], dtype=np.uint8)
-    out[: len(chunk)] = chunk
+    if size <= FALLBACK_READ_CHUNK_BYTES:
+        return out
+    for offset in range(0, size, FALLBACK_READ_CHUNK_BYTES):
+        chunk_size = min(FALLBACK_READ_CHUNK_BYTES, size - offset)
+        data = tracker._read(addr + offset, chunk_size)
+        if not data:
+            continue
+        chunk = np.frombuffer(data[:chunk_size], dtype=np.uint8)
+        out[offset : offset + len(chunk)] = chunk
     return out
 
 
@@ -119,6 +215,61 @@ def _direction_values(tracker: MemoryReelingTracker, addr: int | None) -> np.nda
         if value is not None and math.isfinite(value) and abs(value) < 100000.0:
             out[index] = value
     return out
+
+
+def _linked_pointer_targets(
+    tracker: MemoryReelingTracker,
+    source_addr: int | None,
+    scan_bytes: int,
+    target_bytes: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if not source_addr or scan_bytes < 8 or target_bytes <= 0 or limit <= 0:
+        return []
+    source = tracker._read(source_addr, scan_bytes)
+    if not source:
+        return []
+    targets: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for source_offset in range(0, len(source) - 7, 8):
+        target_addr = struct.unpack_from("<Q", source, source_offset)[0]
+        if not tracker._is_ptr(target_addr) or target_addr in seen:
+            continue
+        target = tracker._read(target_addr, target_bytes)
+        if not target:
+            continue
+        seen.add(target_addr)
+        targets.append(
+            {
+                "source_offset": source_offset,
+                "addr": target_addr,
+                "bytes": _read_bytes(tracker, target_addr, target_bytes),
+            }
+        )
+        if len(targets) >= limit:
+            break
+    return targets
+
+
+def _padded_linked_pointer_snapshot(
+    tracker: MemoryReelingTracker,
+    source_addr: int | None,
+    scan_bytes: int,
+    target_bytes: int,
+    limit: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict[str, str]]]:
+    source_offsets = np.full(limit, -1, dtype=np.int32)
+    addrs = np.zeros(limit, dtype=np.uint64)
+    raw = np.zeros((limit, target_bytes), dtype=np.uint8)
+    json_targets: list[dict[str, str]] = []
+    for index, target in enumerate(_linked_pointer_targets(tracker, source_addr, scan_bytes, target_bytes, limit)):
+        source_offset = int(target["source_offset"])
+        addr = int(target["addr"])
+        source_offsets[index] = source_offset
+        addrs[index] = addr
+        raw[index] = target["bytes"]
+        json_targets.append({"source_offset": f"0x{source_offset:X}", "addr": f"0x{addr:X}"})
+    return source_offsets, addrs, raw, json_targets
 
 
 def _direction_snapshot(tracker: MemoryReelingTracker, fish_addr: int | None) -> dict[str, Any]:
@@ -154,6 +305,33 @@ def _direction_snapshot(tracker: MemoryReelingTracker, fish_addr: int | None) ->
         "selected_move": selected_move,
         "values": values,
     }
+
+
+def _wait_for_initial_resolution(tracker: MemoryReelingTracker) -> None:
+    resolver = tracker._resolver_thread
+    if resolver is None or not resolver.is_alive():
+        return
+    print("Resolving GTA memory structures before recording...")
+    resolver.join()
+    print(
+        "Initial resolution finished: "
+        f"player={'None' if tracker.player_addr is None else f'0x{tracker.player_addr:X}'} "
+        f"fish={'None' if tracker.fish_addr is None else f'0x{tracker.fish_addr:X}'}"
+    )
+
+
+def _probe_tracker_step(tracker: MemoryReelingTracker, allow_deep_search: bool) -> ReelingState:
+    if allow_deep_search or tracker.fish_addr is not None or not tracker.handle:
+        return tracker.step()
+    if tracker.player_addr is None:
+        return ReelingState(active=True, action="target_search")
+    tracker._retry_find_fish(allow_deep_search=False)
+    return ReelingState(
+        active=True,
+        action="target_search",
+        fish_addr=tracker.fish_addr,
+        player_addr=tracker.player_addr,
+    )
 
 
 def _ped_lists(tracker: MemoryReelingTracker) -> list[tuple[int, int, int, int]]:
@@ -464,22 +642,303 @@ def _write_report(npz_path: Path, report_path: Path) -> None:
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _move_label(move_val: float | None) -> int:
+    if move_val is None:
+        return 0
+    if move_val > DIRECTION_EPS:
+        return 1
+    if move_val < -DIRECTION_EPS:
+        return -1
+    return 0
+
+
+def _right_vec_from_snapshot(raw: np.ndarray) -> np.ndarray:
+    data = raw.tobytes()
+    for matrix_offset in PLAYER_MATRIX_OFFSETS:
+        for row in (0, 1, 2):
+            offset = matrix_offset + row * 16
+            if offset + 16 > len(data):
+                continue
+            rx, ry, rz, _rw = struct.unpack_from("<4f", data, offset)
+            if not all(math.isfinite(value) for value in (rx, ry, rz)):
+                continue
+            length = math.hypot(rx, ry)
+            if 0.45 < length < 1.55 and abs(rx) <= 1.2 and abs(ry) <= 1.2:
+                return np.array((rx / length, ry / length), dtype=np.float32)
+    return np.full(2, np.nan, dtype=np.float32)
+
+
+def _capture_right_vectors(data: Any) -> np.ndarray:
+    if "player_right_vectors" in data:
+        return data["player_right_vectors"].astype(np.float32)
+    return np.stack([_right_vec_from_snapshot(row) for row in data["player_bytes"]]).astype(np.float32)
+
+
+def _replay_motion_direction_fixture(data: Any) -> tuple[float | None, int]:
+    labels = data["key_labels"].astype(np.int8)
+    perf_times = data["perf_times"].astype(np.float64)
+    fish_positions = data["fish_positions"].astype(np.float32)
+    right_vectors = data["player_right_vectors"].astype(np.float32)
+    if not (labels.size == perf_times.size == fish_positions.shape[0] == right_vectors.shape[0]):
+        raise ValueError("Motion fixture sample counts differ")
+
+    fixture_addr = 0x20000000000
+    tracker = MemoryReelingTracker.__new__(MemoryReelingTracker)
+    tracker.velocity_xy = (0.0, 0.0)
+    tracker.last_fish_xy = None
+    tracker.last_time = None
+    tracker._projected_velocity_fish_addr = None
+    tracker._projected_velocity = 0.0
+    tracker._reset_move_stabilizer()
+    predictions: list[int] = []
+    expected: list[int] = []
+    for now, label, fish_pos, right in zip(perf_times, labels, fish_positions, right_vectors):
+        if not np.isfinite(fish_pos).all() or not np.isfinite(right).all():
+            continue
+        motion_updated = tracker._update_fish_velocity(float(now), tuple(float(value) for value in fish_pos), False)
+        velocity_along = tracker.velocity_xy[0] * float(right[0]) + tracker.velocity_xy[1] * float(right[1])
+        move_val, _source, action_eps = tracker._movement_from_projected_velocity(
+            velocity_along=velocity_along,
+            fish_addr=fixture_addr,
+            using_stale_fish_pos=False,
+            motion_updated=motion_updated,
+        )
+        move_val, _stable_source = tracker._stabilize_move(move_val, action_eps, float(now))
+        if label not in (-1, 1):
+            continue
+        predictions.append(_move_label(move_val))
+        expected.append(int(label))
+    if not expected:
+        return None, 0
+    return float((np.array(predictions, dtype=np.int8) == np.array(expected, dtype=np.int8)).mean()), len(expected)
+
+
+def replay_direction_fixture(path: Path) -> tuple[float | None, int]:
+    data = np.load(path, allow_pickle=False)
+    metadata = json.loads(str(data["metadata"]))
+    if metadata.get("kind") != "sonar_reeling_direction_fixture":
+        raise ValueError(f"Unsupported fixture kind: {metadata.get('kind')!r}")
+    if "fish_positions" in data and "player_right_vectors" in data:
+        return _replay_motion_direction_fixture(data)
+    fish_bytes = data["fish_bytes"].astype(np.uint8)
+    labels = data["key_labels"].astype(np.int8)
+    if fish_bytes.shape[0] != labels.size:
+        raise ValueError("Fixture fish_bytes and key_labels sample counts differ")
+
+    fixture_addr = 0x20000000000
+    tracker = MemoryReelingTracker.__new__(MemoryReelingTracker)
+    tracker.fish_addr = fixture_addr
+    tracker._fish_confirmed_hash = True
+    tracker._fish_direction_offsets = FISH_PRIMARY_DIRECTION_OFFSETS
+    tracker._blocked_direction_offsets = set()
+    tracker._direction_watch_addr = fixture_addr
+    tracker._direction_watch = {}
+    tracker._direction_alignment = {}
+    current_row = 0
+
+    def f32(addr: int) -> float | None:
+        offset = addr - fixture_addr
+        if offset < 0 or offset + 4 > fish_bytes.shape[1]:
+            return None
+        return struct.unpack_from("<f", fish_bytes[current_row].tobytes(), offset)[0]
+
+    tracker._f32 = f32
+    tracker._reset_direction_tracking(fixture_addr)
+    predictions: list[int] = []
+    expected: list[int] = []
+    for current_row in range(labels.size):
+        label = int(labels[current_row])
+        if label not in (-1, 1):
+            continue
+        selected = tracker._read_control_direction(
+            fixture_addr,
+            tracker._fish_direction_offsets,
+            tracker._blocked_direction_offsets,
+        )
+        predictions.append(0 if selected is None else _move_label(selected[0]))
+        expected.append(label)
+    if not expected:
+        return None, 0
+    return float((np.array(predictions, dtype=np.int8) == np.array(expected, dtype=np.int8)).mean()), len(expected)
+
+
+def _completion_fixture_indices(perf_times: np.ndarray, labels: np.ndarray, max_samples: int) -> np.ndarray:
+    from sonar.tools.analyze_reeling_completion import infer_completion_boundary
+
+    boundary = infer_completion_boundary(perf_times, labels)
+    if boundary is None:
+        return np.zeros(0, dtype=np.int64)
+    _last_manual_index, last_manual_at, _tail_seconds = boundary
+    valid = np.flatnonzero(perf_times >= last_manual_at - 5.0)
+    if max_samples > 0 and valid.size > max_samples:
+        positions = np.linspace(0, valid.size - 1, num=max_samples, dtype=np.int64)
+        valid = valid[positions]
+    return valid
+
+
+def _direction_fixture_indices(
+    perf_times: np.ndarray,
+    labels: np.ndarray,
+    fish_addrs: np.ndarray,
+    fish_hashes: np.ndarray,
+    max_samples: int,
+    fish_bytes: np.ndarray | None = None,
+) -> np.ndarray:
+    valid_mask = (
+        np.isin(labels, (-1, 1))
+        & (fish_addrs != 0)
+        & (fish_hashes == FISH_MODEL_HASH)
+    )
+    if fish_bytes is not None and fish_bytes.shape[1] > FISH_REELING_ACTIVE_OFFSET:
+        valid_mask &= fish_bytes[:, FISH_REELING_ACTIVE_OFFSET] == FISH_REELING_ACTIVE_VALUE
+    manual = np.flatnonzero(np.isin(labels, (-1, 1)))
+    if manual.size:
+        final_manual_at = float(perf_times[manual[-1]])
+        valid_mask &= perf_times <= final_manual_at - FIXTURE_DIRECTION_TAIL_EXCLUDE_SECONDS
+    transitions = np.flatnonzero(
+        np.isin(labels[:-1], (-1, 1))
+        & np.isin(labels[1:], (-1, 1))
+        & (labels[:-1] != labels[1:])
+    )
+    for index in transitions:
+        transition_at = float(perf_times[index + 1])
+        valid_mask &= np.abs(perf_times - transition_at) > FIXTURE_DIRECTION_TRANSITION_MARGIN_SECONDS
+    valid = np.flatnonzero(valid_mask)
+    if max_samples > 0 and valid.size > max_samples:
+        positions = np.linspace(0, valid.size - 1, num=max_samples, dtype=np.int64)
+        valid = valid[positions]
+    return valid
+
+
+def _motion_fixture_indices(
+    labels: np.ndarray,
+    fish_addrs: np.ndarray,
+    fish_hashes: np.ndarray,
+    fish_bytes: np.ndarray,
+    fish_positions: np.ndarray,
+    right_vectors: np.ndarray,
+    max_samples: int,
+) -> np.ndarray:
+    if fish_bytes.shape[1] <= FISH_REELING_ACTIVE_OFFSET:
+        return np.zeros(0, dtype=np.int64)
+    valid_mask = (
+        np.isin(labels, (-1, 0, 1, 2))
+        & (fish_addrs != 0)
+        & (fish_hashes == FISH_MODEL_HASH)
+        & (fish_bytes[:, FISH_REELING_ACTIVE_OFFSET] == FISH_REELING_ACTIVE_VALUE)
+        & np.isfinite(fish_positions).all(axis=1)
+        & np.isfinite(right_vectors).all(axis=1)
+    )
+    valid = np.flatnonzero(valid_mask)
+    if max_samples > 0 and valid.size > max_samples:
+        valid = valid[:max_samples]
+    return valid
+
+
+def _write_fixture(npz_path: Path, fixture_path: Path, max_samples: int, minimum_accuracy: float) -> Path:
+    data = np.load(npz_path, allow_pickle=False)
+    labels = data["key_labels"].astype(np.int8)
+    fish_addrs = data["fish_addrs"].astype(np.uint64)
+    fish_hashes = data["fish_hashes"].astype(np.int64)
+    completion_valid = _completion_fixture_indices(data["perf_times"].astype(np.float64), labels, DEFAULT_FIXTURE_COMPLETION_SAMPLES)
+    source_metadata = json.loads(str(data["metadata"]))
+    if "fish_positions" in data and "player_bytes" in data:
+        right_vectors = _capture_right_vectors(data)
+        fish_positions = data["fish_positions"][:, 0].astype(np.float32)
+        valid = _motion_fixture_indices(
+            labels,
+            fish_addrs,
+            fish_hashes,
+            data["fish_bytes"],
+            fish_positions,
+            right_vectors,
+            max_samples,
+        )
+        fixture_metadata = {
+            "kind": "sonar_reeling_direction_fixture",
+            "version": 2,
+            "source_capture": npz_path.name,
+            "source_capture_version": source_metadata.get("version"),
+            "label": source_metadata.get("label", ""),
+            "minimum_accuracy": minimum_accuracy,
+            "fish_model_hash": FISH_MODEL_HASH,
+            "sample_count": int(valid.size),
+            "completion_sample_count": int(completion_valid.size),
+        }
+        np.savez_compressed(
+            fixture_path,
+            perf_times=data["perf_times"][valid].astype(np.float64),
+            key_labels=labels[valid],
+            fish_positions=fish_positions[valid],
+            player_right_vectors=right_vectors[valid],
+            completion_perf_times=data["perf_times"][completion_valid].astype(np.float64),
+            completion_key_labels=labels[completion_valid],
+            completion_fish_bytes=data["fish_bytes"][completion_valid].astype(np.uint8),
+            metadata=json.dumps(fixture_metadata, ensure_ascii=False),
+        )
+        return fixture_path
+
+    valid = _direction_fixture_indices(
+        data["perf_times"].astype(np.float64),
+        labels,
+        fish_addrs,
+        fish_hashes,
+        max_samples,
+        fish_bytes=data["fish_bytes"],
+    )
+    fixture_metadata = {
+        "kind": "sonar_reeling_direction_fixture",
+        "version": 1,
+        "source_capture": npz_path.name,
+        "source_capture_version": source_metadata.get("version"),
+        "label": source_metadata.get("label", ""),
+        "minimum_accuracy": minimum_accuracy,
+        "fish_model_hash": FISH_MODEL_HASH,
+        "direction_fields": source_metadata.get("direction_fields", []),
+        "sample_count": int(valid.size),
+        "completion_sample_count": int(completion_valid.size),
+    }
+    np.savez_compressed(
+        fixture_path,
+        perf_times=data["perf_times"][valid].astype(np.float64),
+        key_labels=labels[valid],
+        fish_bytes=data["fish_bytes"][valid].astype(np.uint8),
+        completion_perf_times=data["perf_times"][completion_valid].astype(np.float64),
+        completion_key_labels=labels[completion_valid],
+        completion_fish_bytes=data["fish_bytes"][completion_valid].astype(np.uint8),
+        metadata=json.dumps(fixture_metadata, ensure_ascii=False),
+    )
+    return fixture_path
+
+
 def record(args: argparse.Namespace) -> Path:
-    out_dir = Path(args.out_dir or PROJECT_DIR / "logs" / "memory_snapshots")
+    _validate_args(args)
+    out_dir = Path(args.out_dir or PROJECT_DIR / "logs" / "reeling_direction_probes")
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    stem = f"reeling_direction_probe_{stamp}"
+    label = _safe_label(args.label)
+    stem = f"reeling_direction_probe_{label + '_' if label else ''}{stamp}"
     npz_path = out_dir / f"{stem}.npz"
     jsonl_path = out_dir / f"{stem}.jsonl"
     report_path = out_dir / f"{stem}.report.txt"
+    fixture_path = out_dir / f"{stem}.fixture.npz"
+    fish_bytes_size, player_bytes_size, candidate_bytes_size, fish_before_bytes_size = _capture_sizes(args)
 
     tracker = MemoryReelingTracker(args.process, input_controller=NullInputController(), log_callback=print)
     tracker.start()
+    _wait_for_initial_resolution(tracker)
     time.sleep(args.warmup)
+    for seconds_left in range(int(math.ceil(args.countdown)), 0, -1):
+        print(f"Recording starts in {seconds_left}...")
+        time.sleep(1.0)
 
     timestamps: list[float] = []
     perf_times: list[float] = []
+    sample_durations: list[float] = []
+    schedule_lags: list[float] = []
     key_labels: list[int] = []
+    label_left_downs: list[bool] = []
+    label_right_downs: list[bool] = []
     a_downs: list[bool] = []
     d_downs: list[bool] = []
     command_labels: list[int] = []
@@ -492,18 +951,34 @@ def record(args: argparse.Namespace) -> Path:
     selected_direction_offsets: list[int] = []
     selected_direction_raws: list[float] = []
     player_positions: list[np.ndarray] = []
+    player_right_vectors: list[np.ndarray] = []
     fish_positions: list[np.ndarray] = []
+    player_bytes: list[np.ndarray] = []
+    fish_bytes: list[np.ndarray] = []
+    fish_before_bytes: list[np.ndarray] = []
+    candidate_perf_times: list[float] = []
+    candidate_key_labels: list[int] = []
     entity_addrs: list[list[int]] = []
     entity_hashes: list[list[int]] = []
     entity_distances: list[list[float]] = []
     entity_positions: list[np.ndarray] = []
     entity_directions: list[np.ndarray] = []
-    player_bytes: list[np.ndarray] = []
-    fish_bytes: list[np.ndarray] = []
     entity_bytes: list[np.ndarray] = []
+    pointer_perf_times: list[float] = []
+    pointer_key_labels: list[int] = []
+    fish_pointer_source_offsets: list[np.ndarray] = []
+    fish_pointer_addrs: list[np.ndarray] = []
+    fish_pointer_bytes: list[np.ndarray] = []
 
     started = time.perf_counter()
     next_sample = started
+    next_progress = started + 1.0
+    last_candidate_capture_at = float("-inf")
+    last_pointer_capture_at = float("-inf")
+    latest_candidate_count = 0
+    manual_key_samples = 0
+    last_manual_key_at: float | None = None
+    stop_reason = "duration"
     print("Passive reeling direction probe started.")
     print("It reads GTA memory and A/D key state only; it does not press any keys.")
     print("For ground truth, reel manually and press only the correct A or D while the probe is running.")
@@ -514,27 +989,28 @@ def record(args: argparse.Namespace) -> Path:
                 if now_perf < next_sample:
                     time.sleep(min(0.002, next_sample - now_perf))
                     continue
+                scheduled_at = next_sample
                 next_sample += args.interval
+                sample_started = time.perf_counter()
 
-                state = tracker.step() if args.run_tracker_step else tracker.latest_state()
+                state = (
+                    _probe_tracker_step(tracker, args.allow_deep_search)
+                    if args.run_tracker_step
+                    else tracker.latest_state()
+                )
                 held_key = tracker.held_key
-                key_label, a_down, d_down = _keyboard_snapshot()
+                key_label, label_left_down, label_right_down = _keyboard_snapshot(args.label_keys)
+                a_down = _key_down(VK_A)
+                d_down = _key_down(VK_D)
                 command_label = _command_label_from_state(state, held_key)
+                elapsed = now_perf - started
+                if key_label in (-1, 1):
+                    manual_key_samples += 1
+                if key_label != 0:
+                    last_manual_key_at = elapsed
 
                 player_item = tracker._read_pos_at_offsets(tracker.player_addr, POS_OFFSETS) if tracker.player_addr else None
                 player_pos = None if player_item is None else player_item[0]
-                candidates = _collect_candidates(tracker, player_pos, args.max_candidates)
-
-                addrs = [int(item["addr"]) for item in candidates]
-                hashes = [int(item["hash"]) for item in candidates]
-                distances = [float(item["dist"]) for item in candidates]
-                while len(addrs) < args.max_candidates:
-                    addrs.append(0)
-                    hashes.append(0)
-                    distances.append(np.nan)
-                addrs = addrs[: args.max_candidates]
-                hashes = hashes[: args.max_candidates]
-                distances = distances[: args.max_candidates]
 
                 direction_info = _direction_snapshot(tracker, tracker.fish_addr)
                 selected_offset_text = direction_info["selected_offset"]
@@ -543,8 +1019,10 @@ def record(args: argparse.Namespace) -> Path:
 
                 timestamp = time.time()
                 timestamps.append(timestamp)
-                perf_times.append(now_perf - started)
+                perf_times.append(elapsed)
                 key_labels.append(key_label)
+                label_left_downs.append(label_left_down)
+                label_right_downs.append(label_right_down)
                 a_downs.append(a_down)
                 d_downs.append(d_down)
                 command_labels.append(command_label)
@@ -557,21 +1035,75 @@ def record(args: argparse.Namespace) -> Path:
                 selected_direction_offsets.append(selected_offset)
                 selected_direction_raws.append(float("nan") if selected_raw is None else float(selected_raw))
                 player_positions.append(_pos_candidates(tracker, tracker.player_addr, POS_OFFSETS))
+                player_right = tracker._read_player_right_vec(tracker.player_addr) if tracker.player_addr else None
+                player_right_vectors.append(
+                    np.full(2, np.nan, dtype=np.float32)
+                    if player_right is None
+                    else np.array(player_right, dtype=np.float32)
+                )
                 fish_positions.append(_pos_candidates(tracker, tracker.fish_addr, FISH_POS_OFFSETS))
-                entity_addrs.append(addrs)
-                entity_hashes.append(hashes)
-                entity_distances.append(distances)
-                entity_positions.append(np.stack([_pos_candidates(tracker, addr, ENTITY_POS_OFFSETS) for addr in addrs]))
-                entity_directions.append(np.stack([_direction_values(tracker, addr) for addr in addrs]))
-                player_bytes.append(_read_bytes(tracker, tracker.player_addr, args.bytes))
-                fish_bytes.append(_read_bytes(tracker, tracker.fish_addr, args.bytes))
-                entity_bytes.append(np.stack([_read_bytes(tracker, addr, args.bytes) for addr in addrs]))
+                player_bytes.append(_read_bytes(tracker, tracker.player_addr, player_bytes_size))
+                fish_bytes.append(_read_bytes(tracker, tracker.fish_addr, fish_bytes_size))
+                fish_before_addr = None if tracker.fish_addr is None else tracker.fish_addr - fish_before_bytes_size
+                fish_before_bytes.append(_read_bytes(tracker, fish_before_addr, fish_before_bytes_size))
+
+                candidates_json = None
+                if now_perf - last_candidate_capture_at >= args.candidate_interval:
+                    last_candidate_capture_at = now_perf
+                    candidates = _collect_candidates(tracker, player_pos, args.max_candidates)
+                    if tracker.fish_addr is None:
+                        fish_candidate = next((item for item in candidates if item["hash"] == FISH_MODEL_HASH), None)
+                        if fish_candidate is not None:
+                            tracker.fish_addr = int(fish_candidate["addr"])
+                            tracker._set_fish_signal_profile(FISH_MODEL_HASH)
+                    candidates_json = [_candidate_json(tracker, item) for item in candidates]
+                    addrs = [int(item["addr"]) for item in candidates]
+                    hashes = [int(item["hash"]) for item in candidates]
+                    distances = [float(item["dist"]) for item in candidates]
+                    while len(addrs) < args.max_candidates:
+                        addrs.append(0)
+                        hashes.append(0)
+                        distances.append(np.nan)
+                    addrs = addrs[: args.max_candidates]
+                    hashes = hashes[: args.max_candidates]
+                    distances = distances[: args.max_candidates]
+                    candidate_perf_times.append(elapsed)
+                    candidate_key_labels.append(key_label)
+                    entity_addrs.append(addrs)
+                    entity_hashes.append(hashes)
+                    entity_distances.append(distances)
+                    entity_positions.append(np.stack([_pos_candidates(tracker, addr, ENTITY_POS_OFFSETS) for addr in addrs]))
+                    entity_directions.append(np.stack([_direction_values(tracker, addr) for addr in addrs]))
+                    entity_bytes.append(np.stack([_read_bytes(tracker, addr, candidate_bytes_size) for addr in addrs]))
+                    latest_candidate_count = sum(1 for addr in addrs if addr)
+
+                linked_fish_pointers_json = None
+                if now_perf - last_pointer_capture_at >= args.pointer_interval:
+                    last_pointer_capture_at = now_perf
+                    pointer_offsets, pointer_addrs, pointer_raw, linked_fish_pointers_json = _padded_linked_pointer_snapshot(
+                        tracker,
+                        tracker.fish_addr,
+                        args.pointer_scan_bytes,
+                        args.pointer_target_bytes,
+                        args.max_pointer_targets,
+                    )
+                    pointer_perf_times.append(elapsed)
+                    pointer_key_labels.append(key_label)
+                    fish_pointer_source_offsets.append(pointer_offsets)
+                    fish_pointer_addrs.append(pointer_addrs)
+                    fish_pointer_bytes.append(pointer_raw)
+
+                sample_durations.append(time.perf_counter() - sample_started)
+                schedule_lags.append(max(0.0, now_perf - scheduled_at))
 
                 row = {
                     "t": timestamp,
-                    "elapsed": now_perf - started,
+                    "elapsed": elapsed,
                     "keys": {
                         "label": key_label,
+                        "label_keys": args.label_keys,
+                        "label_left_down": label_left_down,
+                        "label_right_down": label_right_down,
                         "a_down": a_down,
                         "d_down": d_down,
                     },
@@ -595,16 +1127,34 @@ def record(args: argparse.Namespace) -> Path:
                         }
                         for idx, offset in enumerate(FISH_POS_OFFSETS)
                     ],
-                    "candidates": [_candidate_json(tracker, item) for item in candidates],
+                    "candidates": candidates_json,
+                    "linked_fish_pointers": linked_fish_pointers_json,
                 }
                 jsonl.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
 
-                if len(timestamps) % max(1, int(1 / args.interval)) == 0:
+                if _should_auto_stop_idle(
+                    elapsed,
+                    key_label,
+                    manual_key_samples,
+                    last_manual_key_at,
+                    args.auto_stop_idle,
+                    args.auto_stop_min_manual_samples,
+                ):
+                    stop_reason = "manual_idle_tail"
                     print(
-                        f"samples={len(timestamps)} action={state.action} "
+                        f"Auto-stop: no manual {args.label_keys} label keys for {args.auto_stop_idle:g}s "
+                        "after reeling activity. Saving completion tail."
+                    )
+                    break
+
+                if now_perf >= next_progress:
+                    next_progress = now_perf + 1.0
+                    average_fps = len(timestamps) / max(0.001, now_perf - started)
+                    print(
+                        f"samples={len(timestamps)} fps={average_fps:.1f} action={state.action} "
                         f"cmd={command_label} keys={key_label} "
                         f"fish={'None' if tracker.fish_addr is None else f'0x{tracker.fish_addr:X}'} "
-                        f"candidates={sum(1 for addr in addrs if addr)}"
+                        f"candidates={latest_candidate_count}"
                     )
     except KeyboardInterrupt:
         print("Interrupted by user; saving collected samples.")
@@ -613,14 +1163,31 @@ def record(args: argparse.Namespace) -> Path:
 
     metadata = {
         "kind": "sonar_reeling_direction_probe",
-        "version": 1,
+        "version": 2,
+        "label": label,
         "process": args.process,
         "duration": args.duration,
         "interval": args.interval,
         "warmup": args.warmup,
-        "bytes": args.bytes,
+        "countdown": args.countdown,
+        "bytes": candidate_bytes_size,
+        "fish_bytes": fish_bytes_size,
+        "fish_before_bytes": fish_before_bytes_size,
+        "player_bytes": player_bytes_size,
+        "candidate_bytes": candidate_bytes_size,
+        "candidate_interval": args.candidate_interval,
         "max_candidates": args.max_candidates,
+        "pointer_interval": args.pointer_interval,
+        "pointer_scan_bytes": args.pointer_scan_bytes,
+        "pointer_target_bytes": args.pointer_target_bytes,
+        "max_pointer_targets": args.max_pointer_targets,
         "run_tracker_step": args.run_tracker_step,
+        "allow_deep_search": args.allow_deep_search,
+        "auto_stop_idle": args.auto_stop_idle,
+        "auto_stop_min_manual_samples": args.auto_stop_min_manual_samples,
+        "label_keys": args.label_keys,
+        "manual_key_samples": manual_key_samples,
+        "stop_reason": stop_reason,
         "direction_fields": [
             {"offset": offset, "eps": eps, "current_polarity": polarity}
             for offset, eps, polarity in FISH_DIRECTION_FIELDS
@@ -629,17 +1196,27 @@ def record(args: argparse.Namespace) -> Path:
         "fish_pos_offsets": FISH_POS_OFFSETS,
         "player_pos_offsets": POS_OFFSETS,
         "entity_pos_offsets": ENTITY_POS_OFFSETS,
-        "key_label_meaning": {"-1": "A", "0": "none", "1": "D", "2": "both"},
+        "key_label_meaning": {
+            "-1": "A" if args.label_keys == "ad" else "Left",
+            "0": "none",
+            "1": "D" if args.label_keys == "ad" else "Right",
+            "2": "both",
+        },
         "jsonl_path": str(jsonl_path),
     }
 
     sample_count = len(timestamps)
-    zero_entity_bytes = np.zeros((0, args.max_candidates, args.bytes), dtype=np.uint8)
+    zero_entity_bytes = np.zeros((0, args.max_candidates, candidate_bytes_size), dtype=np.uint8)
+    zero_pointer_bytes = np.zeros((0, args.max_pointer_targets, args.pointer_target_bytes), dtype=np.uint8)
     np.savez_compressed(
         npz_path,
         timestamps=np.array(timestamps, dtype=np.float64),
         perf_times=np.array(perf_times, dtype=np.float64),
+        sample_durations=np.array(sample_durations, dtype=np.float32),
+        schedule_lags=np.array(schedule_lags, dtype=np.float32),
         key_labels=np.array(key_labels, dtype=np.int8),
+        label_left_down=np.array(label_left_downs, dtype=np.bool_),
+        label_right_down=np.array(label_right_downs, dtype=np.bool_),
         a_down=np.array(a_downs, dtype=np.bool_),
         d_down=np.array(d_downs, dtype=np.bool_),
         command_labels=np.array(command_labels, dtype=np.int8),
@@ -652,42 +1229,107 @@ def record(args: argparse.Namespace) -> Path:
         selected_direction_offsets=np.array(selected_direction_offsets, dtype=np.int32),
         selected_direction_raws=np.array(selected_direction_raws, dtype=np.float32),
         player_positions=np.stack(player_positions).astype(np.float32) if player_positions else np.zeros((0, len(POS_OFFSETS), 3), dtype=np.float32),
+        player_right_vectors=np.stack(player_right_vectors).astype(np.float32) if player_right_vectors else np.zeros((0, 2), dtype=np.float32),
         fish_positions=np.stack(fish_positions).astype(np.float32) if fish_positions else np.zeros((0, len(FISH_POS_OFFSETS), 3), dtype=np.float32),
+        player_bytes=np.stack(player_bytes).astype(np.uint8) if player_bytes else np.zeros((0, player_bytes_size), dtype=np.uint8),
+        fish_bytes=np.stack(fish_bytes).astype(np.uint8) if fish_bytes else np.zeros((0, fish_bytes_size), dtype=np.uint8),
+        fish_before_bytes=np.stack(fish_before_bytes).astype(np.uint8) if fish_before_bytes else np.zeros((0, fish_before_bytes_size), dtype=np.uint8),
+        candidate_perf_times=np.array(candidate_perf_times, dtype=np.float64),
+        entity_key_labels=np.array(candidate_key_labels, dtype=np.int8),
         entity_addrs=np.array(entity_addrs, dtype=np.uint64) if entity_addrs else np.zeros((0, args.max_candidates), dtype=np.uint64),
         entity_hashes=np.array(entity_hashes, dtype=np.int64) if entity_hashes else np.zeros((0, args.max_candidates), dtype=np.int64),
         entity_distances=np.array(entity_distances, dtype=np.float32) if entity_distances else np.zeros((0, args.max_candidates), dtype=np.float32),
         entity_positions=np.stack(entity_positions).astype(np.float32) if entity_positions else np.zeros((0, args.max_candidates, len(ENTITY_POS_OFFSETS), 3), dtype=np.float32),
         entity_directions=np.stack(entity_directions).astype(np.float32) if entity_directions else np.zeros((0, args.max_candidates, len(FISH_DIRECTION_FIELDS)), dtype=np.float32),
-        player_bytes=np.stack(player_bytes).astype(np.uint8) if player_bytes else np.zeros((0, args.bytes), dtype=np.uint8),
-        fish_bytes=np.stack(fish_bytes).astype(np.uint8) if fish_bytes else np.zeros((0, args.bytes), dtype=np.uint8),
         entity_bytes=np.stack(entity_bytes).astype(np.uint8) if entity_bytes else zero_entity_bytes,
+        pointer_perf_times=np.array(pointer_perf_times, dtype=np.float64),
+        pointer_key_labels=np.array(pointer_key_labels, dtype=np.int8),
+        fish_pointer_source_offsets=np.stack(fish_pointer_source_offsets).astype(np.int32) if fish_pointer_source_offsets else np.zeros((0, args.max_pointer_targets), dtype=np.int32),
+        fish_pointer_addrs=np.stack(fish_pointer_addrs).astype(np.uint64) if fish_pointer_addrs else np.zeros((0, args.max_pointer_targets), dtype=np.uint64),
+        fish_pointer_bytes=np.stack(fish_pointer_bytes).astype(np.uint8) if fish_pointer_bytes else zero_pointer_bytes,
         metadata=json.dumps(metadata, ensure_ascii=False),
     )
     _write_report(npz_path, report_path)
+    try:
+        from sonar.tools.analyze_reeling_memory import analyze
+
+        analyze(npz_path, args.analysis_top)
+    except Exception as exc:
+        print(f"Broad memory analysis failed: {exc}")
+    try:
+        from sonar.tools.analyze_reeling_completion import analyze as analyze_completion
+
+        analyze_completion(npz_path, top=args.completion_top)
+    except Exception as exc:
+        print(f"Completion memory analysis failed: {exc}")
+    _write_fixture(npz_path, fixture_path, args.fixture_samples, args.fixture_min_accuracy)
+    fixture_accuracy, fixture_count = replay_direction_fixture(fixture_path)
 
     print(f"Saved samples: {sample_count}")
     print(f"Saved NPZ: {npz_path}")
     print(f"Saved JSONL: {jsonl_path}")
     print(f"Saved report: {report_path}")
+    print(f"Saved regression fixture candidate: {fixture_path}")
+    print(
+        "Fixture current-direction accuracy: "
+        f"{'n/a' if fixture_accuracy is None else f'{fixture_accuracy:.3f}'} n={fixture_count}"
+    )
     return npz_path
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Passively record GTA memory and A/D key state during manual reeling."
+        description="Passively record GTA memory, direction labels, and A/D control key state during manual reeling."
     )
     parser.add_argument("--process", default="gta5.exe")
-    parser.add_argument("--duration", type=float, default=75.0)
+    parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--interval", type=float, default=0.02)
     parser.add_argument("--warmup", type=float, default=0.5)
-    parser.add_argument("--bytes", type=int, default=0x500)
-    parser.add_argument("--max-candidates", type=int, default=12)
+    parser.add_argument("--countdown", type=float, default=5.0)
+    parser.add_argument("--label", default="")
+    parser.add_argument(
+        "--label-keys",
+        choices=tuple(LABEL_KEY_VKS),
+        default="ad",
+        help="Keys used as direction labels: regular A/D controls or independent Left/Right arrow annotations.",
+    )
+    parser.add_argument("--fish-bytes", type=_parse_non_negative_int, default=DEFAULT_FISH_BYTES)
+    parser.add_argument("--fish-before-bytes", type=_parse_non_negative_int, default=DEFAULT_FISH_BEFORE_BYTES)
+    parser.add_argument("--player-bytes", type=_parse_non_negative_int, default=DEFAULT_PLAYER_BYTES)
+    parser.add_argument("--candidate-bytes", type=_parse_non_negative_int, default=DEFAULT_CANDIDATE_BYTES)
+    parser.add_argument(
+        "--bytes",
+        type=_parse_non_negative_int,
+        default=None,
+        help="Compatibility shortcut: override fish, player, and candidate byte windows with one size.",
+    )
+    parser.add_argument("--candidate-interval", type=float, default=DEFAULT_CANDIDATE_INTERVAL)
+    parser.add_argument("--max-candidates", type=int, default=16)
+    parser.add_argument("--pointer-interval", type=float, default=DEFAULT_POINTER_INTERVAL)
+    parser.add_argument("--pointer-scan-bytes", type=_parse_non_negative_int, default=DEFAULT_POINTER_SCAN_BYTES)
+    parser.add_argument("--pointer-target-bytes", type=_parse_non_negative_int, default=DEFAULT_POINTER_TARGET_BYTES)
+    parser.add_argument("--max-pointer-targets", type=int, default=DEFAULT_MAX_POINTER_TARGETS)
+    parser.add_argument("--fixture-samples", type=int, default=DEFAULT_FIXTURE_SAMPLES)
+    parser.add_argument("--fixture-min-accuracy", type=float, default=0.70)
+    parser.add_argument("--analysis-top", type=int, default=100)
+    parser.add_argument("--completion-top", type=int, default=80)
+    parser.add_argument("--auto-stop-idle", type=float, default=DEFAULT_AUTO_STOP_IDLE_SECONDS)
+    parser.add_argument(
+        "--auto-stop-min-manual-samples",
+        type=int,
+        default=DEFAULT_AUTO_STOP_MIN_MANUAL_SAMPLES,
+    )
     parser.add_argument("--out-dir", default=None)
     parser.add_argument(
         "--no-tracker-step",
         dest="run_tracker_step",
         action="store_false",
         help="Only observe cached tracker state. Default runs tracker.step() with a null input controller.",
+    )
+    parser.add_argument(
+        "--allow-deep-search",
+        action="store_true",
+        help="Allow expensive fallback fish scans during recording. Disabled by default to preserve sampling cadence.",
     )
     parser.set_defaults(run_tracker_step=True)
     return parser

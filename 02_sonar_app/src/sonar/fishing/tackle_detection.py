@@ -15,6 +15,7 @@ TACKLE_SLOT_SIZE = 69
 TACKLE_SLOT_GAP = 11
 TACKLE_TOTAL_VISIBLE_SLOTS = 7
 TACKLE_ROW_BOTTOM_OFFSET = 77
+TACKLE_NOTIFICATION_MIN_BELOW_ROW = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +144,14 @@ class TackleDetector:
             return False
         components = cv2.connectedComponentsWithStats(color_mask.astype("uint8"), 8)[2]
         for index in range(1, components.shape[0]):
-            _, _, component_width, component_height, area = components[index]
+            _, component_top, component_width, component_height, area = components[index]
+            component_bottom = top + component_top + component_height
+            min_notification_bottom = row.bottom + max(
+                1,
+                int(round(TACKLE_NOTIFICATION_MIN_BELOW_ROW * scale)),
+            )
+            if component_bottom < min_notification_bottom:
+                continue
             if component_height >= max(25, int(round(25 * scale))) and component_width <= max(10, int(round(10 * scale))):
                 return True
             if component_height >= max(45, int(round(45 * scale))) and area >= max(120, int(round(120 * scale * scale))):

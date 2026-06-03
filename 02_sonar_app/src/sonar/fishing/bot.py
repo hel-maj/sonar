@@ -69,6 +69,7 @@ STOP_REASON_START_FAILED = "не смог начать рыбалку в теч�
 STOP_REASON_NO_STAGE = "не в зоне рыбалки или не видно стадии рыбалки 40 секунд"
 STOP_REASON_WALKING_GUARD = "Сработала защита от ходьбы"
 STOP_REASON_TACKLE_UNREADABLE = "Не удалось прочитать снаряжение"
+STOP_REASON_OVERWEIGHT = "перевес инвентаря"
 AUTO_STOP_SCREENSHOT_REASONS = frozenset({STOP_REASON_NO_STAGE, STOP_REASON_START_FAILED})
 REELING_LOSS_RELEASE_LOG_KEY = "sonar"
 REELING_LOSS_RELEASE_LOG_MAGIC = b"SONAR_REELING_LOSS_LOG_V1\n"
@@ -104,6 +105,7 @@ REELING_FOCUS_RETRY_SECONDS = 1.0
 POST_HOOK_STAGE_CONFIRM_TIMEOUT_SECONDS = 3.0
 POST_HOOK_STAGE_POLL_SECONDS = 0.08
 START_MENU_OPEN_DELAY_SECONDS = 0.65
+FISHING_ENTRY_MIN_INTERVAL_SECONDS = 1.5
 STORAGE_SELECTION_RETRY_SECONDS = 0.75
 STORAGE_SELECTION_GIVE_UP_SECONDS = 3.0
 STORAGE_SELECTION_CLICK_PAUSE_SECONDS = 0.58
@@ -114,6 +116,8 @@ TACKLE_OBSCURED_RETRIES = 3
 TACKLE_DEPLETION_CONFIRM_DELAY_SECONDS = 0.5
 TACKLE_DEPLETION_CONFIRM_ATTEMPTS = 2
 TACKLE_ACTIVE_STAGE_SCAN_INTERVAL_SECONDS = 6.0
+INVENTORY_OPEN_PAUSE_SECONDS = 1.0
+INVENTORY_CLOSE_PAUSE_SECONDS = 1.5
 REELING_PROBLEM_ACTIONS = frozenset({"target_search", "position_unreadable", "memory_unavailable", "control_error"})
 REELING_KNOWN_INTERRUPTION_TRIGGERS = frozenset(
     {
@@ -169,6 +173,7 @@ class FishingBot:
     notification_manager: NotificationManager = field(default_factory=NotificationManager)
     can_start_callback: Callable[[], bool] | None = None
     start_command_callback: Callable[[], bool] | None = None
+    telegram_runtime_enabled_callback: Callable[[], bool] | None = None
     telegram_settings_changed_callback: Callable[[TelegramSettings], None] | None = None
     player_status_callback: Callable[[PlayerStatus | None], None] | None = None
     stream_status_callback: Callable[[], object] | None = None
@@ -187,7 +192,6 @@ class FishingBot:
 
     def __post_init__(self) -> None:
         self.logger = CallbackLogger(self.log_callback)
-        self.input_controller.input_allowed_callback = self._is_game_foreground
         self.capture = WindowCapture(self.process_name)
         self.window_activator = WindowActivator(self.process_name)
         self.trigger_monitor = TriggerMonitor()
@@ -204,8 +208,13 @@ class FishingBot:
         self.casting_monitor: GreenPixelMonitor | None = None
         self.hooking_monitor: TemplateMonitor | None = None
         self._stop_event = threading.Event()
+        self._input_enabled_event = threading.Event()
+        self._input_enabled_event.set()
+        self.input_controller.input_allowed_callback = self._is_fishing_input_allowed
         self._chat_pause_event = threading.Event()
         self._brain_thread: threading.Thread | None = None
+        self._stop_state_lock = threading.Lock()
+        self._stop_cleanup_lock = threading.Lock()
         self._last_triggers: dict[str, float] = {}
         self._last_trigger_matches: dict[str, TemplateMatch] = {}
         self._kickstart_requested = False
@@ -214,6 +223,7 @@ class FishingBot:
         self._focus_lost_notified = False
         self._last_start2_handled_at = 0.0
         self._last_start_pressed_at = 0.0
+        self._last_fishing_entry_pressed_at = 0.0
         self._last_catch_result: CatchScreenResult | None = None
         self._last_stage_label = ""
         self._last_catch_snapshot_at = 0.0
@@ -223,6 +233,7 @@ class FishingBot:
         self._no_stage_since: float | None = None
         self._start_attempt_since: float | None = None
         self._inventory_retry_after = 0.0
+        self._inventory_tasks_retry_pending = False
         self._meal_search_disabled_until_restart = False
         self._last_player_status: PlayerStatus | None = None
         self._last_player_status_at = 0.0
@@ -281,6 +292,7 @@ class FishingBot:
         settings = self.config_manager.load()
         self.notification_manager.configure(
             settings.telegram,
+            runtime_enabled=self.telegram_runtime_enabled_callback() if self.telegram_runtime_enabled_callback else True,
             start_callback=self.start_command_callback or self.start,
             stop_callback=self.stop,
             is_running_callback=lambda: self.state.running,
@@ -350,12 +362,14 @@ class FishingBot:
         self._clear_debug_capture_for_new_session()
         self._focus_game()
         self._stop_event.clear()
+        self._input_enabled_event.set()
         self._chat_pause_event.clear()
         self.state.running = True
         self.state.phase = BotPhase.IDLE
         self.state.detected_stage = "Свободно"
         self.inventory_full = False
         self._inventory_retry_after = 0.0
+        self._inventory_tasks_retry_pending = False
         self._meal_search_disabled_until_restart = False
         self._initial_status_scan_pending = self.settings.auto_meal
         self._player_status_estimate = PlayerStatusEstimate()
@@ -367,6 +381,7 @@ class FishingBot:
         self._last_catch_result = None
         self._no_stage_since = None
         self._start_attempt_since = None
+        self._last_fishing_entry_pressed_at = 0.0
         self._last_focus_state_check_at = 0.0
         self._focus_lost_notified = False
         self.session_stats.clear_tackle_scan()
@@ -382,30 +397,63 @@ class FishingBot:
         return True
 
     def stop(self, reason: str = STOP_REASON_MANUAL) -> None:
-        was_running = self.state.running
-        self.state.phase = BotPhase.STOPPING
-        self._stop_event.set()
+        was_running = self._begin_stop()
         self._finish_stop(was_running, reason)
         if self._brain_thread and self._brain_thread.is_alive() and threading.current_thread() is not self._brain_thread:
             threading.Thread(target=self._join_brain_thread, name="sonar-brain-stop", daemon=True).start()
 
+    def stop_async(self, reason: str = STOP_REASON_MANUAL) -> None:
+        was_running = self._begin_stop()
+        if not was_running:
+            return
+        threading.Thread(
+            target=self._finish_stop_and_join,
+            args=(was_running, reason),
+            name="sonar-stop-cleanup",
+            daemon=True,
+        ).start()
+
     def _stop_from_brain(self, reason: str) -> None:
-        was_running = self.state.running
+        was_running = self._begin_stop()
         screenshot_bytes = self._capture_auto_stop_screenshot(reason) if was_running else None
-        self.state.phase = BotPhase.STOPPING
-        self._stop_event.set()
         self._finish_stop(was_running, reason, auto_stop_screenshot=screenshot_bytes)
 
+    def _begin_stop(self) -> bool:
+        lock = getattr(self, "_stop_state_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._stop_state_lock = lock
+        with lock:
+            was_running = self.state.running
+            self.state.phase = BotPhase.STOPPING
+            input_enabled_event = getattr(self, "_input_enabled_event", None)
+            if input_enabled_event is not None:
+                input_enabled_event.clear()
+            self._stop_event.set()
+            self.state.running = False
+            return was_running
+
+    def _finish_stop_and_join(self, was_running: bool, reason: str) -> None:
+        try:
+            self._finish_stop(was_running, reason)
+        finally:
+            self._join_brain_thread()
+
     def _finish_stop(self, was_running: bool, reason: str, *, auto_stop_screenshot: bytes | None = None) -> None:
+        cleanup_lock = getattr(self, "_stop_cleanup_lock", None)
+        if cleanup_lock is None:
+            cleanup_lock = threading.Lock()
+            self._stop_cleanup_lock = cleanup_lock
+        with cleanup_lock:
+            self._finish_stop_locked(was_running, reason, auto_stop_screenshot=auto_stop_screenshot)
+
+    def _finish_stop_locked(self, was_running: bool, reason: str, *, auto_stop_screenshot: bytes | None = None) -> None:
         if hasattr(self, "_chat_pause_event"):
             self._chat_pause_event.clear()
-        self.reeling_tracker.stop()
-        self.inventory_memory_detector.close()
-        try:
-            self.meal_system.status_memory_detector.close()
-        except Exception:
-            pass
-        self.input_controller.release_all_keys()
+        self._run_stop_step("reeling tracker", self.reeling_tracker.stop)
+        self._run_stop_step("inventory detector", self.inventory_memory_detector.close)
+        self._run_stop_step("meal status detector", lambda: self.meal_system.status_memory_detector.close())
+        self._run_stop_step("input keys", self.input_controller.release_all_keys)
         self.state.running = False
         self.state.phase = BotPhase.IDLE
         self.state.detected_stage = "Свободно"
@@ -416,18 +464,37 @@ class FishingBot:
         self._focus_lost_notified = False
         self._player_status_scan_requested = False
         if was_running:
-            self.session_stats.stop_timer()
+            self._run_stop_step("session timer", self.session_stats.stop_timer)
         self._log(f"Fishing bot stopped: {reason}")
         if was_running:
-            self._publish_ui_event("Рыбалка остановлена", event_type="warning", icon="stop.svg", detail=reason)
+            self._run_stop_step(
+                "UI event",
+                lambda: self._publish_ui_event("Рыбалка остановлена", event_type="warning", icon="stop.svg", detail=reason),
+            )
         if was_running:
             if self.settings.start_stop_sound_enabled:
-                play_sound("bot_stop.wav", volume=START_STOP_SOUND_VOLUME)
-            self.notification_manager.notify_fishing_stopped(
-                self.session_stats.totals(),
-                reason=reason,
-                image_bytes=auto_stop_screenshot,
-            )
+                self._run_stop_step("stop sound", lambda: play_sound("bot_stop.wav", volume=START_STOP_SOUND_VOLUME))
+            totals = self._run_stop_step("session totals", self.session_stats.totals)
+            if totals is not None:
+                self._run_stop_step(
+                    "stop notification",
+                    lambda: self.notification_manager.notify_fishing_stopped(
+                        totals,
+                        reason=reason,
+                        image_bytes=auto_stop_screenshot,
+                    ),
+                )
+
+    def _run_stop_step(self, name: str, callback: Callable[[], object]) -> object | None:
+        try:
+            return callback()
+        except Exception as exc:
+            debug_log(f"BOT_STOP_CLEANUP_FAILED step={name} error={exc}")
+            try:
+                self._log(f"Ошибка очистки при остановке ({name}): {exc}")
+            except Exception:
+                pass
+            return None
 
     def _capture_auto_stop_screenshot(self, reason: str) -> bytes | None:
         if reason not in AUTO_STOP_SCREENSHOT_REASONS:
@@ -521,6 +588,7 @@ class FishingBot:
             return False
         self.input_controller.press_key(self.settings.inventory_hotkey)
         self._log(f"Режим чата: закрываю инвентарь клавишей {self.settings.inventory_hotkey}")
+        self._chat_mode_sleep(INVENTORY_CLOSE_PAUSE_SECONDS)
         return True
 
     def _dismiss_catch_screen_for_chat(self, frame) -> bool:
@@ -636,6 +704,7 @@ class FishingBot:
                         continue
                     if needs_meal and time.time() >= self._inventory_retry_after:
                         self._handle_pending_tasks(do_meal=True)
+                        continue
                     if self._stop_event.is_set():
                         break
                     self._do_casting()
@@ -673,12 +742,21 @@ class FishingBot:
                 else:
                     self._sleep(0.25)
             except Exception as exc:
-                self.state.last_error = str(exc)
-                self._log(f"Brain error: {exc}")
-                try:
-                    self._try_recover()
-                except Exception as recover_exc:
-                    self._sleep(1.0)
+                self._handle_brain_error(exc)
+
+    def _handle_brain_error(self, exc: Exception) -> None:
+        self.state.last_error = str(exc)
+        self._log(f"Brain error: {exc}")
+        if self.state.phase == BotPhase.INVENTORY:
+            self._inventory_tasks_retry_pending = True
+            self._inventory_retry_after = max(getattr(self, "_inventory_retry_after", 0.0), time.time() + 8.0)
+            self._log("Инвентарь: ошибка обработки, повторю позже без восстановления рыбалки")
+            self._sleep(1.0)
+            return
+        try:
+            self._try_recover()
+        except Exception:
+            self._sleep(1.0)
 
     def _stop_if_no_stage_timed_out(self, stage: str | None, needs_meal: bool) -> bool:
         if stage is not None or needs_meal or self._has_pending_catch():
@@ -1074,7 +1152,7 @@ class FishingBot:
     def _try_return_to_fishing_from_idle(self, timeout: float = REELING_IDLE_RETURN_TIMEOUT_SECONDS) -> bool:
         self._log("Вываживание прервано: состояние не найдено, проверяю возврат клавишей E")
         self._focus_game()
-        self.input_controller.press_key("e")
+        self._press_fishing_entry("Вываживание прервано")
         deadline = time.time() + timeout
         while time.time() < deadline and not self._stop_event.is_set():
             state = self._detect_reeling_interruption_state()
@@ -1108,6 +1186,8 @@ class FishingBot:
         return None, 0.0
 
     def _do_casting(self) -> None:
+        if self._retry_inventory_tasks_before_casting():
+            return
         self.state.phase = BotPhase.CASTING
         self._log("Стадия: Заброс")
         if self._start_attempt_since is None:
@@ -1122,6 +1202,8 @@ class FishingBot:
             fish_name, confidence = self._run_reeling_module()
             if fish_name or self._has_pending_catch():
                 self._do_fish_catch(fish_name, confidence)
+            return
+        if self._stop_event.is_set():
             return
         if start_phase != "casting":
             self._log("Заброс пропущен: стадия рыбалки не найдена")
@@ -1160,6 +1242,17 @@ class FishingBot:
             return
         self._log("Заброс: завершён")
         self._wait_for_stage_transition(("start1",), ("start2", "wait_tension"), timeout=8.0, return_on_old_gone=False)
+
+    def _retry_inventory_tasks_before_casting(self) -> bool:
+        if not getattr(self, "_inventory_tasks_retry_pending", False):
+            return False
+        wait_seconds = self._inventory_retry_after - time.time()
+        if wait_seconds > 0.0:
+            self._sleep(min(0.5, wait_seconds))
+            return True
+        self._log("Инвентарь: повторяю отложенные действия перед забросом")
+        self._handle_pending_tasks(do_meal=True)
+        return True
 
     def _casting_control_loop(
         self,
@@ -1790,8 +1883,10 @@ class FishingBot:
             return
         self.state.phase = BotPhase.INVENTORY
         if not self._open_inventory():
+            self._inventory_tasks_retry_pending = True
             self._log("Инвентарь не открыт; отложенные действия пропущены")
             return
+        self._inventory_tasks_retry_pending = False
         if do_meal:
             self._do_meal_actions()
         if do_backpack:
@@ -1929,9 +2024,13 @@ class FishingBot:
         self._focus_game()
         deadline = time.time() + 4.0
         next_toggle_at = 0.0
+        inventory_was_open = False
         while time.time() < deadline and not self._stop_event.is_set():
             if not self._is_inventory_open():
+                if inventory_was_open:
+                    self._sleep(INVENTORY_CLOSE_PAUSE_SECONDS)
                 return True
+            inventory_was_open = True
             if time.time() >= next_toggle_at:
                 self.input_controller.press_key(self.settings.inventory_hotkey)
                 self._log(f"Питание: закрываю инвентарь клавишей {self.settings.inventory_hotkey} для контрольной проверки")
@@ -2151,8 +2250,8 @@ class FishingBot:
             self._sleep(0.1)
         if self._stop_event.is_set():
             return False
-        self.input_controller.press_key("e")
-        self._log("Смена наживки: рыбалка запущена заново")
+        if self._press_fishing_entry("Смена наживки"):
+            self._log("Смена наживки: рыбалка запущена заново")
         self._kickstart_requested = True
         self._sleep(0.3)
         return True
@@ -2176,7 +2275,7 @@ class FishingBot:
         self._focus_game()
         self.input_controller.press_key("esc")
         self._sleep(BOT_DELAYS["inventory"])
-        self.input_controller.press_key("e")
+        self._press_fishing_entry("Хранилище")
         self._sleep(BOT_DELAYS["wait"])
         self._log("Store trunk routine executed")
         return True
@@ -2252,10 +2351,10 @@ class FishingBot:
         if action == "exit_game":
             self._log("Перевес: выключаю игру")
             self._shutdown_game()
-            self._stop_event.set()
+            self._stop_from_brain(STOP_REASON_OVERWEIGHT)
             return
         self._log("Перевес: останавливаю рыбалку")
-        self._stop_event.set()
+        self._stop_from_brain(STOP_REASON_OVERWEIGHT)
 
     def _shutdown_game(self) -> None:
         wanted = self.process_name.lower()
@@ -2284,7 +2383,7 @@ class FishingBot:
         self._focus_game()
         initial_matches = self.trigger_monitor.find_detections(self.capture.capture())
         if not self._is_fishing_stage_active(initial_matches):
-            self.input_controller.press_key("e")
+            self._press_fishing_entry("Вход в рыбалку")
             self._sleep_random(START_MENU_OPEN_DELAY_SECONDS, RANDOM_DELAY_JITTER_SECONDS)
         deadline = time.time() + timeout
         clicked: set[str] = set()
@@ -2376,6 +2475,9 @@ class FishingBot:
         scan = self._read_tackle_until_clear(frame)
         if scan is None:
             return False
+        if scan.obscured:
+            self._log("Снаряжение: проверка пропущена, панель всё ещё перекрыта уведомлением")
+            return True
         self._log("Снаряжение:\n" + format_tackle_items(scan.items))
         depletion = self._find_tackle_depletion(scan)
         if depletion is None:
@@ -2417,6 +2519,7 @@ class FishingBot:
     def _read_tackle_until_clear(self, frame=None) -> TackleScanResult | None:
         waits = [0.0, TACKLE_OBSCURED_INITIAL_WAIT_SECONDS]
         waits.extend([TACKLE_OBSCURED_RETRY_WAIT_SECONDS] * TACKLE_OBSCURED_RETRIES)
+        latest_obscured_scan: TackleScanResult | None = None
         for attempt, wait_seconds in enumerate(waits):
             if wait_seconds > 0:
                 self._log(f"Снаряжение перекрыто уведомлением, жду {wait_seconds:.0f} сек")
@@ -2426,11 +2529,15 @@ class FishingBot:
             current_frame = frame if attempt == 0 and frame is not None else self.capture.capture()
             scan = self.tackle_detector.detect(current_frame)
             if scan.obscured:
+                latest_obscured_scan = scan
                 continue
+            latest_obscured_scan = None
             if self._is_empty_tackle_scan(scan):
                 continue
             self._store_tackle_scan(scan, current_frame)
             return scan
+        if latest_obscured_scan is not None:
+            return latest_obscured_scan
         self._log(f"Автостоп: {STOP_REASON_TACKLE_UNREADABLE}")
         self._stop_from_brain(STOP_REASON_TACKLE_UNREADABLE)
         return None
@@ -2523,6 +2630,7 @@ class FishingBot:
         if now - self._last_start_pressed_at < 0.3:
             return False
         self._last_start_pressed_at = now
+        debug_log("FISHING_START_PRESS reason=tackle_selection")
         self.input_controller.press_key("e")
         self._log("Стадия: Выбор снастей -> нажата E")
         self._sleep_random(TACKLE_ACTION_DELAY_SECONDS, RANDOM_DELAY_JITTER_SECONDS)
@@ -2587,10 +2695,6 @@ class FishingBot:
 
     def _click_storage_option_from_screenshot(self, target: str, anchor: TemplateMatch) -> bool:
         frame = self.capture.capture()
-        fresh_matches = self.trigger_monitor.find_detections(frame)
-        if "start" not in fresh_matches:
-            self._log("Fish storage screenshot click skipped: fishing menu is not confirmed")
-            return False
         height, width = frame.shape[:2]
         res = resolution_name(width, height)
         roi = self._storage_selector_roi(anchor, width, height)
@@ -2679,6 +2783,15 @@ class FishingBot:
             return True
         if not self._exit_to_idle_before_inventory():
             return False
+        self._sleep(INVENTORY_OPEN_PAUSE_SECONDS)
+        if self._stop_event.is_set():
+            return False
+        if self._is_inventory_open():
+            self._log("Стадия: Инвентарь уже открыт")
+            return True
+        if not self._exit_to_idle_before_inventory():
+            self._log("Инвентарь: стадия изменилась перед открытием, повторю позже")
+            return False
         self.input_controller.press_key(self.settings.inventory_hotkey)
         self._log(f"Инвентарь: нажата клавиша {self.settings.inventory_hotkey}")
         self._sleep(1.0)
@@ -2697,12 +2810,16 @@ class FishingBot:
         self._focus_game()
         deadline = time.time() + 8.0
         next_inventory_toggle_at = 0.0
+        inventory_was_open = False
         while time.time() < deadline and not self._stop_event.is_set():
             if self._close_game_menu_if_open():
                 self._sleep(0.2)
                 continue
             if not self._is_inventory_open():
+                if inventory_was_open:
+                    self._sleep(INVENTORY_CLOSE_PAUSE_SECONDS)
                 break
+            inventory_was_open = True
             if time.time() >= next_inventory_toggle_at:
                 self.input_controller.press_key(self.settings.inventory_hotkey)
                 self._log(f"Инвентарь: закрываю клавишей {self.settings.inventory_hotkey}")
@@ -2717,8 +2834,8 @@ class FishingBot:
             self._sleep(0.2)
         if self._stop_event.is_set():
             return
-        self.input_controller.press_key("e")
-        self._log("Возврат к рыбалке: нажата E")
+        if self._press_fishing_entry("Возврат к рыбалке"):
+            self._log("Возврат к рыбалке: нажата E")
 
     def _exit_to_idle_before_inventory(self, timeout: float = 12.0) -> bool:
         deadline = time.time() + timeout
@@ -2783,15 +2900,26 @@ class FishingBot:
                 return False
             self._log(f"Recover attempt {attempt + 1}/{max_retries}")
             self._focus_game()
-            self.input_controller.key_down("w")
-            self._sleep(BOT_DELAYS["half"])
-            self.input_controller.key_up("w")
-            self.input_controller.press_key("e")
+            self._press_fishing_entry("Recover")
             if self._wait_for_start_phase(timeout=BOT_DELAYS["recover_pause"]):
                 self.notification_manager.notify_fishing_restored()
                 return True
         self.notification_manager.notify_fishing_failed()
         return False
+
+    def _press_fishing_entry(self, reason: str) -> bool:
+        now = time.time()
+        elapsed = now - getattr(self, "_last_fishing_entry_pressed_at", 0.0)
+        if elapsed < FISHING_ENTRY_MIN_INTERVAL_SECONDS:
+            remaining = FISHING_ENTRY_MIN_INTERVAL_SECONDS - elapsed
+            self._log(f"{reason}: повторное нажатие E пропущено, cooldown {remaining:.1f}с")
+            return False
+        self._last_fishing_entry_pressed_at = now
+        debug_log(f"FISHING_ENTRY_PRESS reason={reason}")
+        if self.input_controller.press_key("e") is False:
+            self._last_fishing_entry_pressed_at = 0.0
+            return False
+        return True
 
     def _sleep(self, seconds: float) -> None:
         end = time.time() + seconds
@@ -2911,6 +3039,10 @@ class FishingBot:
             return psutil.Process(pid).name().lower() == self.process_name.lower()
         except Exception:
             return False
+
+    def _is_fishing_input_allowed(self) -> bool:
+        input_enabled_event = getattr(self, "_input_enabled_event", None)
+        return bool(input_enabled_event is not None and input_enabled_event.is_set() and self._is_game_foreground())
 
     def _capture_screenshot_bytes(self) -> bytes:
         frame = self.capture.capture()

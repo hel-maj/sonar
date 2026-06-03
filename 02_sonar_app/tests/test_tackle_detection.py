@@ -46,6 +46,7 @@ def counts_for(name: str) -> list[int]:
         ("counts_reel0_line848_hook3_bait4.jpg", [1, 0, 848, 3, 4, 0]),
         ("dark_rod_tackle_1.jpg", [1, 1, 741, 6, 220, 0]),
         ("dark_rod_tackle_2.jpg", [1, 1, 741, 6, 220, 0]),
+        ("unobscured_bait_icon_overflow.jpg", [1, 1, 931, 4, 4, 0]),
     ],
 )
 def test_tackle_counts_are_read_from_slot_color_and_quantity_digits(fixture, expected):

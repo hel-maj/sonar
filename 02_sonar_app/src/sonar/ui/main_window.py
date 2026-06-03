@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 from sonar.config.manager import ConfigManager
 from sonar.config.models import SonarSettings
 from sonar.core.events import UiEventMessage, event_bus
+from sonar.core.state import BotPhase
 from sonar.build_metadata import APP_BUILD_HASH, APP_NAME
 from sonar.fishing.bot import FishingBot
 from sonar.fishing.catch_quality import CATCH_SIZE_COLORS_BY_KEY
@@ -289,6 +290,7 @@ class MainWindow(QMainWindow):
             session_stats=self.session_stats,
             can_start_callback=self._can_start_fishing,
             start_command_callback=self._start_bot_from_remote,
+            telegram_runtime_enabled_callback=lambda: self._can_use_feature(FEATURE_TELEGRAM),
             telegram_settings_changed_callback=self.telegram_settings_bridge.changed.emit,
             player_status_callback=self.player_status_bridge.updated.emit,
             keep_debug_capture=keep_debug_capture,
@@ -1571,6 +1573,12 @@ class MainWindow(QMainWindow):
             nav_buttons=self._nav_buttons,
             license_context=context,
         )
+        if hasattr(self, "bot"):
+            self.bot.notification_manager.set_runtime_enabled(self._can_use_feature(FEATURE_TELEGRAM))
+        if active and not self._can_use_feature(FEATURE_STREAM_CHAT) and hasattr(self, "stream_service"):
+            snapshot = self.stream_service.snapshot()
+            if snapshot.chat_mode_enabled:
+                self.stream_service.disable_chat_mode(force=True)
         if not active:
             self._select_page(self.license_tab)
             if hasattr(self, "bot") and self.bot.state.running:
@@ -1835,7 +1843,8 @@ class MainWindow(QMainWindow):
 
     def stop_bot(self) -> None:
         try:
-            self.bot.stop()
+            self._pending_bot_start_after_license = False
+            self.bot.stop_async()
         except Exception as exc:
             self.append_log(f"Ошибка остановки: {exc}")
         finally:
@@ -2213,12 +2222,16 @@ class MainWindow(QMainWindow):
         active_license = self._has_active_license()
         fishing_allowed = self._can_use_feature(FEATURE_FISHING)
         running = bool(fishing_allowed and self.bot.state.running)
+        stopping = self.bot.state.phase == BotPhase.STOPPING
         if not active_license:
             title = "Лицензия не активна"
             description = "Активируйте ключ, чтобы запустить рыбалку"
         elif not fishing_allowed:
             title = "Рыбалка недоступна"
             description = "Функция отключена для этой лицензии"
+        elif stopping:
+            title = "Останавливаем"
+            description = "Завершаем текущие операции"
         elif running:
             title = "Работает"
             description = self.bot.state.detected_stage or "Бот выполняет текущий цикл"
@@ -2230,9 +2243,9 @@ class MainWindow(QMainWindow):
         for label in getattr(self, "_status_description_labels", []):
             label.setText(description)
         for button in getattr(self, "_start_buttons", []):
-            button.setEnabled(fishing_allowed and not running and not self._license_checking)
+            button.setEnabled(fishing_allowed and not running and not stopping and not self._license_checking)
         for button in getattr(self, "_stop_buttons", []):
-            button.setEnabled(running)
+            button.setEnabled(running and not stopping)
         for badge in getattr(self, "_ready_badges", []):
             if running:
                 badge.setText("Активен")
@@ -2486,6 +2499,10 @@ class MainWindow(QMainWindow):
         if chat_closed:
             if self._resume_bot_after_chat and getattr(self, "bot", None) is not None and self.bot.state.running:
                 self.bot.pause_for_chat(False)
+            self._resume_bot_after_chat = False
+        elif self._resume_bot_after_chat:
+            if getattr(self, "bot", None) is not None and self.bot.state.running:
+                self.bot.stop("не удалось закрыть режим чата")
             self._resume_bot_after_chat = False
         self.log_bridge.message.emit(result.message if result.ok else f"Режим чата: {result.message}")
         return result

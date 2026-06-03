@@ -186,6 +186,7 @@ docs/guides/update_release_full.md
 - [docs/guides/keygen_license_features.md](docs/guides/keygen_license_features.md)
 - [docs/guides/release_build_security.md](docs/guides/release_build_security.md)
 - [CODE_INDEX.md](CODE_INDEX.md)
+- [docs/guides/manual_reeling_capture.md](docs/guides/manual_reeling_capture.md)
 
 ## Основные скрипты
 

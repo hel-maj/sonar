@@ -30,6 +30,45 @@ class MessageResponse(Response):
         return {"result": {"message_id": self.message_id}}
 
 
+def test_runtime_gate_controls_polling(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(NotificationManager, "start_polling", lambda self: calls.append("start"))
+    monkeypatch.setattr(NotificationManager, "stop_polling", lambda self: calls.append("stop"))
+    manager = NotificationManager()
+
+    manager.configure(TelegramSettings(enabled=True, bot_token="token"), runtime_enabled=False)
+    manager.set_runtime_enabled(True)
+    manager.set_runtime_enabled(False)
+
+    assert calls == ["stop", "start", "stop"]
+
+
+def test_runtime_gate_blocks_network_and_incoming_callbacks(monkeypatch):
+    calls: list[tuple[str, object]] = []
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        runtime_enabled=False,
+    )
+    monkeypatch.setattr(NotificationManager, "_api_post", lambda self, method, **kwargs: calls.append((method, kwargs)))
+    monkeypatch.setattr(NotificationManager, "_send_menu", lambda self, chat_id: calls.append(("menu", chat_id)))
+
+    assert manager.send_message("blocked") is False
+    manager._handle_update({"message": {"chat": {"id": 1}, "text": "/menu"}})
+
+    assert calls == []
+
+
+def test_disabled_setting_blocks_direct_telegram_api_calls(monkeypatch):
+    calls: list[tuple[str, object]] = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=False, bot_token="token", admin_ids=[1]))
+    monkeypatch.setattr(notifier_module.requests, "post", lambda *args, **kwargs: calls.append((args[0], kwargs)))
+
+    assert manager.send_photo(1, b"png") is False
+    assert manager._api_post("sendMessage", json={"chat_id": 1, "text": "blocked"}) is None
+
+    assert calls == []
+
+
 def test_notification_menu_edits_callback_message_and_uses_two_columns(monkeypatch):
     manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
     calls = []

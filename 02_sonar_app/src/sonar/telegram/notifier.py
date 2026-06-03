@@ -65,6 +65,7 @@ class NotificationManager:
     stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None
     stream_set_snapshot_mode_callback: Callable[[bool], bool] | None = None
     player_status_scan_callback: Callable[[], tuple[bool, str]] | None = None
+    runtime_enabled: bool = True
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
     _poll_thread: threading.Thread | None = field(default=None, init=False)
     _last_update_id: int | None = field(default=None, init=False)
@@ -90,6 +91,7 @@ class NotificationManager:
         self,
         settings: TelegramSettings,
         *,
+        runtime_enabled: bool | None = None,
         start_callback: Callable[[], bool] | None = None,
         stop_callback: Callable[[], None] | None = None,
         is_running_callback: Callable[[], bool] | None = None,
@@ -114,6 +116,8 @@ class NotificationManager:
         player_status_scan_callback: Callable[[], tuple[bool, str]] | None = None,
     ) -> None:
         self.settings = settings
+        if runtime_enabled is not None:
+            self.runtime_enabled = bool(runtime_enabled)
         self.start_callback = start_callback
         self.stop_callback = stop_callback
         self.is_running_callback = is_running_callback
@@ -136,12 +140,21 @@ class NotificationManager:
         self.stream_set_chat_zoom_callback = stream_set_chat_zoom_callback
         self.stream_set_snapshot_mode_callback = stream_set_snapshot_mode_callback
         self.player_status_scan_callback = player_status_scan_callback
-        if self.settings.enabled and self.settings.bot_token:
+        self._sync_polling()
+
+    def set_runtime_enabled(self, enabled: bool) -> None:
+        self.runtime_enabled = bool(enabled)
+        self._sync_polling()
+
+    def _sync_polling(self) -> None:
+        if self.runtime_enabled and self.settings.enabled and self.settings.bot_token:
             self.start_polling()
         else:
             self.stop_polling()
 
     def start_polling(self) -> None:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+            return
         poll_thread = getattr(self, "_poll_thread", None)
         if poll_thread and poll_thread.is_alive():
             return
@@ -289,7 +302,7 @@ class NotificationManager:
     def send_message(self, text: str, *, chat_id: int | None = None, reply_markup: dict[str, Any] | None = None) -> bool:
         if self.sink:
             self.sink(text)
-        if not self.settings.enabled or not self.settings.bot_token:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
             return False
         chat_ids = [chat_id] if chat_id is not None else list(self.settings.admin_ids)
         if not chat_ids:
@@ -306,6 +319,8 @@ class NotificationManager:
         return ok
 
     def send_photo(self, chat_id: int, image_bytes: bytes, caption: str = "📸 Скриншот игры") -> bool:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+            return False
         response = self._api_post(
             "sendPhoto",
             data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
@@ -314,7 +329,7 @@ class NotificationManager:
         return bool(response and response.ok)
 
     def send_photo_to_admins(self, image_bytes: bytes, caption: str = "📸 Скриншот игры") -> bool:
-        if not self.settings.enabled or not self.settings.bot_token or not self.settings.admin_ids:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token or not self.settings.admin_ids:
             return False
         ok = True
         for chat_id in self.settings.admin_ids:
@@ -323,7 +338,7 @@ class NotificationManager:
 
     def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
-            if not self.settings.enabled or not self.settings.bot_token:
+            if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
                 self._stop_event.wait(1.0)
                 continue
             params: dict[str, Any] = {"timeout": 20, "allowed_updates": ["message", "callback_query"]}
@@ -334,6 +349,8 @@ class NotificationManager:
                 if not response.ok:
                     self._stop_event.wait(2.0)
                     continue
+                if self._stop_event.is_set() or not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+                    break
                 for update in response.json().get("result", []):
                     self._last_update_id = update.get("update_id", self._last_update_id)
                     self._handle_update(update)
@@ -345,6 +362,8 @@ class NotificationManager:
                 self._stop_event.wait(2.0)
 
     def _handle_update(self, update: dict[str, Any]) -> None:
+        if not self.runtime_enabled or not self.settings.enabled:
+            return
         if "message" in update:
             message = update["message"]
             chat_id = int(message.get("chat", {}).get("id", 0))
@@ -866,6 +885,8 @@ class NotificationManager:
             return self.send_message(text, chat_id=chat_id, reply_markup=reply_markup)
         if self.sink:
             self.sink(text)
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+            return False
         payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
@@ -885,7 +906,7 @@ class NotificationManager:
         return f"{decrypt_text_literal('telegram_api_base')}/bot{self.settings.bot_token}/{method}"
 
     def _api_post(self, method: str, **kwargs) -> requests.Response | None:
-        if not self.settings.bot_token:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
             return None
         try:
             return requests.post(self._api_url(method), timeout=self.timeout, **kwargs)

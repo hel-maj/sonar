@@ -44,6 +44,10 @@ def _mode_addr(addrs: np.ndarray) -> int:
     return Counter(values).most_common(1)[0][0]
 
 
+def _format_offset(offset: int) -> str:
+    return f"-0x{-offset:03X}" if offset < 0 else f"0x{offset:03X}"
+
+
 def _summarize_candidate(
     source: str,
     slot: int,
@@ -63,7 +67,7 @@ def _summarize_candidate(
     else:
         spread = "p10=nan p50=nan p90=nan"
     return (
-        f"{source:8s} slot={slot:<2d} addr=0x{addr:X} off=0x{offset:03X} {metric:5s} "
+        f"{source:8s} slot={slot:<2d} addr=0x{addr:X} off={_format_offset(offset)} {metric:5s} "
         f"score={score:.3f} corr={corr:+.3f} acc={'n/a' if acc is None else f'{acc:.3f}'} n={n:<4d} {spread}"
     )
 
@@ -79,6 +83,61 @@ def _candidate_stats(values: np.ndarray, labels: np.ndarray) -> tuple[float, flo
     return _score(corr, acc), corr, acc
 
 
+def _append_raw_candidates(
+    candidates: list[tuple[float, str]],
+    *,
+    source: str,
+    slot: int,
+    addr: int,
+    raw: np.ndarray,
+    labels: np.ndarray,
+    base_offset: int = 0,
+) -> None:
+    if raw.shape[0] != labels.size:
+        return
+    for relative_offset in range(0, raw.shape[1] - 3, 4):
+        values = _float_at(raw, relative_offset)
+        if not np.isfinite(values).all() or float(np.nanmax(np.abs(values))) > 100000.0:
+            continue
+        offset = base_offset + relative_offset
+        stats = _candidate_stats(values, labels)
+        if stats is not None:
+            score, corr, acc = stats
+            if score >= 0.25:
+                candidates.append(
+                    (
+                        score,
+                        _summarize_candidate(source, slot, addr, offset, "raw", score, corr, acc, int((labels != 0).sum()), values),
+                    )
+                )
+        if values.size < 3:
+            continue
+        delta = np.diff(values)
+        delta_labels = labels[1:]
+        delta_stats = _candidate_stats(delta, delta_labels)
+        if delta_stats is None:
+            continue
+        score_d, corr_d, acc_d = delta_stats
+        if score_d >= 0.25:
+            candidates.append(
+                (
+                    score_d,
+                    _summarize_candidate(
+                        source,
+                        slot,
+                        addr,
+                        offset,
+                        "delta",
+                        score_d,
+                        corr_d,
+                        acc_d,
+                        int((delta_labels != 0).sum()),
+                        delta,
+                    ),
+                )
+            )
+
+
 def analyze(path: Path, top: int) -> Path:
     data = np.load(path, allow_pickle=False)
     labels = data["key_labels"].astype(np.float32)
@@ -91,6 +150,7 @@ def analyze(path: Path, top: int) -> Path:
 
     entity_bytes = data["entity_bytes"]
     entity_addrs = data["entity_addrs"]
+    entity_labels = data["entity_key_labels"].astype(np.float32) if "entity_key_labels" in data else labels
     for slot in range(entity_bytes.shape[1]):
         mode_addr = _mode_addr(entity_addrs[:, slot])
         if mode_addr == 0:
@@ -99,56 +159,70 @@ def analyze(path: Path, top: int) -> Path:
         if int(same_addr.sum()) < 12:
             continue
         raw = entity_bytes[same_addr, slot, :]
-        y = labels[same_addr]
-        for offset in range(0, raw.shape[1] - 4, 4):
-            values = _float_at(raw, offset)
-            if not np.isfinite(values).all() or float(np.nanmax(np.abs(values))) > 100000.0:
-                continue
-            stats = _candidate_stats(values, y)
-            if stats is None:
-                continue
-            score, corr, acc = stats
-            if score >= 0.25:
-                candidates.append(
-                    (
-                        score,
-                        _summarize_candidate("entity", slot, mode_addr, offset, "raw", score, corr, acc, int((y != 0).sum()), values),
-                    )
-                )
-            if values.size >= 3:
-                delta = np.diff(values)
-                dy = y[1:]
-                stats_d = _candidate_stats(delta, dy)
-                if stats_d is None:
-                    continue
-                score_d, corr_d, acc_d = stats_d
-                same_next = same_addr[np.where(same_addr)[0][1:]]
-                if score_d >= 0.25 and bool(np.all(same_next)):
-                    candidates.append(
-                        (
-                            score_d,
-                            _summarize_candidate("entity", slot, mode_addr, offset, "delta", score_d, corr_d, acc_d, int((dy != 0).sum()), delta),
-                        )
-                    )
+        _append_raw_candidates(
+            candidates,
+            source="entity",
+            slot=slot,
+            addr=mode_addr,
+            raw=raw,
+            labels=entity_labels[same_addr],
+        )
 
     player_bytes = data["player_bytes"]
     player_addr = _mode_addr(data["player_addrs"])
     if player_addr and player_bytes.shape[0] >= 12:
-        for offset in range(0, player_bytes.shape[1] - 4, 4):
-            values = _float_at(player_bytes, offset)
-            if not np.isfinite(values).all() or float(np.nanmax(np.abs(values))) > 100000.0:
+        _append_raw_candidates(
+            candidates,
+            source="player",
+            slot=0,
+            addr=player_addr,
+            raw=player_bytes,
+            labels=labels,
+        )
+
+    fish_bytes = data["fish_bytes"] if "fish_bytes" in data else np.zeros((0, 0), dtype=np.uint8)
+    fish_addr = _mode_addr(data["fish_addrs"])
+    if fish_addr and fish_bytes.shape[0] >= 12:
+        _append_raw_candidates(
+            candidates,
+            source="fish",
+            slot=0,
+            addr=fish_addr,
+            raw=fish_bytes,
+            labels=labels,
+        )
+
+    fish_before_bytes = data["fish_before_bytes"] if "fish_before_bytes" in data else np.zeros((0, 0), dtype=np.uint8)
+    if fish_addr and fish_before_bytes.shape[0] >= 12 and fish_before_bytes.shape[1] > 0:
+        _append_raw_candidates(
+            candidates,
+            source="fish_pre",
+            slot=0,
+            addr=fish_addr,
+            raw=fish_before_bytes,
+            labels=labels,
+            base_offset=-fish_before_bytes.shape[1],
+        )
+
+    if "fish_pointer_bytes" in data and "fish_pointer_addrs" in data:
+        pointer_bytes = data["fish_pointer_bytes"]
+        pointer_addrs = data["fish_pointer_addrs"]
+        pointer_labels = data["pointer_key_labels"].astype(np.float32)
+        for slot in range(pointer_bytes.shape[1]):
+            mode_addr = _mode_addr(pointer_addrs[:, slot])
+            if mode_addr == 0:
                 continue
-            stats = _candidate_stats(values, labels)
-            if stats is None:
+            same_addr = pointer_addrs[:, slot] == mode_addr
+            if int(same_addr.sum()) < 12:
                 continue
-            score, corr, acc = stats
-            if score >= 0.25:
-                candidates.append(
-                    (
-                        score,
-                        _summarize_candidate("player", 0, player_addr, offset, "raw", score, corr, acc, int((labels != 0).sum()), values),
-                    )
-                )
+            _append_raw_candidates(
+                candidates,
+                source="fish_ptr",
+                slot=slot,
+                addr=mode_addr,
+                raw=pointer_bytes[same_addr, slot, :],
+                labels=pointer_labels[same_addr],
+            )
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     report.append("")

@@ -10,7 +10,7 @@ from sonar.core.state import BotPhase
 from sonar.vision.matching import TemplateMatch
 
 BAIT_RESTART_ATTEMPTS = 10
-BAIT_RESTART_INTERVAL_SECONDS = 0.5
+BAIT_RESTART_INTERVAL_SECONDS = 1.5
 
 
 class _BotLoader(importlib.abc.Loader):
@@ -74,8 +74,8 @@ def _restart_fishing_after_bait_change(self) -> bool:
 
     for attempt in range(1, bot_module.BAIT_RESTART_ATTEMPTS + 1):
         self._focus_game()
-        self.input_controller.press_key("e")
-        self._log(f"Смена наживки: попытка входа в рыбалку {attempt}/{bot_module.BAIT_RESTART_ATTEMPTS}")
+        if self._press_fishing_entry("Смена наживки"):
+            self._log(f"Смена наживки: попытка входа в рыбалку {attempt}/{bot_module.BAIT_RESTART_ATTEMPTS}")
         self._sleep(bot_module.BAIT_RESTART_INTERVAL_SECONDS)
         self._refresh_triggers()
         if self._is_fishing_stage_active(self._last_triggers):
@@ -130,7 +130,7 @@ def _prepare_fishing_start(self, timeout: float = 12.0) -> str | None:
     self._focus_game()
     initial_matches = self.trigger_monitor.find_detections(self.capture.capture())
     if not self._is_fishing_stage_active(initial_matches):
-        self.input_controller.press_key("e")
+        self._press_fishing_entry("Вход в рыбалку")
         self._sleep_random(bot_module.START_MENU_OPEN_DELAY_SECONDS, bot_module.RANDOM_DELAY_JITTER_SECONDS)
     deadline = time.time() + timeout
     clicked: set[str] = set()
