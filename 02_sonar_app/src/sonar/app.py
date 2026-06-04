@@ -11,9 +11,10 @@ from sonar.paths import LOG_DIR, LOGS_ENABLED
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_logging()
     argv = argv if argv is not None else sys.argv
-    if "--debug" in argv:
+    debug_enabled = "--debug" in argv
+    configure_logging()
+    if debug_enabled:
         os.environ["SONAR_DEBUG_CAPTURE"] = "1"
         os.environ["SONAR_DEBUG_MODE"] = "1"
     ui_argv = [arg for arg in argv if arg != "--debug"]

@@ -1,0 +1,883 @@
+{
+  "summary": {
+    "exe": "P:\\projects\\Majestic\\Sonar\\02_sonar_app\\dist\\The Elder Scrolls V - Skyrim Special Edition\\The Elder Scrolls V - Skyrim Special Edition.exe",
+    "payload_marker_offset": 168016,
+    "compressed_payload_bytes_read": 84488971,
+    "decompressed_payload_bytes": 282576335,
+    "parsed_payload_bytes": 282576335,
+    "entries": 299,
+    "resources": 197,
+    "resource_bytes": 19242785,
+    "resource_top_dirs": {
+      "sonar/resources/app.ico": 1,
+      "sonar/resources/chat_icons": 13,
+      "sonar/resources/fishing": 117,
+      "sonar/resources/fonts": 1,
+      "sonar/resources/icon.ico": 1,
+      "sonar/resources/icon.jpeg": 1,
+      "sonar/resources/icon.png": 1,
+      "sonar/resources/sonar_logo.png": 1,
+      "sonar/resources/sounds": 2,
+      "sonar/resources/streaming": 1,
+      "sonar/resources/tessdata": 2,
+      "sonar/resources/tesseract": 1,
+      "sonar/resources/ui_icons": 55
+    },
+    "resource_extensions": {
+      ".ico": 2,
+      ".jpeg": 1,
+      ".md": 3,
+      ".png": 137,
+      ".svg": 50,
+      ".traineddata": 2,
+      ".wav": 2
+    },
+    "first_entries": [
+      {
+        "name": "__main__.dll",
+        "size": 42573824
+      },
+      {
+        "name": "81d243bd2c585b0f4821__mypyc.pyd",
+        "size": 219136
+      },
+      {
+        "name": "_bz2.pyd",
+        "size": 86896
+      },
+      {
+        "name": "_ctypes.pyd",
+        "size": 127480
+      },
+      {
+        "name": "_decimal.pyd",
+        "size": 262000
+      }
+    ],
+    "last_entries": [
+      {
+        "name": "sonar/resources/ui_icons/telegram_outline_white.svg",
+        "size": 3109
+      },
+      {
+        "name": "sonar/resources/ui_icons/timer.svg",
+        "size": 585
+      },
+      {
+        "name": "sonar/resources/ui_icons/trunk.svg",
+        "size": 908
+      },
+      {
+        "name": "sonar/resources/ui_icons/warning.svg",
+        "size": 659
+      },
+      {
+        "name": "sonar/resources/ui_icons/weigher.svg",
+        "size": 1202
+      }
+    ],
+    "parse_warning": "",
+    "extracted_dir": "P:\\projects\\Majestic\\Sonar\\02_sonar_app\\outputs\\reverse_assets_420c094c3fd",
+    "all_entries": 299,
+    "non_resource_sonar_entries": [
+      {
+        "name": "sonar/sdelete.exe",
+        "size": 211992
+      },
+      {
+        "name": "sonar/secure_wipe.ps1",
+        "size": 1085
+      }
+    ]
+  },
+  "resources": [
+    {
+      "name": "sonar/resources/app.ico",
+      "size": 18220
+    },
+    {
+      "name": "sonar/resources/icon.ico",
+      "size": 62931
+    },
+    {
+      "name": "sonar/resources/icon.jpeg",
+      "size": 133166
+    },
+    {
+      "name": "sonar/resources/icon.png",
+      "size": 426519
+    },
+    {
+      "name": "sonar/resources/sonar_logo.png",
+      "size": 1997460
+    },
+    {
+      "name": "sonar/resources/chat_icons/ballas.png",
+      "size": 6328
+    },
+    {
+      "name": "sonar/resources/chat_icons/bloods.png",
+      "size": 6178
+    },
+    {
+      "name": "sonar/resources/chat_icons/ems.png",
+      "size": 7085
+    },
+    {
+      "name": "sonar/resources/chat_icons/fam.png",
+      "size": 32633
+    },
+    {
+      "name": "sonar/resources/chat_icons/famillies.png",
+      "size": 6180
+    },
+    {
+      "name": "sonar/resources/chat_icons/fib.png",
+      "size": 6200
+    },
+    {
+      "name": "sonar/resources/chat_icons/government.png",
+      "size": 4274
+    },
+    {
+      "name": "sonar/resources/chat_icons/lspd.png",
+      "size": 6274
+    },
+    {
+      "name": "sonar/resources/chat_icons/marabunta.png",
+      "size": 6365
+    },
+    {
+      "name": "sonar/resources/chat_icons/sang.png",
+      "size": 5013
+    },
+    {
+      "name": "sonar/resources/chat_icons/sheriff.png",
+      "size": 6150
+    },
+    {
+      "name": "sonar/resources/chat_icons/vagos.png",
+      "size": 6303
+    },
+    {
+      "name": "sonar/resources/chat_icons/weazle-news.png",
+      "size": 6763
+    },
+    {
+      "name": "sonar/resources/fishing/catch/keep_button.png",
+      "size": 4871
+    },
+    {
+      "name": "sonar/resources/fishing/catch/release_button.png",
+      "size": 3595
+    },
+    {
+      "name": "sonar/resources/fishing/fish/albula.png",
+      "size": 98103
+    },
+    {
+      "name": "sonar/resources/fishing/fish/ancient_gyneria.png",
+      "size": 648216
+    },
+    {
+      "name": "sonar/resources/fishing/fish/barracuda.png",
+      "size": 70340
+    },
+    {
+      "name": "sonar/resources/fishing/fish/bream_leshch.png",
+      "size": 155362
+    },
+    {
+      "name": "sonar/resources/fishing/fish/common_snook.png",
+      "size": 98568
+    },
+    {
+      "name": "sonar/resources/fishing/fish/golavl.png",
+      "size": 109362
+    },
+    {
+      "name": "sonar/resources/fishing/fish/korichnevy_som.png",
+      "size": 131079
+    },
+    {
+      "name": "sonar/resources/fishing/fish/krasny_gorbyl.png",
+      "size": 113302
+    },
+    {
+      "name": "sonar/resources/fishing/fish/krugly_trahinot.png",
+      "size": 100752
+    },
+    {
+      "name": "sonar/resources/fishing/fish/marlin.png",
+      "size": 105372
+    },
+    {
+      "name": "sonar/resources/fishing/fish/obyknovennaya_shchuka.png",
+      "size": 92675
+    },
+    {
+      "name": "sonar/resources/fishing/fish/polosaty_lavrak.png",
+      "size": 124004
+    },
+    {
+      "name": "sonar/resources/fishing/fish/pribrezhny_bass.png",
+      "size": 126033
+    },
+    {
+      "name": "sonar/resources/fishing/fish/raduzhnaya_forel.png",
+      "size": 130834
+    },
+    {
+      "name": "sonar/resources/fishing/fish/rechnoy_okun.png",
+      "size": 140220
+    },
+    {
+      "name": "sonar/resources/fishing/fish/remove.png",
+      "size": 1412
+    },
+    {
+      "name": "sonar/resources/fishing/fish/roach_plotva.png",
+      "size": 119366
+    },
+    {
+      "name": "sonar/resources/fishing/fish/roach_vobla.png",
+      "size": 163452
+    },
+    {
+      "name": "sonar/resources/fishing/fish/rudd_krasnoperka.png",
+      "size": 130300
+    },
+    {
+      "name": "sonar/resources/fishing/fish/ruster.png",
+      "size": 136168
+    },
+    {
+      "name": "sonar/resources/fishing/fish/sazan.png",
+      "size": 144033
+    },
+    {
+      "name": "sonar/resources/fishing/fish/serebryany_karas.png",
+      "size": 143535
+    },
+    {
+      "name": "sonar/resources/fishing/fish/seriola.png",
+      "size": 133160
+    },
+    {
+      "name": "sonar/resources/fishing/fish/som_obyknovennyy.png",
+      "size": 92833
+    },
+    {
+      "name": "sonar/resources/fishing/fish/steelhead_salmon.png",
+      "size": 100404
+    },
+    {
+      "name": "sonar/resources/fishing/fish/sterlet.png",
+      "size": 66956
+    },
+    {
+      "name": "sonar/resources/fishing/fish/sudak_obyknovennyy.png",
+      "size": 119808
+    },
+    {
+      "name": "sonar/resources/fishing/fish/tarpon.png",
+      "size": 99145
+    },
+    {
+      "name": "sonar/resources/fishing/fish/temny_gorbyl.png",
+      "size": 122264
+    },
+    {
+      "name": "sonar/resources/fishing/fish/toksichny_okun.png",
+      "size": 871771
+    },
+    {
+      "name": "sonar/resources/fishing/fish/zerkalny_karp.png",
+      "size": 123678
+    },
+    {
+      "name": "sonar/resources/fishing/fish/zhereh.png",
+      "size": 86119
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/1.png",
+      "size": 316
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/10.png",
+      "size": 2797
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/11.png",
+      "size": 458
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/12.png",
+      "size": 890
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/13.png",
+      "size": 1371
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/14.png",
+      "size": 1957
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/15.png",
+      "size": 3310
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/2.png",
+      "size": 551
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/3.png",
+      "size": 347
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/4.png",
+      "size": 418
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/5.png",
+      "size": 535
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/6.png",
+      "size": 631
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/7.png",
+      "size": 747
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/8.png",
+      "size": 1808
+    },
+    {
+      "name": "sonar/resources/fishing/fish_ocean/9.png",
+      "size": 913
+    },
+    {
+      "name": "sonar/resources/fishing/garbage/bag.png",
+      "size": 14490
+    },
+    {
+      "name": "sonar/resources/fishing/garbage/bag2k.png",
+      "size": 24948
+    },
+    {
+      "name": "sonar/resources/fishing/garbage/corn.png",
+      "size": 9082
+    },
+    {
+      "name": "sonar/resources/fishing/garbage/corn2k.png",
+      "size": 15671
+    },
+    {
+      "name": "sonar/resources/fishing/garbage/eject.png",
+      "size": 1088
+    },
+    {
+      "name": "sonar/resources/fishing/garbage/eject2k.png",
+      "size": 1408
+    },
+    {
+      "name": "sonar/resources/fishing/garbage/pack.png",
+      "size": 1727
+    },
+    {
+      "name": "sonar/resources/fishing/garbage/pack2k.png",
+      "size": 2577
+    },
+    {
+      "name": "sonar/resources/fishing/inventory/environment_text.png",
+      "size": 4366
+    },
+    {
+      "name": "sonar/resources/fishing/inventory/inventory_bag_icon.png",
+      "size": 1096
+    },
+    {
+      "name": "sonar/resources/fishing/inventory/inventory_close.png",
+      "size": 734
+    },
+    {
+      "name": "sonar/resources/fishing/inventory/inventory_marker.png",
+      "size": 2477
+    },
+    {
+      "name": "sonar/resources/fishing/inventory/inventory_text.png",
+      "size": 3302
+    },
+    {
+      "name": "sonar/resources/fishing/inventory/inventory_title.png",
+      "size": 2110
+    },
+    {
+      "name": "sonar/resources/fishing/meal/100%.png",
+      "size": 654
+    },
+    {
+      "name": "sonar/resources/fishing/meal/100%_2k.png",
+      "size": 865
+    },
+    {
+      "name": "sonar/resources/fishing/meal/cocktail.png",
+      "size": 1701
+    },
+    {
+      "name": "sonar/resources/fishing/meal/cocktail2k.png",
+      "size": 2718
+    },
+    {
+      "name": "sonar/resources/fishing/meal/donut.png",
+      "size": 2759
+    },
+    {
+      "name": "sonar/resources/fishing/meal/donut2k.png",
+      "size": 4743
+    },
+    {
+      "name": "sonar/resources/fishing/meal/irp.png",
+      "size": 7895
+    },
+    {
+      "name": "sonar/resources/fishing/meal/irp2k.png",
+      "size": 14046
+    },
+    {
+      "name": "sonar/resources/fishing/meal/use.png",
+      "size": 1217
+    },
+    {
+      "name": "sonar/resources/fishing/meal/use2k.png",
+      "size": 1605
+    },
+    {
+      "name": "sonar/resources/fishing/menu/menu_back.png",
+      "size": 1723
+    },
+    {
+      "name": "sonar/resources/fishing/menu/menu_hide.png",
+      "size": 3266
+    },
+    {
+      "name": "sonar/resources/fishing/overlay/back_hint.png",
+      "size": 1723
+    },
+    {
+      "name": "sonar/resources/fishing/overlay/hide_hint.png",
+      "size": 3266
+    },
+    {
+      "name": "sonar/resources/fishing/result/free_btn.png",
+      "size": 3595
+    },
+    {
+      "name": "sonar/resources/fishing/result/take_btn.png",
+      "size": 4871
+    },
+    {
+      "name": "sonar/resources/fishing/triger/AD.png",
+      "size": 993
+    },
+    {
+      "name": "sonar/resources/fishing/triger/AD_2k.png",
+      "size": 1264
+    },
+    {
+      "name": "sonar/resources/fishing/triger/advantage.png",
+      "size": 618
+    },
+    {
+      "name": "sonar/resources/fishing/triger/advantage2k.png",
+      "size": 697
+    },
+    {
+      "name": "sonar/resources/fishing/triger/boat.png",
+      "size": 320
+    },
+    {
+      "name": "sonar/resources/fishing/triger/boat2k.png",
+      "size": 403
+    },
+    {
+      "name": "sonar/resources/fishing/triger/bubles.png",
+      "size": 411
+    },
+    {
+      "name": "sonar/resources/fishing/triger/bubles_2k.png",
+      "size": 563
+    },
+    {
+      "name": "sonar/resources/fishing/triger/cast_action.png",
+      "size": 3010
+    },
+    {
+      "name": "sonar/resources/fishing/triger/cast_action_2k.png",
+      "size": 4430
+    },
+    {
+      "name": "sonar/resources/fishing/triger/changeBait.png",
+      "size": 2195
+    },
+    {
+      "name": "sonar/resources/fishing/triger/change_boat.png",
+      "size": 441
+    },
+    {
+      "name": "sonar/resources/fishing/triger/change_boat2k.png",
+      "size": 541
+    },
+    {
+      "name": "sonar/resources/fishing/triger/changed_Bait2k.png",
+      "size": 3929
+    },
+    {
+      "name": "sonar/resources/fishing/triger/gear.png",
+      "size": 4088
+    },
+    {
+      "name": "sonar/resources/fishing/triger/gear_2k.png",
+      "size": 5740
+    },
+    {
+      "name": "sonar/resources/fishing/triger/hook_action.png",
+      "size": 2482
+    },
+    {
+      "name": "sonar/resources/fishing/triger/hook_action_2k.png",
+      "size": 3541
+    },
+    {
+      "name": "sonar/resources/fishing/triger/human.png",
+      "size": 339
+    },
+    {
+      "name": "sonar/resources/fishing/triger/human2k.png",
+      "size": 412
+    },
+    {
+      "name": "sonar/resources/fishing/triger/hunger.png",
+      "size": 572
+    },
+    {
+      "name": "sonar/resources/fishing/triger/hunger2k.png",
+      "size": 593
+    },
+    {
+      "name": "sonar/resources/fishing/triger/pereves.png",
+      "size": 2389
+    },
+    {
+      "name": "sonar/resources/fishing/triger/pereves2k.png",
+      "size": 3193
+    },
+    {
+      "name": "sonar/resources/fishing/triger/red.png",
+      "size": 147
+    },
+    {
+      "name": "sonar/resources/fishing/triger/red_2k.png",
+      "size": 158
+    },
+    {
+      "name": "sonar/resources/fishing/triger/start.png",
+      "size": 3182
+    },
+    {
+      "name": "sonar/resources/fishing/triger/start1.png",
+      "size": 3080
+    },
+    {
+      "name": "sonar/resources/fishing/triger/start1_2k.png",
+      "size": 4133
+    },
+    {
+      "name": "sonar/resources/fishing/triger/start2.png",
+      "size": 3006
+    },
+    {
+      "name": "sonar/resources/fishing/triger/start2_2k.png",
+      "size": 3861
+    },
+    {
+      "name": "sonar/resources/fishing/triger/start2k.png",
+      "size": 4174
+    },
+    {
+      "name": "sonar/resources/fishing/triger/start_action.png",
+      "size": 2832
+    },
+    {
+      "name": "sonar/resources/fishing/triger/start_action_2k.png",
+      "size": 4207
+    },
+    {
+      "name": "sonar/resources/fishing/triger/thirst.png",
+      "size": 726
+    },
+    {
+      "name": "sonar/resources/fishing/triger/thirst2k.png",
+      "size": 552
+    },
+    {
+      "name": "sonar/resources/fishing/triger/wait_tension.png",
+      "size": 19616
+    },
+    {
+      "name": "sonar/resources/fishing/triger/wait_tension_2k.png",
+      "size": 25545
+    },
+    {
+      "name": "sonar/resources/fonts/README.md",
+      "size": 266
+    },
+    {
+      "name": "sonar/resources/sounds/bot_start.wav",
+      "size": 59564
+    },
+    {
+      "name": "sonar/resources/sounds/bot_stop.wav",
+      "size": 55724
+    },
+    {
+      "name": "sonar/resources/streaming/README.md",
+      "size": 440
+    },
+    {
+      "name": "sonar/resources/tessdata/eng.traineddata",
+      "size": 4113088
+    },
+    {
+      "name": "sonar/resources/tessdata/rus.traineddata",
+      "size": 3861738
+    },
+    {
+      "name": "sonar/resources/tesseract/README.md",
+      "size": 236
+    },
+    {
+      "name": "sonar/resources/ui_icons/backpack.png",
+      "size": 704395
+    },
+    {
+      "name": "sonar/resources/ui_icons/bait.png",
+      "size": 722632
+    },
+    {
+      "name": "sonar/resources/ui_icons/calendar.svg",
+      "size": 847
+    },
+    {
+      "name": "sonar/resources/ui_icons/chart.svg",
+      "size": 1275
+    },
+    {
+      "name": "sonar/resources/ui_icons/chat_window.svg",
+      "size": 5819
+    },
+    {
+      "name": "sonar/resources/ui_icons/chat_zoom.svg",
+      "size": 14674
+    },
+    {
+      "name": "sonar/resources/ui_icons/circle.svg",
+      "size": 481
+    },
+    {
+      "name": "sonar/resources/ui_icons/clock.svg",
+      "size": 557
+    },
+    {
+      "name": "sonar/resources/ui_icons/copy.svg",
+      "size": 1272
+    },
+    {
+      "name": "sonar/resources/ui_icons/dollar.svg",
+      "size": 753
+    },
+    {
+      "name": "sonar/resources/ui_icons/download.svg",
+      "size": 744
+    },
+    {
+      "name": "sonar/resources/ui_icons/email.svg",
+      "size": 493
+    },
+    {
+      "name": "sonar/resources/ui_icons/eye.svg",
+      "size": 1327
+    },
+    {
+      "name": "sonar/resources/ui_icons/fish.svg",
+      "size": 4610
+    },
+    {
+      "name": "sonar/resources/ui_icons/fish_hook.svg",
+      "size": 553
+    },
+    {
+      "name": "sonar/resources/ui_icons/fish_solid.svg",
+      "size": 2327
+    },
+    {
+      "name": "sonar/resources/ui_icons/fishing_rod.svg",
+      "size": 4242
+    },
+    {
+      "name": "sonar/resources/ui_icons/focus.svg",
+      "size": 1952
+    },
+    {
+      "name": "sonar/resources/ui_icons/food.svg",
+      "size": 922
+    },
+    {
+      "name": "sonar/resources/ui_icons/frame.svg",
+      "size": 783
+    },
+    {
+      "name": "sonar/resources/ui_icons/gauge_10fps.png",
+      "size": 664052
+    },
+    {
+      "name": "sonar/resources/ui_icons/id_card.svg",
+      "size": 2615
+    },
+    {
+      "name": "sonar/resources/ui_icons/info.svg",
+      "size": 531
+    },
+    {
+      "name": "sonar/resources/ui_icons/landing_net.png",
+      "size": 548655
+    },
+    {
+      "name": "sonar/resources/ui_icons/leader.png",
+      "size": 488637
+    },
+    {
+      "name": "sonar/resources/ui_icons/lightning.svg",
+      "size": 497
+    },
+    {
+      "name": "sonar/resources/ui_icons/link.svg",
+      "size": 2405
+    },
+    {
+      "name": "sonar/resources/ui_icons/menu.svg",
+      "size": 1286
+    },
+    {
+      "name": "sonar/resources/ui_icons/monitor.svg",
+      "size": 782
+    },
+    {
+      "name": "sonar/resources/ui_icons/net.svg",
+      "size": 1471
+    },
+    {
+      "name": "sonar/resources/ui_icons/pen.svg",
+      "size": 804
+    },
+    {
+      "name": "sonar/resources/ui_icons/photo.svg",
+      "size": 1227
+    },
+    {
+      "name": "sonar/resources/ui_icons/pijama_bow.svg",
+      "size": 6765
+    },
+    {
+      "name": "sonar/resources/ui_icons/play.svg",
+      "size": 999
+    },
+    {
+      "name": "sonar/resources/ui_icons/play_white.svg",
+      "size": 999
+    },
+    {
+      "name": "sonar/resources/ui_icons/profit.svg",
+      "size": 2279
+    },
+    {
+      "name": "sonar/resources/ui_icons/pulse.svg",
+      "size": 748
+    },
+    {
+      "name": "sonar/resources/ui_icons/reload.svg",
+      "size": 955
+    },
+    {
+      "name": "sonar/resources/ui_icons/scales.svg",
+      "size": 2823
+    },
+    {
+      "name": "sonar/resources/ui_icons/selection_area.svg",
+      "size": 1491
+    },
+    {
+      "name": "sonar/resources/ui_icons/settings.svg",
+      "size": 6409
+    },
+    {
+      "name": "sonar/resources/ui_icons/shield_check.svg",
+      "size": 410
+    },
+    {
+      "name": "sonar/resources/ui_icons/shield_check_white.svg",
+      "size": 410
+    },
+    {
+      "name": "sonar/resources/ui_icons/skip.svg",
+      "size": 864
+    },
+    {
+      "name": "sonar/resources/ui_icons/sound.svg",
+      "size": 495
+    },
+    {
+      "name": "sonar/resources/ui_icons/stop.svg",
+      "size": 511
+    },
+    {
+      "name": "sonar/resources/ui_icons/stop_white.svg",
+      "size": 511
+    },
+    {
+      "name": "sonar/resources/ui_icons/stream.svg",
+      "size": 2190
+    },
+    {
+      "name": "sonar/resources/ui_icons/telegram_color.svg",
+      "size": 1378
+    },
+    {
+      "name": "sonar/resources/ui_icons/telegram_outline.svg",
+      "size": 3120
+    },
+    {
+      "name": "sonar/resources/ui_icons/telegram_outline_white.svg",
+      "size": 3109
+    },
+    {
+      "name": "sonar/resources/ui_icons/timer.svg",
+      "size": 585
+    },
+    {
+      "name": "sonar/resources/ui_icons/trunk.svg",
+      "size": 908
+    },
+    {
+      "name": "sonar/resources/ui_icons/warning.svg",
+      "size": 659
+    },
+    {
+      "name": "sonar/resources/ui_icons/weigher.svg",
+      "size": 1202
+    }
+  ]
+}

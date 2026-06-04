@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+from sonar.core.logging import debug_log
+
 
 PUL = ctypes.POINTER(ctypes.c_ulong)
 INPUT_KEYBOARD = 1
@@ -15,6 +17,7 @@ MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
+BLOCKED_AUTOMATION_KEYS = frozenset({"w"})
 
 SCAN_CODES = {
     "esc": 0x01,
@@ -32,7 +35,6 @@ SCAN_CODES = {
     "backspace": 0x0E,
     "tab": 0x0F,
     "q": 0x10,
-    "w": 0x11,
     "e": 0x12,
     "r": 0x13,
     "t": 0x14,
@@ -159,15 +161,22 @@ class InputController:
         return True
 
     def tap_key_fast(self, key: str, duration: float = 0.003) -> bool:
+        normalized_key = key.lower()
+        if normalized_key in BLOCKED_AUTOMATION_KEYS:
+            debug_log(f"INPUT_BLOCKED action=tap_key_fast key={normalized_key} reason=blocked_automation_key")
+            return False
         if not self.dry_run and not self.is_input_allowed():
+            debug_log(f"INPUT_BLOCKED action=tap_key_fast key={normalized_key} reason=input_not_allowed")
             return False
         if self.dry_run:
             return True
+        debug_log(f"INPUT_KEY_DOWN key={normalized_key} source=tap_key_fast")
         self._send_key(key, key_up=False)
         try:
             if duration > 0:
                 time.sleep(duration)
         finally:
+            debug_log(f"INPUT_KEY_UP key={normalized_key} source=tap_key_fast")
             self._send_key(key, key_up=True)
         return True
 
@@ -188,18 +197,29 @@ class InputController:
         return True
 
     def key_down(self, key: str) -> bool:
+        normalized_key = key.lower()
+        if normalized_key in BLOCKED_AUTOMATION_KEYS:
+            debug_log(f"INPUT_BLOCKED action=key_down key={normalized_key} reason=blocked_automation_key")
+            return False
         if not self.dry_run and not self.is_input_allowed():
+            debug_log(f"INPUT_BLOCKED action=key_down key={normalized_key} reason=input_not_allowed")
             return False
         if not self.dry_run:
+            debug_log(f"INPUT_KEY_DOWN key={normalized_key} source=key_down")
             self._send_key(key, key_up=False)
         return True
 
     def key_up(self, key: str) -> bool:
+        normalized_key = key.lower()
+        if normalized_key in BLOCKED_AUTOMATION_KEYS:
+            debug_log(f"INPUT_BLOCKED action=key_up key={normalized_key} reason=blocked_automation_key")
+            return False
         if not self.dry_run:
+            debug_log(f"INPUT_KEY_UP key={normalized_key} source=key_up")
             self._send_key(key, key_up=True)
         return True
 
-    def release_all_keys(self, keys: tuple[str, ...] = ("w", "a", "s", "d", "e", "q", "shift", "space", "ctrl", "alt")) -> None:
+    def release_all_keys(self, keys: tuple[str, ...] = ("a", "s", "d", "e", "q", "shift", "space", "ctrl", "alt")) -> None:
         for key in keys:
             self.key_up(key)
 
@@ -208,7 +228,11 @@ class InputController:
         time.sleep(seconds)
 
     def _send_key(self, key: str, key_up: bool) -> None:
-        scan = SCAN_CODES.get(key.lower())
+        normalized_key = key.lower()
+        if normalized_key in BLOCKED_AUTOMATION_KEYS:
+            debug_log(f"INPUT_BLOCKED action=_send_key key={normalized_key} reason=blocked_automation_key")
+            return
+        scan = SCAN_CODES.get(normalized_key)
         if scan is None:
             raise ValueError(f"Unsupported key: {key}")
         flags = KEYEVENTF_SCANCODE | (KEYEVENTF_KEYUP if key_up else 0)

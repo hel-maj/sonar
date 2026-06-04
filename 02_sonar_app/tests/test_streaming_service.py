@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import shutil
 import threading
 import time
@@ -92,6 +93,38 @@ def test_chat_mode_stays_enabled_when_exit_callback_fails(tmp_path):
 
     assert snapshot.chat_mode_enabled is True
     assert snapshot.error == "close failed"
+
+
+def test_forced_chat_mode_disable_clears_mode_when_exit_callback_fails(tmp_path):
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_exit_callback=lambda: ChatActionResult(False, "close failed"),
+    )
+    service._chat_mode_enabled = True
+
+    snapshot = service.disable_chat_mode(force=True)
+
+    assert snapshot.chat_mode_enabled is False
+    assert snapshot.error == "close failed"
+
+
+def test_stop_stream_exits_chat_mode_before_runtime_cleanup(tmp_path):
+    calls: list[str] = []
+    service = StreamingService(
+        temp_root=tmp_path,
+        prewarm_binaries=False,
+        chat_exit_callback=lambda: calls.append("close") or ChatActionResult(True, "closed"),
+    )
+    service._active = True
+    service._status = "online"
+    service._chat_mode_enabled = True
+
+    service.stop_stream("test")
+
+    assert calls == ["close"]
+    assert service.snapshot().chat_mode_enabled is False
+    assert service.snapshot().status == "offline"
 
 
 def test_snapshot_hides_chat_tabs_until_input_is_active(tmp_path):
@@ -365,6 +398,231 @@ def test_hls_playlist_ready_requires_segment_file(tmp_path):
     (hls_dir / "seg_00000.ts").write_bytes(b"segment")
 
     assert StreamingService._hls_playlist_ready(hls_dir) is True
+
+
+def test_cloudflared_command_uses_http2_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("SONAR_STREAM_CLOUDFLARED_PROTOCOL", raising=False)
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._local_url = "http://127.0.0.1:12345"
+
+    command = service._build_cloudflared_command(Path("cloudflared.exe"))
+
+    assert command == [
+        "cloudflared.exe",
+        "tunnel",
+        "--edge-ip-version",
+        "4",
+        "--protocol",
+        "http2",
+        "--url",
+        "http://127.0.0.1:12345",
+    ]
+
+
+def test_cloudflared_protocol_can_be_overridden(tmp_path, monkeypatch):
+    monkeypatch.setenv("SONAR_STREAM_CLOUDFLARED_PROTOCOL", "quic")
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._local_url = "http://127.0.0.1:12345"
+
+    command = service._build_cloudflared_command(Path("cloudflared.exe"))
+
+    assert command[command.index("--protocol") + 1] == "quic"
+
+
+def test_cloudflared_edge_ip_version_can_be_overridden(tmp_path, monkeypatch):
+    monkeypatch.setenv("SONAR_STREAM_CLOUDFLARED_EDGE_IP_VERSION", "auto")
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._local_url = "http://127.0.0.1:12345"
+
+    command = service._build_cloudflared_command(Path("cloudflared.exe"))
+
+    assert command[command.index("--edge-ip-version") + 1] == "auto"
+
+
+def test_tunnelmole_command_uses_local_port(tmp_path):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._local_url = "http://127.0.0.1:12345"
+
+    command = service._build_tunnelmole_command(["tmole"])
+
+    assert command == ["tmole", "12345"]
+
+
+def test_cloudflared_after_three_failed_starts_falls_back_to_tunnelmole(tmp_path, monkeypatch):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._active = True
+    service._runtime_token = "runtime-token"
+    fallback_tokens: list[str] = []
+    monkeypatch.setattr(service, "_resolve_cloudflared_binary", lambda wait_timeout=None: Path("cloudflared.exe"))
+    monkeypatch.setattr(service, "_start_cloudflared_process_locked", lambda cloudflared: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(service, "_start_tunnelmole_worker", lambda token: fallback_tokens.append(token))
+
+    service._start_tunnel_worker("runtime-token")
+    service._start_tunnel_worker("runtime-token")
+    service._start_tunnel_worker("runtime-token")
+
+    assert service._cloudflared_start_attempts == 3
+    assert fallback_tokens == ["runtime-token"]
+
+
+def test_cloudflared_url_waits_for_registered_connection(tmp_path):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._active = True
+    service._local_url = "http://127.0.0.1:12345"
+    service._public_url = service._local_url
+
+    class FakeProcess:
+        stdout = iter([
+            "|  https://example.trycloudflare.com  |\n",
+        ])
+
+        def poll(self):
+            return None
+
+    process = FakeProcess()
+    service._cloudflared_process = process
+
+    service._watch_cloudflared_output(process, io.StringIO())
+
+    assert service._public_url == "http://127.0.0.1:12345"
+
+
+def test_cloudflared_url_publishes_after_registered_connection(tmp_path, monkeypatch):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._active = True
+    service._local_url = "http://127.0.0.1:12345"
+    service._public_url = service._local_url
+    monkeypatch.setattr(service, "_schedule_public_tunnel_publish", lambda process, url: setattr(service, "_public_url", url))
+
+    class FakeProcess:
+        stdout = iter([
+            "|  https://example.trycloudflare.com  |\n",
+            "INF Registered tunnel connection connIndex=0 protocol=http2\n",
+        ])
+
+        def poll(self):
+            return None
+
+    process = FakeProcess()
+    service._cloudflared_process = process
+
+    service._watch_cloudflared_output(process, io.StringIO())
+
+    assert service._public_url == "https://example.trycloudflare.com"
+
+
+def test_tunnelmole_url_publishes_when_announced(tmp_path, monkeypatch):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._active = True
+    service._local_url = "http://127.0.0.1:12345"
+    service._public_url = service._local_url
+    service._tunnel_provider = "tunnelmole"
+    monkeypatch.setattr(service, "_schedule_public_tunnel_publish", lambda process, url: setattr(service, "_public_url", url))
+
+    class FakeProcess:
+        stdout = iter([
+            "https://blue.tunnelmole.net is forwarding to localhost:12345\n",
+        ])
+
+        def poll(self):
+            return None
+
+    process = FakeProcess()
+    service._cloudflared_process = process
+
+    service._watch_tunnelmole_output(process, io.StringIO())
+
+    assert service._public_url == "https://blue.tunnelmole.net"
+
+
+def test_cloudflared_transient_serve_error_keeps_public_url(tmp_path, monkeypatch):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._active = True
+    service._local_url = "http://127.0.0.1:12345"
+    service._public_url = service._local_url
+    monkeypatch.setattr(service, "_schedule_public_tunnel_publish", lambda process, url: setattr(service, "_public_url", url))
+
+    class FakeProcess:
+        stdout = iter([
+            "|  https://example.trycloudflare.com  |\n",
+            "INF Registered tunnel connection connIndex=0 protocol=http2\n",
+            'ERR Serve tunnel error error="context canceled"\n',
+        ])
+
+        def poll(self):
+            return None
+
+    process = FakeProcess()
+    service._cloudflared_process = process
+
+    service._watch_cloudflared_output(process, io.StringIO())
+
+    assert service._public_url == "https://example.trycloudflare.com"
+
+
+def test_cloudflared_process_exit_clears_public_url(tmp_path):
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._active = True
+    service._local_url = "http://127.0.0.1:12345"
+    service._public_url = "https://example.trycloudflare.com"
+
+    class FakeProcess:
+        stdout = iter([])
+
+        def poll(self):
+            return 1
+
+    process = FakeProcess()
+    service._cloudflared_process = process
+
+    service._watch_cloudflared_output(process, io.StringIO())
+
+    assert service._public_url == "http://127.0.0.1:12345"
+
+
+def test_cloudflared_url_readiness_timeout_restarts_tunnel(tmp_path, monkeypatch):
+    monkeypatch.setattr(stream_service, "CLOUDFLARED_PUBLIC_URL_READY_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(stream_service, "CLOUDFLARED_PUBLIC_URL_READY_POLL_SECONDS", 0.001)
+    monkeypatch.setattr(stream_service, "CLOUDFLARED_PUBLIC_URL_RESTART_BACKOFF_SECONDS", 0.0)
+    service = StreamingService(temp_root=tmp_path, prewarm_binaries=False)
+    service._active = True
+    service._runtime_token = "runtime-token"
+    service._local_url = "http://127.0.0.1:12345"
+    service._public_url = service._local_url
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+    process = FakeProcess()
+    service._cloudflared_process = process
+    monkeypatch.setattr(service, "_public_tunnel_url_check", lambda url: (False, "http_error=530"))
+    terminated: list[object] = []
+    restarted: list[str] = []
+    monkeypatch.setattr(service, "_terminate_process", lambda proc: terminated.append(proc))
+    monkeypatch.setattr(service, "_start_tunnel_worker", lambda token: restarted.append(token))
+
+    service._publish_public_tunnel_when_ready(process, "https://example.trycloudflare.com")
+
+    assert terminated == [process]
+    assert restarted == ["runtime-token"]
+    assert service._cloudflared_process is None
+    assert service._public_url == "http://127.0.0.1:12345"
+
+
+def test_cloudflared_url_check_rejects_530_from_curl(monkeypatch):
+    class FakeResult:
+        stdout = "530"
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(stream_service.shutil, "which", lambda command: "curl.exe" if command == "curl.exe" else None)
+    monkeypatch.setattr(stream_service.subprocess, "run", lambda *args, **kwargs: FakeResult())
+
+    reachable, detail = StreamingService._public_tunnel_url_check("https://example.trycloudflare.com")
+
+    assert reachable is False
+    assert "status=530" in detail
 
 
 def test_resolve_binary_copies_bundled_exe_to_runtime_temp(tmp_path, monkeypatch):

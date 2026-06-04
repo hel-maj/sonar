@@ -21,7 +21,7 @@ def _load_uploads():
 
 def test_iter_build_archives_accepts_only_named_build_zips(tmp_path):
     uploads = _load_uploads()
-    key = "a" * 64
+    key = "a" * 11
     valid = tmp_path / f"{key}-Game.exe.zip"
     invalid = tmp_path / "Game.zip"
     nested = tmp_path / "nested" / f"{key}-Nested.exe.zip"

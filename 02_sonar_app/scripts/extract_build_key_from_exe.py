@@ -11,8 +11,8 @@ from typing import BinaryIO
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUILD_MAP = APP_ROOT.parent / "config" / "sonar_build_keys.json"
-BUILD_KEY_RE = re.compile(rb"(?<![0-9A-Fa-f])[0-9A-Fa-f]{64}(?![0-9A-Fa-f])")
-TEXT_BUILD_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
+BUILD_KEY_RE = re.compile(rb"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{11}|[0-9A-Fa-f]{64})(?![0-9A-Fa-f])")
+TEXT_BUILD_KEY_RE = re.compile(r"^(?:[0-9a-f]{11}|[0-9a-f]{64})$")
 
 
 @dataclass(frozen=True, slots=True)

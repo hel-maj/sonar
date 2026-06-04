@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
+from sonar.core.logging import debug_log
 from sonar.paths import CONFIG_DIR, PROJECT_DIR, RESOURCE_DIR
 from sonar.security.runtime import decrypt_json_literal, decrypt_text_literal
 from sonar.streaming.chat import CHAT_COMMANDS, ChatActionResult, ChatCommand, ChatDetection, ChatTab
@@ -30,6 +31,9 @@ from sonar.vision.geometry import Rect
 VIEWER_TIMEOUT_SECONDS = 300.0
 STREAM_TEMP_PREFIX = "sonar-stream-"
 CLOUDFLARED_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
+TUNNELMOLE_URL_RE = re.compile(r"https?://[a-z0-9-]+\.tunnelmole\.(?:net|com)", re.IGNORECASE)
+CLOUDFLARED_REGISTERED_RE = re.compile(r"\bRegistered tunnel connection\b", re.IGNORECASE)
+ARGOTUNNEL_DNS_ERROR_RE = re.compile(r"\bFailed to initialize DNS local resolver\b", re.IGNORECASE)
 STREAMING_RESOURCE_DIR = RESOURCE_DIR / "streaming"
 CHAT_ICON_DIR = RESOURCE_DIR / "chat_icons"
 STREAMING_CACHE_DIR = CONFIG_DIR / "streaming"
@@ -43,6 +47,13 @@ HLS_READY_POLL_SECONDS = 0.1
 DEFAULT_STREAM_FPS = 30
 LOW_FPS_STREAM_FPS = 10
 SNAPSHOT_MODE_INTERVAL_MS = int(1000 / LOW_FPS_STREAM_FPS)
+CLOUDFLARED_DEFAULT_PROTOCOL = "http2"
+CLOUDFLARED_DEFAULT_EDGE_IP_VERSION = "4"
+CLOUDFLARED_PUBLIC_URL_READY_TIMEOUT_SECONDS = 60.0
+CLOUDFLARED_PUBLIC_URL_READY_POLL_SECONDS = 0.5
+CLOUDFLARED_PUBLIC_URL_CHECK_TIMEOUT_SECONDS = 3.0
+CLOUDFLARED_PUBLIC_URL_RESTART_BACKOFF_SECONDS = 2.0
+CLOUDFLARED_MAX_START_ATTEMPTS = 3
 CHAT_MEMORY_SCAN_INTERVAL_SECONDS = 2.0
 CHAT_MEMORY_SCAN_TIMEOUT_SECONDS = 30.0
 CHAT_MEMORY_LATEST_STALE_GRACE_SECONDS = 1.0
@@ -1380,6 +1391,8 @@ class StreamingService:
         self._server_thread: threading.Thread | None = None
         self._ffmpeg_process: subprocess.Popen | None = None
         self._cloudflared_process: subprocess.Popen | None = None
+        self._tunnel_provider = ""
+        self._cloudflared_start_attempts = 0
         self._audio_fallback_video_only = False
         self._monitor_thread: threading.Thread | None = None
         self._start_thread: threading.Thread | None = None
@@ -1416,6 +1429,7 @@ class StreamingService:
             return True
 
     def stop_stream(self, reason: str = "manual") -> None:
+        self._disable_chat_mode_before_stream_stop()
         with self._lock:
             if not self._active and self._status == "offline":
                 return
@@ -1423,6 +1437,7 @@ class StreamingService:
             self._stop_runtime_locked(clean_temp=True)
 
     def shutdown(self) -> None:
+        self._disable_chat_mode_before_stream_stop()
         with self._lock:
             self._stop_runtime_locked(clean_temp=True)
         shutil.rmtree(self._runtime_dir, ignore_errors=True)
@@ -1547,13 +1562,13 @@ class StreamingService:
         self._refresh_chat_memory_if_needed(force=True)
         return self.snapshot()
 
-    def disable_chat_mode(self) -> StreamSnapshot:
+    def disable_chat_mode(self, *, force: bool = False) -> StreamSnapshot:
         result: ChatActionResult | ChatDetection | None = None
         if self.chat_exit_callback is not None:
             with self._chat_action_lock:
                 result = self.chat_exit_callback()
         with self._lock:
-            self._chat_mode_enabled = isinstance(result, ChatActionResult) and not result.ok
+            self._chat_mode_enabled = not force and isinstance(result, ChatActionResult) and not result.ok
             self._apply_chat_result_locked(result)
             if not self._chat_mode_enabled:
                 self._chat_memory_loading = False
@@ -1564,6 +1579,12 @@ class StreamingService:
         if enabled:
             return self.enable_chat_mode()
         return self.disable_chat_mode()
+
+    def _disable_chat_mode_before_stream_stop(self) -> None:
+        with self._lock:
+            chat_mode_enabled = self._chat_mode_enabled
+        if chat_mode_enabled:
+            self.disable_chat_mode(force=True)
 
     def send_chat_message(self, tab_id: str | None, message: str) -> StreamSnapshot:
         if self.chat_send_callback is None:
@@ -1973,9 +1994,12 @@ class StreamingService:
         self._last_viewer_activity_at = None
         self._local_url = None
         self._public_url = None
+        self._tunnel_provider = ""
+        self._cloudflared_start_attempts = 0
         self._temp_dir = self.temp_root / f"{STREAM_TEMP_PREFIX}{uuid.uuid4().hex}"
         self._hls_dir = self._temp_dir / "hls"
         self._hls_dir.mkdir(parents=True, exist_ok=True)
+        self._log(f"Stream link: new runtime temp_dir={self._temp_dir} hls_dir={self._hls_dir}")
 
     def _prepare_binaries_worker(self) -> None:
         with self._binary_prepare_lock:
@@ -2079,17 +2103,67 @@ class StreamingService:
                 self._status = "error"
 
     def _start_tunnel_worker(self, token: str) -> None:
+        with self._lock:
+            start_tunnelmole = self._cloudflared_start_attempts >= CLOUDFLARED_MAX_START_ATTEMPTS
+            if start_tunnelmole:
+                self._log("cloudflared: max start attempts reached, switching to tunnelmole")
+        if start_tunnelmole:
+            self._start_tunnelmole_worker(token)
+            return
+
+        self._log(f"Stream link: resolving cloudflared token={token}")
         cloudflared = self._resolve_cloudflared_binary(wait_timeout=None)
         if cloudflared is None:
+            fallback_token: str | None = None
+            with self._lock:
+                if token == self._runtime_token and self._active:
+                    self._cloudflared_start_attempts = CLOUDFLARED_MAX_START_ATTEMPTS
+                    fallback_token = token
+            if fallback_token is not None:
+                self._start_tunnelmole_worker(fallback_token)
             self._log("cloudflared не удалось подготовить автоматически, ссылка будет локальной")
+            return
+        self._log(f"Stream link: cloudflared binary={cloudflared}")
+        fallback_token: str | None = None
+        with self._lock:
+            if token != self._runtime_token or not self._active:
+                self._log(f"Stream link: cloudflared start skipped token={token} active={self._active}")
+                return
+            if self._cloudflared_process is not None and self._cloudflared_process.poll() is None:
+                provider = self._tunnel_provider or "cloudflared"
+                self._log(f"Stream link: {provider} already running pid={getattr(self._cloudflared_process, 'pid', None)}")
+                return
+            try:
+                self._cloudflared_start_attempts += 1
+                self._start_cloudflared_process_locked(cloudflared)
+            except Exception as exc:
+                self._cloudflared_process = None
+                self._tunnel_provider = ""
+                if self._cloudflared_start_attempts >= CLOUDFLARED_MAX_START_ATTEMPTS:
+                    self._log("cloudflared: switching to tunnelmole after failed start")
+                    fallback_token = token
+                self._log(f"cloudflared не запустился: {exc}")
+
+        if fallback_token is not None:
+            self._start_tunnelmole_worker(fallback_token)
+
+    def _start_tunnelmole_worker(self, token: str) -> None:
+        command_prefix = self._resolve_tunnelmole_command()
+        if command_prefix is None:
+            self._log("tunnelmole: tmole/tunnelmole/npx not found, keeping local stream URL")
             return
         with self._lock:
             if token != self._runtime_token or not self._active:
+                self._log(f"Stream link: tunnelmole start skipped token={token} active={self._active}")
+                return
+            if self._cloudflared_process is not None and self._cloudflared_process.poll() is None:
+                provider = self._tunnel_provider or "tunnel"
+                self._log(f"Stream link: {provider} already running pid={getattr(self._cloudflared_process, 'pid', None)}")
                 return
             try:
-                self._start_cloudflared_process_locked(cloudflared)
+                self._start_tunnelmole_process_locked(command_prefix)
             except Exception as exc:
-                self._log(f"cloudflared не запустился: {exc}")
+                self._log(f"tunnelmole: failed to start: {exc}")
 
     def _wait_for_hls_ready(self, token: str) -> None:
         deadline = time.monotonic() + HLS_READY_TIMEOUT_SECONDS
@@ -2133,6 +2207,7 @@ class StreamingService:
         port = int(self._httpd.server_address[1])
         self._local_url = f"http://127.0.0.1:{port}"
         self._public_url = self._local_url
+        self._log(f"Stream link: local origin ready url={self._local_url}")
         self._server_thread = threading.Thread(target=self._httpd.serve_forever, name="sonar-stream-http", daemon=True)
         self._server_thread.start()
 
@@ -2195,9 +2270,12 @@ class StreamingService:
         if self._local_url is None:
             return
         log_file = self._open_log_file_locked("cloudflared.log")
-        command = [str(cloudflared), "tunnel", "--url", self._local_url]
+        command = self._build_cloudflared_command(cloudflared)
+        self._log(f"cloudflared: starting command={self._format_command_for_log(command)}")
         process = self._popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         self._cloudflared_process = process
+        self._tunnel_provider = "cloudflared"
+        self._log(f"cloudflared: process started pid={getattr(process, 'pid', None)} origin={self._local_url}")
         threading.Thread(
             target=self._watch_cloudflared_output,
             args=(process, log_file),
@@ -2205,10 +2283,78 @@ class StreamingService:
             daemon=True,
         ).start()
 
+    def _build_cloudflared_command(self, cloudflared: Path) -> list[str]:
+        protocol = (
+            os.environ.get("SONAR_STREAM_CLOUDFLARED_PROTOCOL", CLOUDFLARED_DEFAULT_PROTOCOL).strip()
+            or CLOUDFLARED_DEFAULT_PROTOCOL
+        )
+        edge_ip_version = (
+            os.environ.get("SONAR_STREAM_CLOUDFLARED_EDGE_IP_VERSION", CLOUDFLARED_DEFAULT_EDGE_IP_VERSION).strip()
+            or CLOUDFLARED_DEFAULT_EDGE_IP_VERSION
+        )
+        return [
+            str(cloudflared),
+            "tunnel",
+            "--edge-ip-version",
+            edge_ip_version,
+            "--protocol",
+            protocol,
+            "--url",
+            self._local_url or "",
+        ]
+
+    def _resolve_tunnelmole_command(self) -> list[str] | None:
+        env_path = os.environ.get("SONAR_STREAM_TUNNELMOLE_PATH", "").strip()
+        if env_path:
+            explicit = Path(env_path)
+            if explicit.exists():
+                return [str(explicit)]
+            found = shutil.which(env_path)
+            if found:
+                return [found]
+        for name in ("tmole", "tunnelmole"):
+            found = shutil.which(name)
+            if found:
+                return [found]
+        if os.environ.get("SONAR_STREAM_TUNNELMOLE_DISABLE_NPX") == "1":
+            return None
+        npx = shutil.which("npx.cmd") or shutil.which("npx")
+        if npx:
+            return [npx, "-y", "tunnelmole"]
+        return None
+
+    def _start_tunnelmole_process_locked(self, command_prefix: list[str]) -> None:
+        if self._local_url is None:
+            return
+        log_file = self._open_log_file_locked("tunnelmole.log")
+        command = self._build_tunnelmole_command(command_prefix)
+        self._log(f"tunnelmole: starting command={self._format_command_for_log(command)}")
+        process = self._popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self._cloudflared_process = process
+        self._tunnel_provider = "tunnelmole"
+        self._log(f"tunnelmole: process started pid={getattr(process, 'pid', None)} origin={self._local_url}")
+        threading.Thread(
+            target=self._watch_tunnelmole_output,
+            args=(process, log_file),
+            name="sonar-tunnelmole",
+            daemon=True,
+        ).start()
+
+    def _build_tunnelmole_command(self, command_prefix: list[str]) -> list[str]:
+        parsed = urlparse(self._local_url or "")
+        if parsed.port is None:
+            raise RuntimeError(f"Cannot determine local stream port from {self._local_url!r}")
+        return [*command_prefix, str(parsed.port)]
+
+    @staticmethod
+    def _format_command_for_log(command: list[str]) -> str:
+        return " ".join(f'"{part}"' if " " in part else part for part in command)
+
     def _watch_cloudflared_output(self, process: subprocess.Popen, log_file) -> None:
         stream = process.stdout
         if stream is None:
             return
+        pending_public_url = ""
         try:
             for line in stream:
                 try:
@@ -2218,10 +2364,181 @@ class StreamingService:
                     pass
                 match = CLOUDFLARED_URL_RE.search(line)
                 if match:
-                    with self._lock:
-                        self._public_url = match.group(0).rstrip("/")
+                    pending_public_url = match.group(0).rstrip("/")
+                    self._log(f"cloudflared: candidate quick tunnel URL announced url={pending_public_url}")
+                    continue
+                if CLOUDFLARED_REGISTERED_RE.search(line) and pending_public_url:
+                    self._log(f"cloudflared: registered connection url={pending_public_url}")
+                    self._schedule_public_tunnel_publish(process, pending_public_url)
+                    continue
+                if ARGOTUNNEL_DNS_ERROR_RE.search(line):
+                    self._log(f"cloudflared: Argo DNS resolver failed line={line.strip()}")
+                    continue
         except Exception as exc:
             self._log(f"cloudflared output error: {exc}")
+        finally:
+            with self._lock:
+                if self._cloudflared_process is process and process.poll() is not None:
+                    self._log(f"cloudflared: process exited returncode={process.poll()}")
+                    self._clear_public_tunnel_url_locked()
+
+    def _watch_tunnelmole_output(self, process: subprocess.Popen, log_file) -> None:
+        stream = process.stdout
+        if stream is None:
+            return
+        published_urls: set[str] = set()
+        try:
+            for line in stream:
+                try:
+                    log_file.write(line.encode("utf-8", errors="replace") if "b" in getattr(log_file, "mode", "") else line)
+                    log_file.flush()
+                except Exception:
+                    pass
+                for match in TUNNELMOLE_URL_RE.finditer(line):
+                    public_url = match.group(0).rstrip("/")
+                    if public_url in published_urls:
+                        continue
+                    published_urls.add(public_url)
+                    self._log(f"tunnelmole: public URL announced url={public_url}")
+                    self._schedule_public_tunnel_publish(process, public_url)
+        except Exception as exc:
+            self._log(f"tunnelmole output error: {exc}")
+        finally:
+            with self._lock:
+                if self._cloudflared_process is process and process.poll() is not None:
+                    self._log(f"tunnelmole: process exited returncode={process.poll()}")
+                    self._clear_public_tunnel_url_locked()
+
+    def _clear_public_tunnel_url_locked(self) -> None:
+        if self._is_public_tunnel_url(self._public_url):
+            self._log(f"Stream link: clearing public URL url={self._public_url} fallback={self._local_url}")
+            self._public_url = self._local_url
+
+    @staticmethod
+    def _is_public_tunnel_url(url: str | None) -> bool:
+        if not url:
+            return False
+        lowered = url.lower()
+        return "trycloudflare.com" in lowered or ".tunnelmole." in lowered
+
+    def _schedule_public_tunnel_publish(self, process: subprocess.Popen, public_url: str) -> None:
+        self._log(f"Stream link: scheduling public URL readiness check url={public_url}")
+        threading.Thread(
+            target=self._publish_public_tunnel_when_ready,
+            args=(process, public_url),
+            name="sonar-cloudflared-url-check",
+            daemon=True,
+        ).start()
+
+    def _publish_public_tunnel_when_ready(self, process: subprocess.Popen, public_url: str) -> None:
+        deadline = time.monotonic() + CLOUDFLARED_PUBLIC_URL_READY_TIMEOUT_SECONDS
+        attempt = 0
+        while time.monotonic() < deadline:
+            attempt += 1
+            with self._lock:
+                if self._cloudflared_process is not process or not self._active:
+                    self._log(f"Stream link: public URL check cancelled url={public_url} attempt={attempt}")
+                    return
+            reachable, detail = self._public_tunnel_url_check(public_url)
+            if reachable:
+                with self._lock:
+                    if self._cloudflared_process is process and self._active:
+                        self._public_url = public_url
+                        provider = self._tunnel_provider or "tunnel"
+                        if provider == "cloudflared":
+                            self._cloudflared_start_attempts = 0
+                        self._log(f"Stream link: public URL ready provider={provider} url={public_url} attempt={attempt} detail={detail}")
+                return
+            self._log(f"Stream link: public URL not ready url={public_url} attempt={attempt} detail={detail}")
+            time.sleep(CLOUDFLARED_PUBLIC_URL_READY_POLL_SECONDS)
+        self._log(f"Stream link: public URL readiness timeout url={public_url}")
+        self._restart_cloudflared_after_bad_public_url(process, public_url, "readiness timeout")
+
+    def _restart_cloudflared_after_bad_public_url(self, process: subprocess.Popen, public_url: str, reason: str) -> None:
+        token: str | None = None
+        provider = "cloudflared"
+        fallback_to_tunnelmole = False
+        with self._lock:
+            if self._cloudflared_process is not process or not self._active:
+                self._log(f"cloudflared: restart skipped for stale URL url={public_url} reason={reason}")
+                return
+            token = self._runtime_token
+            provider = self._tunnel_provider or "cloudflared"
+            if provider == "cloudflared":
+                fallback_to_tunnelmole = self._cloudflared_start_attempts >= CLOUDFLARED_MAX_START_ATTEMPTS
+            self._log(f"{provider}: restarting after unusable public URL url={public_url} reason={reason}")
+            self._cloudflared_process = None
+            self._tunnel_provider = ""
+            self._clear_public_tunnel_url_locked()
+        self._terminate_process(process)
+        if token is None:
+            return
+        time.sleep(CLOUDFLARED_PUBLIC_URL_RESTART_BACKOFF_SECONDS)
+        if fallback_to_tunnelmole:
+            self._log("cloudflared: switching to tunnelmole after public URL failures")
+            self._start_tunnelmole_worker(token)
+        elif provider == "tunnelmole":
+            self._start_tunnelmole_worker(token)
+        else:
+            self._start_tunnel_worker(token)
+
+    @staticmethod
+    def _public_tunnel_url_check(public_url: str) -> tuple[bool, str]:
+        target = f"{public_url.rstrip('/')}/live/"
+        curl = shutil.which("curl.exe") or shutil.which("curl")
+        if curl:
+            return StreamingService._public_tunnel_url_check_with_curl(curl, target)
+        try:
+            request = urllib.request.Request(
+                target,
+                headers={"User-Agent": "Sonar-stream-check/1.0"},
+            )
+            with urllib.request.urlopen(request, timeout=CLOUDFLARED_PUBLIC_URL_CHECK_TIMEOUT_SECONDS) as response:
+                status = int(getattr(response, "status", 200))
+                return 200 <= status < 500, f"status={status}"
+        except urllib.error.HTTPError as exc:
+            return False, f"http_error={exc.code}"
+        except (OSError, urllib.error.URLError, ValueError) as exc:
+            return False, f"error={type(exc).__name__}: {exc}"
+
+    @staticmethod
+    def _public_tunnel_url_check_with_curl(curl: str, target: str) -> tuple[bool, str]:
+        command = [
+            curl,
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            str(CLOUDFLARED_PUBLIC_URL_CHECK_TIMEOUT_SECONDS),
+            "--output",
+            os.devnull,
+            "--write-out",
+            "%{http_code}",
+            target,
+        ]
+        try:
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=CLOUDFLARED_PUBLIC_URL_CHECK_TIMEOUT_SECONDS + 1.0,
+                creationflags=creationflags,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return False, f"curl_error={type(exc).__name__}: {exc}"
+        status_text = (result.stdout or "").strip()[-3:]
+        try:
+            status = int(status_text)
+        except ValueError:
+            status = 0
+        if 200 <= status < 500:
+            return True, f"status={status} checker=curl"
+        detail = (result.stderr or "").strip().replace("\r", " ").replace("\n", " ")
+        if detail:
+            detail = detail[:240]
+            return False, f"status={status} curl_exit={result.returncode} detail={detail}"
+        return False, f"status={status} curl_exit={result.returncode}"
 
     def _restart_ffmpeg_locked(self) -> None:
         token = self._runtime_token
@@ -2277,6 +2594,8 @@ class StreamingService:
             should_stop = False
             game_missing = False
             restart_needed = False
+            restart_tunnel_token: str | None = None
+            restart_tunnelmole_token: str | None = None
             with self._lock:
                 if self._active and self._should_auto_stop_locked():
                     should_stop = True
@@ -2287,6 +2606,22 @@ class StreamingService:
                 ):
                     self._log("FFmpeg завершился, перезапускаю стрим")
                     restart_needed = True
+                if (
+                    self._active
+                    and self._cloudflared_process
+                    and self._cloudflared_process.poll() is not None
+                ):
+                    provider = self._tunnel_provider or "cloudflared"
+                    self._log(f"{provider} ended, restarting tunnel")
+                    self._cloudflared_process = None
+                    self._tunnel_provider = ""
+                    self._clear_public_tunnel_url_locked()
+                    if provider == "cloudflared" and self._cloudflared_start_attempts >= CLOUDFLARED_MAX_START_ATTEMPTS:
+                        restart_tunnelmole_token = self._runtime_token
+                    elif provider == "tunnelmole":
+                        restart_tunnelmole_token = self._runtime_token
+                    else:
+                        restart_tunnel_token = self._runtime_token
                 active = self._active
                 game_window_available_callback = self.game_window_available_callback
             if active and game_window_available_callback is not None and not game_window_available_callback():
@@ -2296,6 +2631,10 @@ class StreamingService:
                 continue
             if restart_needed:
                 self._restart_ffmpeg()
+            if restart_tunnel_token is not None:
+                self._start_tunnel_worker(restart_tunnel_token)
+            if restart_tunnelmole_token is not None:
+                self._start_tunnelmole_worker(restart_tunnelmole_token)
             if should_stop:
                 self.stop_stream("нет зрителей 5 минут")
 
@@ -2318,6 +2657,8 @@ class StreamingService:
         self._terminate_process(self._cloudflared_process)
         self._ffmpeg_process = None
         self._cloudflared_process = None
+        self._tunnel_provider = ""
+        self._cloudflared_start_attempts = 0
         if self._httpd is not None:
             try:
                 self._httpd.shutdown()
@@ -2745,6 +3086,7 @@ class StreamingService:
             pass
 
     def _log(self, message: str) -> None:
+        debug_log(message)
         if self.log_callback is not None:
             self.log_callback(message)
 

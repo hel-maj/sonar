@@ -30,6 +30,45 @@ class MessageResponse(Response):
         return {"result": {"message_id": self.message_id}}
 
 
+def test_runtime_gate_controls_polling(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(NotificationManager, "start_polling", lambda self: calls.append("start"))
+    monkeypatch.setattr(NotificationManager, "stop_polling", lambda self: calls.append("stop"))
+    manager = NotificationManager()
+
+    manager.configure(TelegramSettings(enabled=True, bot_token="token"), runtime_enabled=False)
+    manager.set_runtime_enabled(True)
+    manager.set_runtime_enabled(False)
+
+    assert calls == ["stop", "start", "stop"]
+
+
+def test_runtime_gate_blocks_network_and_incoming_callbacks(monkeypatch):
+    calls: list[tuple[str, object]] = []
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        runtime_enabled=False,
+    )
+    monkeypatch.setattr(NotificationManager, "_api_post", lambda self, method, **kwargs: calls.append((method, kwargs)))
+    monkeypatch.setattr(NotificationManager, "_send_menu", lambda self, chat_id: calls.append(("menu", chat_id)))
+
+    assert manager.send_message("blocked") is False
+    manager._handle_update({"message": {"chat": {"id": 1}, "text": "/menu"}})
+
+    assert calls == []
+
+
+def test_disabled_setting_blocks_direct_telegram_api_calls(monkeypatch):
+    calls: list[tuple[str, object]] = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=False, bot_token="token", admin_ids=[1]))
+    monkeypatch.setattr(notifier_module.requests, "post", lambda *args, **kwargs: calls.append((args[0], kwargs)))
+
+    assert manager.send_photo(1, b"png") is False
+    assert manager._api_post("sendMessage", json={"chat_id": 1, "text": "blocked"}) is None
+
+    assert calls == []
+
+
 def test_notification_menu_edits_callback_message_and_uses_two_columns(monkeypatch):
     manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
     calls = []
@@ -139,6 +178,42 @@ def test_stream_menu_hides_open_button_until_public_link(monkeypatch):
 
     keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
     assert not any(button.get("url") for row in keyboard for button in row)
+
+
+def test_public_stream_url_normalizes_to_live_page():
+    snapshot = SimpleNamespace(
+        public_url="https://example.trycloudflare.com?token=old",
+        stream_url="https://example.trycloudflare.com/hls/live.m3u8?stream=local",
+    )
+
+    assert NotificationManager._public_stream_url(snapshot) == "https://example.trycloudflare.com/live/"
+
+
+def test_public_stream_url_keeps_existing_live_page():
+    snapshot = SimpleNamespace(
+        public_url="https://example.trycloudflare.com/live/",
+        stream_url="",
+    )
+
+    assert NotificationManager._public_stream_url(snapshot) == "https://example.trycloudflare.com/live/"
+
+
+def test_public_stream_url_converts_hls_playlist_to_live_page():
+    snapshot = SimpleNamespace(
+        public_url="",
+        stream_url="https://example.trycloudflare.com/hls/live.m3u8?stream=local",
+    )
+
+    assert NotificationManager._public_stream_url(snapshot) == "https://example.trycloudflare.com/live/"
+
+
+def test_public_stream_url_rejects_ipv6_loopback():
+    snapshot = SimpleNamespace(
+        public_url="http://[::1]:1000",
+        stream_url="http://[::1]:1000/live/",
+    )
+
+    assert NotificationManager._public_stream_url(snapshot) == ""
 
 
 def test_stream_menu_allows_cancelling_starting_stream(monkeypatch):
@@ -321,7 +396,7 @@ def test_send_stream_link_shows_menu_without_sending_local_link(monkeypatch):
     assert "127.0.0.1" not in text
 
 
-def test_stream_menu_marks_unreachable_cloudflare_link_as_forming(monkeypatch):
+def test_stream_menu_marks_unreachable_cloudflare_link_as_unavailable(monkeypatch):
     snapshot = SimpleNamespace(
         active=True,
         status="online",
@@ -348,7 +423,9 @@ def test_stream_menu_marks_unreachable_cloudflare_link_as_forming(monkeypatch):
     manager._send_stream_menu(1, message_id=42)
 
     payload = calls[0][1]["json"]
-    assert "Ссылка: Формируется..." in payload["text"]
+    assert "https://example.trycloudflare.com/live/" in payload["text"]
+    assert "Ссылка сформирована, но Cloudflare пока не отвечает" in payload["text"]
+    assert "Ссылка: Формируется..." not in payload["text"]
     keyboard = payload["reply_markup"]["inline_keyboard"]
     assert not any(button.get("url") for row in keyboard for button in row)
 
@@ -490,7 +567,7 @@ def test_caught_fish_notification_sends_photo_with_caption(monkeypatch):
     assert "Рустер" in photo_call[1]["data"]["caption"]
 
 
-def test_caught_fish_notification_includes_release_status_and_real_quality_title(monkeypatch):
+def test_caught_fish_notification_does_not_promote_record_quality(monkeypatch):
     calls = []
     manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
 
@@ -511,8 +588,33 @@ def test_caught_fish_notification_includes_release_status_and_real_quality_title
     )
 
     text = calls[0][1]["json"]["text"]
-    assert "Рекордный улов" in text
-    assert "Трофейный" not in text
+    assert "Рекордный улов" not in text
+    assert "Трофейная" not in text
+    assert "Статус:</b> отпущена" in text
+
+
+def test_caught_fish_notification_promotes_trophy_quality(monkeypatch):
+    calls = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_caught_fish(
+        "Рустер",
+        3.0,
+        "Трофейная",
+        10,
+        None,
+        SessionTotals(0, 1, 3.0, 1, 3.0, 100, 100),
+        released=True,
+    )
+
+    text = calls[0][1]["json"]["text"]
+    assert "Трофейная" in text
     assert "Статус:</b> отпущена" in text
 
 

@@ -4,9 +4,11 @@ import html
 import re
 import threading
 import time
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from sonar.fishing.catch_quality import CATCH_SIZE_TYPES, UNKNOWN_CATCH_SIZE_KEY, UNKNOWN_CATCH_SIZE_LABEL, catch_size_key, catch_size_label
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
@@ -118,6 +120,7 @@ class FishingSessionStats:
         default_prices: dict[str, FishPrice | float] | None = None,
         custom_prices: dict[str, float] | None = None,
     ) -> None:
+        self._started_at = datetime.now()
         self._elapsed_seconds = 0.0
         self._running_started_at: float | None = None
         self.default_prices = _coerce_price_catalog(default_prices or EMBEDDED_FISH_PRICES)
@@ -132,6 +135,7 @@ class FishingSessionStats:
 
     def reset(self) -> None:
         with self._lock:
+            self._started_at = datetime.now()
             self._elapsed_seconds = 0.0
             if self._running_started_at is not None:
                 self._running_started_at = time.time()
@@ -288,6 +292,88 @@ class FishingSessionStats:
     def has_catches(self) -> bool:
         return self.totals().caught_count > 0
 
+    def started_at(self) -> datetime:
+        with self._lock:
+            return self._started_at
+
+    def to_dict(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "started_at": self._started_at.isoformat(timespec="seconds"),
+                "duration_seconds": self._duration_seconds_locked(),
+                "fish": [asdict(item) for item in self._fish.values()],
+                "catch_sizes": dict(self._catch_sizes),
+                "custom_prices": dict(self.custom_prices),
+            }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        default_prices: dict[str, FishPrice | float] | None = None,
+        custom_prices: dict[str, float] | None = None,
+    ) -> "FishingSessionStats":
+        stats = cls(default_prices=default_prices, custom_prices=(data.get("custom_prices") or custom_prices or {}))
+        with stats._lock:
+            stats._started_at = _parse_datetime(data.get("started_at"), datetime.now())
+            stats._elapsed_seconds = _clean_float(data.get("duration_seconds"))
+            stats._running_started_at = None
+            stats._fish.clear()
+            for raw_item in data.get("fish") or []:
+                if not isinstance(raw_item, dict):
+                    continue
+                fish_id = str(raw_item.get("fish_id") or "unknown")
+                stats._fish[fish_id] = FishStat(
+                    fish_id=fish_id,
+                    name=str(raw_item.get("name") or fish_display_name(fish_id)),
+                    caught_count=_clean_int(raw_item.get("caught_count")),
+                    caught_kg=_clean_float(raw_item.get("caught_kg")),
+                    released_count=_clean_int(raw_item.get("released_count")),
+                    released_kg=_clean_float(raw_item.get("released_kg")),
+                )
+            stats._catch_sizes = {item.key: 0 for item in CATCH_SIZE_TYPES}
+            stats._catch_sizes[UNKNOWN_CATCH_SIZE_KEY] = 0
+            raw_catch_sizes = data.get("catch_sizes") or {}
+            if isinstance(raw_catch_sizes, dict):
+                for key, value in raw_catch_sizes.items():
+                    stats._catch_sizes[str(key)] = _clean_int(value)
+        return stats
+
+    @classmethod
+    def aggregate(
+        cls,
+        sessions: Iterable["FishingSessionStats"],
+        *,
+        default_prices: dict[str, FishPrice | float] | None = None,
+        custom_prices: dict[str, float] | None = None,
+    ) -> "FishingSessionStats":
+        result = cls(default_prices=default_prices, custom_prices=custom_prices)
+        started_at: datetime | None = None
+        with result._lock:
+            result._elapsed_seconds = 0.0
+            result._running_started_at = None
+            result._fish.clear()
+            result._catch_sizes = {item.key: 0 for item in CATCH_SIZE_TYPES}
+            result._catch_sizes[UNKNOWN_CATCH_SIZE_KEY] = 0
+            for stats in sessions:
+                with stats._lock:
+                    if started_at is None or stats._started_at < started_at:
+                        started_at = stats._started_at
+                    result._elapsed_seconds += stats._duration_seconds_locked()
+                    for source in stats._fish.values():
+                        target = result._fish.setdefault(source.fish_id, FishStat(fish_id=source.fish_id, name=source.name))
+                        target.name = source.name
+                        target.caught_count += source.caught_count
+                        target.caught_kg += source.caught_kg
+                        target.released_count += source.released_count
+                        target.released_kg += source.released_kg
+                    for key, count in stats._catch_sizes.items():
+                        result._catch_sizes[key] = result._catch_sizes.get(key, 0) + count
+            if started_at is not None:
+                result._started_at = started_at
+        return result
+
     def _duration_seconds_locked(self) -> float:
         if self._running_started_at is None:
             return self._elapsed_seconds
@@ -340,6 +426,16 @@ def format_duration(seconds: float) -> str:
     if hours:
         return f"{hours} ч {minutes} мин"
     return f"{minutes} мин"
+
+
+def format_duration_hhmm(seconds: float) -> str:
+    total_minutes = max(0, int(seconds // 60))
+    hours, minutes = divmod(total_minutes, 60)
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def format_session_title(started_at: datetime, totals: SessionTotals) -> str:
+    return f"{started_at.strftime('%d.%m.%Y')} {format_duration_hhmm(totals.duration_seconds)}, {totals.caught_count}шт."
 
 
 def format_weight(value: float) -> str:
@@ -415,6 +511,34 @@ def _clean_custom_prices(prices: dict[str, float]) -> dict[str, float]:
         if price > 0:
             clean[str(fish_id)] = price
     return clean
+
+
+def _parse_datetime(value: Any, fallback: datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return fallback
+
+
+def _clean_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _clean_float(value: Any) -> float:
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _format_price_value(value: float) -> str:

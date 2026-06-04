@@ -10,7 +10,6 @@ from PIL import Image
 
 from sonar.fishing.catch_quality import normalize_catch_size
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
-from sonar.fishing.fish_recognition import FishRecognition
 from sonar.ocr import configure_tesseract, has_tessdata, tessdata_config
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.geometry import Rect
@@ -44,7 +43,6 @@ class CatchScreenResult:
 @dataclass
 class CatchScreenDetector:
     resource_dir: Path = FISHING_RESOURCE_DIR
-    fish_recognition: FishRecognition | None = None
     matcher: TemplateMatcher = field(default_factory=lambda: TemplateMatcher(CATCH_MATCH_THRESHOLD))
     templates: dict[str, np.ndarray] = field(default_factory=dict)
 
@@ -66,12 +64,10 @@ class CatchScreenDetector:
         panel_rect = self._panel_rect(keep, release, frame.shape[1], frame.shape[0])
         fish_text = self._read_text(frame, self._fish_name_roi(panel_rect))
         text_fish_id = fish_id_from_display(fish_text)
-        fish_id, confidence = self._recognize_fish(frame)
+        fish_id = text_fish_id
+        confidence = 0.95 if text_fish_id else 0.0
         if text_fish_id:
-            fish_id = text_fish_id
-            confidence = max(confidence, 0.95)
-        elif fish_id is None:
-            fish_id = text_fish_id
+            fish_text = fish_display_name(text_fish_id)
         quality_text = self._normalize_quality(self._read_text(frame, self._quality_roi(panel_rect)))
         weight_text = self._read_weight_text(frame, panel_rect)
         weight_kg = self._parse_weight(weight_text)
@@ -135,11 +131,6 @@ class CatchScreenDetector:
         values = {round(base * factor, 2) for factor in (0.70, 0.82, 0.92, 1.0, 1.08, 1.20, 1.38, 1.60, 2.0)}
         values.update({1.0, 1.2, 1.5})
         return tuple(sorted(value for value in values if 0.45 <= value <= 3.0))
-
-    def _recognize_fish(self, frame: np.ndarray) -> tuple[str | None, float]:
-        if self.fish_recognition is None:
-            return None, 0.0
-        return self.fish_recognition.recognize_fish(frame)
 
     @staticmethod
     def _panel_metrics(keep: TemplateMatch, release: TemplateMatch) -> tuple[float, float, float, float]:

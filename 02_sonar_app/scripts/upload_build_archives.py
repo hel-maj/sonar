@@ -60,7 +60,7 @@ DEFAULT_SOURCE = ROOT / "dist"
 DEFAULT_HOST = os.environ.get("SONAR_UPLOAD_HOST", "m-sonar-addr.ru")
 DEFAULT_USER = "root"
 DEFAULT_REMOTE_DIR = "/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds"
-ARCHIVE_NAME_RE = re.compile(r"^[0-9a-f]{64}-.+\.exe\.zip$", re.IGNORECASE)
+ARCHIVE_NAME_RE = re.compile(r"^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$", re.IGNORECASE)
 
 
 def is_build_archive(path: Path) -> bool:

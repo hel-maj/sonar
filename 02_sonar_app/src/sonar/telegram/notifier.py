@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import ipaddress
 import random
 import re
 import threading
@@ -11,6 +12,7 @@ from io import BytesIO
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
+from urllib.parse import urlparse, urlunparse
 
 import requests
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
@@ -65,6 +67,7 @@ class NotificationManager:
     stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None
     stream_set_snapshot_mode_callback: Callable[[bool], bool] | None = None
     player_status_scan_callback: Callable[[], tuple[bool, str]] | None = None
+    runtime_enabled: bool = True
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
     _poll_thread: threading.Thread | None = field(default=None, init=False)
     _last_update_id: int | None = field(default=None, init=False)
@@ -90,6 +93,7 @@ class NotificationManager:
         self,
         settings: TelegramSettings,
         *,
+        runtime_enabled: bool | None = None,
         start_callback: Callable[[], bool] | None = None,
         stop_callback: Callable[[], None] | None = None,
         is_running_callback: Callable[[], bool] | None = None,
@@ -114,6 +118,8 @@ class NotificationManager:
         player_status_scan_callback: Callable[[], tuple[bool, str]] | None = None,
     ) -> None:
         self.settings = settings
+        if runtime_enabled is not None:
+            self.runtime_enabled = bool(runtime_enabled)
         self.start_callback = start_callback
         self.stop_callback = stop_callback
         self.is_running_callback = is_running_callback
@@ -136,12 +142,21 @@ class NotificationManager:
         self.stream_set_chat_zoom_callback = stream_set_chat_zoom_callback
         self.stream_set_snapshot_mode_callback = stream_set_snapshot_mode_callback
         self.player_status_scan_callback = player_status_scan_callback
-        if self.settings.enabled and self.settings.bot_token:
+        self._sync_polling()
+
+    def set_runtime_enabled(self, enabled: bool) -> None:
+        self.runtime_enabled = bool(enabled)
+        self._sync_polling()
+
+    def _sync_polling(self) -> None:
+        if self.runtime_enabled and self.settings.enabled and self.settings.bot_token:
             self.start_polling()
         else:
             self.stop_polling()
 
     def start_polling(self) -> None:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+            return
         poll_thread = getattr(self, "_poll_thread", None)
         if poll_thread and poll_thread.is_alive():
             return
@@ -195,10 +210,19 @@ class NotificationManager:
             return
         self.send_message(self._format_session_stats_message("🚤 Рыбалка началась!", "📊 Текущая сессия", totals))
 
-    def notify_fishing_stopped(self, totals: SessionTotals, *, reason: str | None = None) -> None:
+    def notify_fishing_stopped(
+        self,
+        totals: SessionTotals,
+        *,
+        reason: str | None = None,
+        image_bytes: bytes | None = None,
+    ) -> None:
         if not self.settings.notify_start_stop:
             return
-        self.send_message(self._format_session_stats_message("🛑 Рыбалка остановлена!", "📊 Статистика сессии", totals, reason=reason))
+        message = self._format_session_stats_message("🛑 Рыбалка остановлена!", "📊 Статистика сессии", totals, reason=reason)
+        if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message):
+            return
+        self.send_message(message)
 
     def notify_meal_eaten(
         self,
@@ -280,7 +304,7 @@ class NotificationManager:
     def send_message(self, text: str, *, chat_id: int | None = None, reply_markup: dict[str, Any] | None = None) -> bool:
         if self.sink:
             self.sink(text)
-        if not self.settings.enabled or not self.settings.bot_token:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
             return False
         chat_ids = [chat_id] if chat_id is not None else list(self.settings.admin_ids)
         if not chat_ids:
@@ -297,6 +321,8 @@ class NotificationManager:
         return ok
 
     def send_photo(self, chat_id: int, image_bytes: bytes, caption: str = "📸 Скриншот игры") -> bool:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+            return False
         response = self._api_post(
             "sendPhoto",
             data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
@@ -305,7 +331,7 @@ class NotificationManager:
         return bool(response and response.ok)
 
     def send_photo_to_admins(self, image_bytes: bytes, caption: str = "📸 Скриншот игры") -> bool:
-        if not self.settings.enabled or not self.settings.bot_token or not self.settings.admin_ids:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token or not self.settings.admin_ids:
             return False
         ok = True
         for chat_id in self.settings.admin_ids:
@@ -314,7 +340,7 @@ class NotificationManager:
 
     def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
-            if not self.settings.enabled or not self.settings.bot_token:
+            if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
                 self._stop_event.wait(1.0)
                 continue
             params: dict[str, Any] = {"timeout": 20, "allowed_updates": ["message", "callback_query"]}
@@ -325,6 +351,8 @@ class NotificationManager:
                 if not response.ok:
                     self._stop_event.wait(2.0)
                     continue
+                if self._stop_event.is_set() or not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+                    break
                 for update in response.json().get("result", []):
                     self._last_update_id = update.get("update_id", self._last_update_id)
                     self._handle_update(update)
@@ -336,6 +364,8 @@ class NotificationManager:
                 self._stop_event.wait(2.0)
 
     def _handle_update(self, update: dict[str, Any]) -> None:
+        if not self.runtime_enabled or not self.settings.enabled:
+            return
         if "message" in update:
             message = update["message"]
             chat_id = int(message.get("chat", {}).get("id", 0))
@@ -471,8 +501,14 @@ class NotificationManager:
         if active and auto_stop is not None:
             minutes, seconds = divmod(max(0, int(auto_stop)), 60)
             auto_stop_line = f"\n⏱ Автостоп: {minutes}:{seconds:02d} без зрителей"
-        link = self._verified_public_stream_url(snapshot) if active else ""
-        link_line = f"\n🔗 Ссылка: {link or 'Формируется...'}" if active else ""
+        formed_link = self._public_stream_url(snapshot) if active else ""
+        link = self._verified_public_stream_url(snapshot) if formed_link else ""
+        link_status = link or (
+            f"{formed_link}\n⚠️ Ссылка сформирована, но Cloudflare пока не отвечает"
+            if formed_link
+            else "Формируется..."
+        )
+        link_line = f"\n🔗 Ссылка: {link_status}" if active else ""
         status_icon = "🟢" if status == "online" else "🔴" if status == "offline" else "🟡"
         text = (
             "📺 Стрим игры\n\n"
@@ -744,10 +780,23 @@ class NotificationManager:
     @staticmethod
     def _public_stream_url(snapshot: Any | None) -> str:
         for field_name in ("public_url", "stream_url"):
-            url = str(getattr(snapshot, field_name, "") or "")
-            if NotificationManager._is_public_stream_url(url):
-                return url.rstrip("/") + "/live/" if not url.rstrip("/").endswith("/live") else url.rstrip("/") + "/"
+            url = NotificationManager._normalize_stream_page_url(str(getattr(snapshot, field_name, "") or ""))
+            if url:
+                return url
         return ""
+
+    @staticmethod
+    def _normalize_stream_page_url(url: str) -> str:
+        if not NotificationManager._is_public_stream_url(url):
+            return ""
+        parsed = urlparse(url.strip())
+        path = parsed.path.rstrip("/")
+        path_lower = path.lower()
+        if path_lower.startswith("/hls/") or path_lower.endswith(".m3u8"):
+            path = "/live"
+        elif not path_lower.endswith("/live"):
+            path = f"{path}/live" if path else "/live"
+        return urlunparse((parsed.scheme, parsed.netloc, f"{path}/", "", "", ""))
 
     def _verified_public_stream_url(self, snapshot: Any | None) -> str:
         url = self._public_stream_url(snapshot)
@@ -775,11 +824,17 @@ class NotificationManager:
 
     @staticmethod
     def _is_public_stream_url(url: str) -> bool:
-        normalized = url.strip().lower()
-        if not normalized.startswith(("http://", "https://")):
+        parsed = urlparse(url.strip())
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
             return False
-        parsed_host = normalized.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
-        return parsed_host not in {"127.0.0.1", "localhost", "::1"}
+        host = parsed.hostname.strip("[]").lower()
+        if host == "localhost":
+            return False
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return True
+        return not (address.is_loopback or address.is_unspecified)
 
     @staticmethod
     def _message_contains_stream_link(text: str) -> bool:
@@ -857,6 +912,8 @@ class NotificationManager:
             return self.send_message(text, chat_id=chat_id, reply_markup=reply_markup)
         if self.sink:
             self.sink(text)
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+            return False
         payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
@@ -876,7 +933,7 @@ class NotificationManager:
         return f"{decrypt_text_literal('telegram_api_base')}/bot{self.settings.bot_token}/{method}"
 
     def _api_post(self, method: str, **kwargs) -> requests.Response | None:
-        if not self.settings.bot_token:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
             return None
         try:
             return requests.post(self._api_url(method), timeout=self.timeout, **kwargs)
@@ -892,8 +949,9 @@ class NotificationManager:
                 if width <= 0 or height <= 0:
                     return image_bytes
                 crop_x = min(width // 3, max(0, int(round(width * 0.02))))
-                if crop_x > 0 and width - crop_x * 2 > 1:
-                    original = original.crop((crop_x, 0, width - crop_x, height))
+                crop_top = min(height // 3, max(0, int(round(height * 0.01))))
+                if (crop_x > 0 or crop_top > 0) and width - crop_x * 2 > 1 and height - crop_top > 1:
+                    original = original.crop((crop_x, crop_top, width - crop_x, height))
                     width, height = original.size
                 canvas_width = max(width, int(round(width * 1.35)))
                 canvas_height = max(height, int(round(height * 1.35)))
@@ -1007,7 +1065,7 @@ class NotificationManager:
         *,
         released: bool | None = None,
     ) -> str:
-        trophy = quality_text and any(marker in quality_text.lower() for marker in ("троф", "рекорд"))
+        trophy = bool(quality_text and quality_text.strip().casefold() == "трофейная")
         lines = []
         if trophy:
             lines.append(f"🏆 <b>{_h(quality_text)}!</b>")
