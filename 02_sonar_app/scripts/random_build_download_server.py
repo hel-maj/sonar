@@ -18,7 +18,7 @@ HOST = os.environ.get("SONAR_RANDOM_BUILD_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SONAR_RANDOM_BUILD_PORT", "8766"))
 BUILDS_DIR = Path(os.environ.get("SONAR_RANDOM_BUILD_DIR", str(ROOT / "builds"))).resolve()
 ACCESS_TOKEN = os.environ.get("SONAR_RANDOM_BUILD_TOKEN", "").strip()
-ARCHIVE_NAME_RE = re.compile(r"^[0-9a-f]{64}-.+\.exe\.zip$", re.IGNORECASE)
+ARCHIVE_NAME_RE = re.compile(r"^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)

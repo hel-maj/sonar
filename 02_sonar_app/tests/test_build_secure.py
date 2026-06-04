@@ -205,6 +205,29 @@ def test_branding_seed_ignores_icon_history_for_reproducible_rebuild(tmp_path):
     assert not history_file.exists()
 
 
+def test_branding_generates_short_build_key(tmp_path):
+    branding = _load_branding()
+    icons = tmp_path / "icons"
+    icons.mkdir()
+    Image.new("RGBA", (16, 16), (255, 0, 0, 255)).save(icons / "A.png")
+
+    result = branding.prepare_build(
+        SimpleNamespace(
+            source_root=_make_branding_source(tmp_path / "build"),
+            icons_dir=icons,
+            metadata_out=tmp_path / "build.json",
+            history_file=icons / ".build_history.json",
+            seed="fixed-seed",
+            build_key="",
+            license_server_url="",
+            license_account_id="",
+        )
+    )
+
+    assert len(result["build_key"]) == 11
+    assert all(character in "0123456789abcdef" for character in result["build_key"])
+
+
 def test_package_data_includes_uninstall_helpers():
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 

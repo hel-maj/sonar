@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import base64
 import csv
-import hashlib
 import io
 import json
 import os
@@ -24,6 +22,7 @@ from sonar.automation.input_controller import InputController
 from sonar.automation.window import WindowActivator
 from sonar.config.manager import ConfigManager
 from sonar.config.models import FishingSettings, TelegramSettings
+from sonar.core.log_crypto import decrypt_log_payload, encrypt_log_payload
 from sonar.core.logging import CallbackLogger, LogCallback, debug_log
 from sonar.core.sounds import play_sound
 from sonar.core.events import UiEventMessage, event_bus
@@ -71,7 +70,6 @@ STOP_REASON_TACKLE_UNREADABLE = "Не удалось прочитать снар
 STOP_REASON_OVERWEIGHT = "перевес инвентаря"
 AUTO_STOP_SCREENSHOT_REASONS = frozenset({STOP_REASON_NO_STAGE, STOP_REASON_START_FAILED})
 REELING_LOSS_RELEASE_LOG_KEY = "sonar"
-REELING_LOSS_RELEASE_LOG_MAGIC = b"SONAR_REELING_LOSS_LOG_V1\n"
 REELING_LOSS_RELEASE_LOG_GLOB = "reeling_loss_*.jsonl.enc"
 REELING_LOSS_RELEASE_LOG_LIMIT = 15
 REEL_CATCH_SCREEN_TIMEOUT_SECONDS = 3.0
@@ -134,34 +132,12 @@ REELING_KNOWN_INTERRUPTION_TRIGGERS = frozenset(
 )
 
 
-def _reeling_loss_keystream(key: str, nonce: bytes, length: int) -> bytes:
-    key_bytes = key.encode("utf-8")
-    blocks: list[bytes] = []
-    counter = 0
-    while sum(len(block) for block in blocks) < length:
-        blocks.append(hashlib.sha256(key_bytes + nonce + counter.to_bytes(8, "big")).digest())
-        counter += 1
-    return b"".join(blocks)[:length]
-
-
-def _xor_bytes(data: bytes, mask: bytes) -> bytes:
-    return bytes(byte ^ mask_byte for byte, mask_byte in zip(data, mask))
-
-
 def encrypt_reeling_loss_log(plaintext: bytes, *, key: str = REELING_LOSS_RELEASE_LOG_KEY) -> bytes:
-    nonce = os.urandom(16)
-    encrypted = _xor_bytes(plaintext, _reeling_loss_keystream(key, nonce, len(plaintext)))
-    return base64.b64encode(REELING_LOSS_RELEASE_LOG_MAGIC + nonce + encrypted)
+    return encrypt_log_payload(plaintext, key=key)
 
 
 def decrypt_reeling_loss_log(payload: bytes, *, key: str = REELING_LOSS_RELEASE_LOG_KEY) -> bytes:
-    raw = base64.b64decode(payload)
-    if not raw.startswith(REELING_LOSS_RELEASE_LOG_MAGIC):
-        raise ValueError("Unsupported reeling loss log format")
-    body = raw[len(REELING_LOSS_RELEASE_LOG_MAGIC):]
-    nonce = body[:16]
-    encrypted = body[16:]
-    return _xor_bytes(encrypted, _reeling_loss_keystream(key, nonce, len(encrypted)))
+    return decrypt_log_payload(payload, key=key)
 
 
 @dataclass

@@ -21,7 +21,7 @@ def _load_server():
 
 def test_iter_archive_files_only_accepts_build_archives(tmp_path):
     server = _load_server()
-    key = "a" * 64
+    key = "a" * 11
     valid = tmp_path / f"{key}-Game Name.exe.zip"
     invalid = tmp_path / "plain.zip"
     nested = tmp_path / "nested" / f"{key}-Nested.exe.zip"

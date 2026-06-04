@@ -63,7 +63,6 @@ from sonar.fishing.statistics import (
 )
 from sonar.fishing.session_history import FishingSessionHistory, StoredFishingSession
 from sonar.fishing.statistics_export import default_stats_csv_path, write_stats_csv
-from sonar.fishing.tackle_detection import format_tackle_items
 from sonar.license.client import LicenseStatus
 from sonar.license.context import LicenseContext
 from sonar.license.features import (
@@ -460,8 +459,7 @@ class MainWindow(QMainWindow):
         icon_path = find_app_icon_path()
         if icon_path is not None:
             self.setWindowIcon(QIcon(str(icon_path)))
-        self.resize(990, 615)
-        self.setMinimumSize(860, 540)
+        self.setFixedSize(1014, 690)
         self._build_ui()
         self._load_settings_to_ui(self.settings)
         self.telegram_enabled_check.stateChanged.connect(self._telegram_enabled_changed)
@@ -693,7 +691,7 @@ class MainWindow(QMainWindow):
     def _page(self, title: str, subtitle: str = "") -> tuple[QWidget, QVBoxLayout]:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 6, 8, 8)
         layout.setSpacing(12)
         layout.addWidget(SectionHeader(title, subtitle))
         return page, layout
@@ -706,7 +704,7 @@ class MainWindow(QMainWindow):
         content = QWidget()
         content.setObjectName("scrollPageContent")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 6, 0)
+        content_layout.setContentsMargins(0, 6, 26, 10)
         content_layout.setSpacing(12)
         scroll.setWidget(content)
         page._sonar_page_scroll_area = scroll
@@ -717,9 +715,9 @@ class MainWindow(QMainWindow):
         page, layout = self._page("Обзор", "Главный экран управления рыбалкой, стримом и уведомлениями.")
         top = QHBoxLayout()
         top.setSpacing(12)
-        top.addWidget(self._build_fishing_control_card(), 3)
-        top.addWidget(self._build_system_state_card(include_tackle=False), 2)
-        layout.addLayout(top, 3)
+        top.addWidget(self._build_fishing_control_card(), 3, Qt.AlignmentFlag.AlignTop)
+        top.addWidget(self._build_system_state_card(include_tackle=False), 2, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(top)
 
         session_card = Card()
         session_card.setMinimumHeight(78)
@@ -750,8 +748,8 @@ class MainWindow(QMainWindow):
 
         bottom = QHBoxLayout()
         bottom.setSpacing(12)
-        bottom.addWidget(self._build_overview_telegram_card(), 1)
-        bottom.addWidget(self._build_overview_stream_card(), 1)
+        bottom.addWidget(self._build_overview_telegram_card(), 1, Qt.AlignmentFlag.AlignTop)
+        bottom.addWidget(self._build_overview_stream_card(), 1, Qt.AlignmentFlag.AlignTop)
         bottom.addWidget(self._build_recent_events_card(), 2)
         layout.addLayout(bottom, 3)
         return page
@@ -821,6 +819,8 @@ class MainWindow(QMainWindow):
 
     def _build_fishing_control_card(self) -> QWidget:
         card = Card()
+        card.setFixedWidth(386)
+        card.setFixedHeight(260)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 14)
         layout.setSpacing(11)
@@ -833,8 +833,8 @@ class MainWindow(QMainWindow):
         fishing_ready_badge = Badge("Готов", "green")
         self._ready_badges.append(fishing_ready_badge)
         title_row = QHBoxLayout()
-        title_row.addWidget(title)
-        title_row.addWidget(fishing_ready_badge)
+        title_row.addWidget(title, 0, Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(fishing_ready_badge, 0, Qt.AlignmentFlag.AlignVCenter)
         title_row.addStretch(1)
         title_box.addLayout(title_row)
         state_caption = QLabel("Состояние")
@@ -851,35 +851,22 @@ class MainWindow(QMainWindow):
         title_box.addWidget(status_label)
         title_box.addWidget(status_description_label)
         heading.addLayout(title_box, 1)
-        hotkey_card = Card(soft=True)
-        hotkey_card.setFixedWidth(102)
-        hotkey_card.setMinimumHeight(70)
-        hotkey_layout = QVBoxLayout(hotkey_card)
-        hotkey_layout.setContentsMargins(9, 8, 9, 8)
-        hotkey_layout.setSpacing(5)
-        hotkey_title = QLabel("Горячая")
-        hotkey_title.setProperty("muted", True)
-        main_hotkey_label = Badge("F9", "blue")
-        main_hotkey_label.setMinimumHeight(28)
-        self._hotkey_badges.append(main_hotkey_label)
-        hotkey_layout.addWidget(hotkey_title)
-        hotkey_layout.addWidget(main_hotkey_label)
-        heading.addWidget(hotkey_card)
         preview = QLabel("Скриншот игры появится после захвата")
         preview.setObjectName("fishingPreview")
         preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview.setWordWrap(True)
-        preview.setFixedSize(160, 96)
+        preview.setFixedSize(192, 108)
         preview.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         preview.setProperty("muted", True)
         self._fishing_preview_labels.append(preview)
-        heading.addWidget(preview)
+        heading.addWidget(preview, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
         layout.addLayout(heading)
+        layout.addStretch(1)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(9)
-        start_button = ActionButton("Запустить", "primary", icon=ui_icon("play_white.svg"), size="xl")
-        stop_button = ActionButton("Остановить", "danger", icon=ui_icon("stop_white.svg"), size="xl")
+        start_button = ActionButton("Запустить", "primary", icon=ui_icon("play_white.svg"), size="xs")
+        stop_button = ActionButton("Остановить", "danger", icon=ui_icon("stop_white.svg"), size="xs")
         start_button.clicked.connect(self.start_bot)
         stop_button.clicked.connect(self.stop_bot)
         self._start_buttons.append(start_button)
@@ -902,7 +889,7 @@ class MainWindow(QMainWindow):
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
-        self.game_state_tile = self._status_tile("Игра", "Не проверялась", "Majestic RP", ui_icon("monitor.svg"))
+        self.game_state_tile = self._status_tile("Игра", "—", "Majestic RP", ui_icon("monitor.svg"))
         self.player_food_tile = self._status_tile("Еда", "—", "Показатель", ui_icon("food.svg"))
         self.player_water_tile = self._status_tile("Вода", "—", "Показатель", ui_icon("pulse.svg"))
         self.player_inventory_tile = self._status_tile("Инвентарь", "—", "Вес", ui_icon("backpack.png"))
@@ -915,9 +902,9 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.player_food_tile, 1, 0)
         grid.addWidget(self.player_water_tile, 1, 1)
         if include_tackle:
-            self.tackle_bait_tile = self._status_tile("Наживка", "Не сканировалась", "", ui_icon("bait.png"))
-            self.tackle_leader_tile = self._status_tile("Поводок", "Не сканировался", "", ui_icon("leader.png"))
-            self.tackle_net_tile = self._status_tile("Подсак", "Не сканировался", "", ui_icon("landing_net.png"))
+            self.tackle_bait_tile = self._status_tile("Наживка", "—", "", ui_icon("bait.png"))
+            self.tackle_leader_tile = self._status_tile("Поводок", "—", "", ui_icon("leader.png"))
+            self.tackle_net_tile = self._status_tile("Подсак", "—", "", ui_icon("landing_net.png"))
             self._system_tiles["bait"].append(self.tackle_bait_tile)
             self._system_tiles["leader"].append(self.tackle_leader_tile)
             self._system_tiles["net"].append(self.tackle_net_tile)
@@ -1128,8 +1115,7 @@ class MainWindow(QMainWindow):
         activation_layout.addWidget(self.license_key_input)
         activation_layout.addWidget(self.license_activate_button)
         activation_layout.addWidget(self.license_status_label)
-        activation_layout.addStretch(1)
-        row.addWidget(activation, 2)
+        row.addWidget(activation, 2, Qt.AlignmentFlag.AlignTop)
 
         info = Card()
         info_layout = QVBoxLayout(info)
@@ -1144,17 +1130,17 @@ class MainWindow(QMainWindow):
         info_layout.addWidget(info_title)
         info_layout.addWidget(self.license_account_status)
         info_layout.addWidget(self.license_account_expiry)
-        info_layout.addStretch(1)
-        row.addWidget(info, 1)
-        layout.addLayout(row, 1)
+        row.addWidget(info, 1, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(row)
+        layout.addStretch(1)
         return page
 
     def _build_fishing_tab(self) -> QWidget:
         page, layout = self._page("Рыбалка", "Запуск бота, состояние снастей и краткая сводка сессии.")
         row = QHBoxLayout()
         row.setSpacing(12)
-        row.addWidget(self._build_fishing_control_card(), 3)
-        row.addWidget(self._build_system_state_card(), 2)
+        row.addWidget(self._build_fishing_control_card(), 3, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(self._build_system_state_card(), 2, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(row)
 
         summary_row = QHBoxLayout()
@@ -1174,7 +1160,7 @@ class MainWindow(QMainWindow):
             self.fishing_income_metric,
         ):
             details_layout.addWidget(widget)
-        summary_row.addWidget(details, 3)
+        summary_row.addWidget(details, 3, Qt.AlignmentFlag.AlignTop)
 
         tackle_group = Card()
         tackle_layout = QVBoxLayout(tackle_group)
@@ -1184,10 +1170,11 @@ class MainWindow(QMainWindow):
         tackle_title.setProperty("sectionTitle", True)
         self.fishing_tackle_label = QLabel("Снаряжение ещё не сканировалось")
         self.fishing_tackle_label.setWordWrap(True)
+        self.fishing_tackle_label.setTextFormat(Qt.TextFormat.RichText)
         self.fishing_tackle_label.setProperty("muted", True)
         tackle_layout.addWidget(tackle_title)
-        tackle_layout.addWidget(self.fishing_tackle_label, 1)
-        summary_row.addWidget(tackle_group, 2)
+        tackle_layout.addWidget(self.fishing_tackle_label)
+        summary_row.addWidget(tackle_group, 2, Qt.AlignmentFlag.AlignTop)
 
         layout.addLayout(summary_row)
         layout.addStretch(1)
@@ -1481,6 +1468,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.stats_to_date_input, 0)
 
         self.stats_apply_filter_button = ActionButton("Применить фильтр", "primary", size="xs")
+        self.stats_apply_filter_button.setMaximumWidth(150)
         self.stats_apply_filter_button.clicked.connect(self.apply_stats_filter)
         self.stats_return_current_button = ActionButton("К текущей", size="xs")
         self.stats_return_current_button.clicked.connect(self.return_to_current_stats_session)
@@ -1678,16 +1666,16 @@ class MainWindow(QMainWindow):
 
     def _build_statistics_tab(self) -> QWidget:
         page, layout = self._page("Статистика", "Подробная статистика рыбалки, размеров улова и доходов.")
-        layout.addWidget(self._build_stats_filter_card())
         actions = QHBoxLayout()
         actions.addStretch(1)
-        self.reset_stats_button = ActionButton("Сбросить сессию", icon=ui_icon("reload.svg"))
+        self.reset_stats_button = ActionButton("Новая сессия", icon=ui_icon("reload.svg"))
         self.reset_stats_button.clicked.connect(self.reset_session_stats)
         self.export_stats_button = ActionButton("Выгрузить CSV", icon=ui_icon("download.svg"))
         self.export_stats_button.clicked.connect(self.export_stats_csv)
         actions.addWidget(self.reset_stats_button)
         actions.addWidget(self.export_stats_button)
         layout.addLayout(actions)
+        layout.addWidget(self._build_stats_filter_card())
 
         metrics = QGridLayout()
         metrics.setSpacing(9)
@@ -1736,20 +1724,18 @@ class MainWindow(QMainWindow):
         catch_size_group = Card()
         catch_size_group.setMinimumWidth(250)
         catch_size_group.setMaximumWidth(290)
+        catch_size_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         catch_size_layout = QVBoxLayout(catch_size_group)
         catch_size_layout.setContentsMargins(12, 10, 12, 12)
         catch_size_title = QLabel("Статистика по типу улова")
         catch_size_title.setProperty("sectionTitle", True)
         catch_size_layout.addWidget(catch_size_title)
-        catch_body = QHBoxLayout()
-        catch_body.setSpacing(12)
         self.catch_size_chart = CatchSizeDonut()
         self.catch_size_legend_layout = QVBoxLayout()
         self.catch_size_legend_layout.setSpacing(6)
-        catch_body.addWidget(self.catch_size_chart, 0, Qt.AlignmentFlag.AlignVCenter)
-        catch_body.addLayout(self.catch_size_legend_layout, 1)
-        catch_size_layout.addLayout(catch_body)
-        body.addWidget(catch_size_group, 1)
+        catch_size_layout.addWidget(self.catch_size_chart, 0, Qt.AlignmentFlag.AlignHCenter)
+        catch_size_layout.addLayout(self.catch_size_legend_layout)
+        body.addWidget(catch_size_group, 1, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(body, 1)
         self._refresh_stats_tab()
         return page
@@ -1776,9 +1762,8 @@ class MainWindow(QMainWindow):
         form.addLayout(self._field_block("ID администраторов", self.telegram_admins_input))
         button = ActionButton("Сохранить Telegram", "primary", icon=ui_icon("telegram_outline_white.svg"))
         button.clicked.connect(self.save_settings)
-        form.addStretch(1)
         form.addWidget(button)
-        row.addWidget(group, 1)
+        row.addWidget(group, 1, Qt.AlignmentFlag.AlignTop)
 
         notify = Card()
         notify_layout = QVBoxLayout(notify)
@@ -1818,9 +1803,9 @@ class MainWindow(QMainWindow):
                 threshold_unit.setProperty("muted", True)
                 threshold_row.addWidget(threshold_unit)
                 notify_layout.addLayout(threshold_row)
-        notify_layout.addStretch(1)
-        row.addWidget(notify, 1)
-        layout.addLayout(row, 1)
+        row.addWidget(notify, 1, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(row)
+        layout.addStretch(1)
         return page
 
     def _field_block(self, label: str, widget: QWidget) -> QVBoxLayout:
@@ -1876,59 +1861,20 @@ class MainWindow(QMainWindow):
             status_layout.addLayout(self._compact_form_row(label, widget, label_stretch=2, value_stretch=1))
         buttons = QHBoxLayout()
         buttons.setSpacing(9)
-        self.stream_start_button = ActionButton("Запустить стрим", "primary", icon=ui_icon("play_white.svg"), size="l")
+        self.stream_start_button = ActionButton("Запустить стрим", "primary", icon=ui_icon("play_white.svg"), size="s")
         self.stream_start_button.clicked.connect(self.start_stream)
-        self.stream_stop_button = ActionButton("Остановить стрим", "danger", icon=ui_icon("stop_white.svg"), size="l")
+        self.stream_stop_button = ActionButton("Остановить стрим", "danger", icon=ui_icon("stop_white.svg"), size="s")
         self.stream_stop_button.clicked.connect(self.stop_stream)
-        self.stream_chat_mode_button = ActionButton("Включить режим чата", icon=ui_icon("chat_window.svg"), size="l")
+        self.stream_chat_mode_button = ActionButton("Включить режим чата", icon=ui_icon("chat_window.svg"), size="s")
         self.stream_chat_mode_button.clicked.connect(self.enable_chat_mode)
         buttons.addWidget(self.stream_start_button)
         buttons.addWidget(self.stream_stop_button)
         buttons.addWidget(self.stream_chat_mode_button)
         status_layout.addStretch(1)
         status_layout.addLayout(buttons)
-        top.addWidget(status_group, 3)
-
-        side = QVBoxLayout()
-        side.setSpacing(12)
-        telegram_group = Card()
-        telegram_group.setMinimumHeight(112)
-        telegram_layout = QVBoxLayout(telegram_group)
-        telegram_layout.setContentsMargins(13, 12, 13, 13)
-        telegram_layout.setSpacing(6)
-        telegram_header = QHBoxLayout()
-        telegram_header.addWidget(IconLabel(ui_icon("telegram_color.svg"), 20))
-        telegram_title = QLabel("Telegram")
-        telegram_title.setProperty("sectionTitle", True)
-        self.stream_telegram_badge = Badge("Отключен", "gray")
-        telegram_header.addWidget(telegram_title, 1)
-        telegram_header.addWidget(self.stream_telegram_badge)
-        telegram_layout.addLayout(telegram_header)
-        self.stream_telegram_status_label = QLabel("Бот отключён")
-        self.stream_telegram_status_label.setProperty("muted", True)
-        self.stream_telegram_admins_label = QLabel("Chat ID: —")
-        self.stream_telegram_admins_label.setProperty("muted", True)
-        telegram_layout.addWidget(self.stream_telegram_status_label)
-        telegram_layout.addWidget(self.stream_telegram_admins_label)
-        side.addWidget(telegram_group)
-
-        license_group = Card()
-        license_group.setMinimumHeight(100)
-        license_layout = QVBoxLayout(license_group)
-        license_layout.setContentsMargins(13, 12, 13, 13)
-        license_layout.setSpacing(6)
-        license_title = QLabel("Лицензия и аккаунт")
-        license_title.setProperty("sectionTitle", True)
-        self.stream_license_status_label = QLabel("Статус: —")
-        self.stream_license_status_label.setProperty("muted", True)
-        self.stream_license_expires_label = QLabel("Действует до: —")
-        self.stream_license_expires_label.setProperty("muted", True)
-        license_layout.addWidget(license_title)
-        license_layout.addWidget(self.stream_license_status_label)
-        license_layout.addWidget(self.stream_license_expires_label)
-        side.addWidget(license_group)
-        top.addLayout(side, 2)
-        layout.addLayout(top, 3)
+        top.addWidget(status_group, 3, Qt.AlignmentFlag.AlignTop)
+        top.addStretch(1)
+        layout.addLayout(top)
 
         options = QHBoxLayout()
         options.setSpacing(12)
@@ -1948,6 +1894,7 @@ class MainWindow(QMainWindow):
         quality_layout.addWidget(quality_title)
         quality_layout.addWidget(quality_note)
         quality_layout.addWidget(self.stream_quality_combo)
+        quality_layout.addStretch(1)
         options.addWidget(quality_group, 1)
 
         chat_group = Card()
@@ -2540,7 +2487,6 @@ class MainWindow(QMainWindow):
                 self.status_label.setText("Лицензия не активна")
                 self.append_log("Лицензия не активна")
                 return
-            self._prepare_stats_for_new_run()
             self.save_settings()
             if self.bot.start(skip_license_check=True):
                 self._refresh_status_label()
@@ -2564,7 +2510,6 @@ class MainWindow(QMainWindow):
         if not status.valid or status.expired or not self._can_use_feature(FEATURE_FISHING):
             self.log_bridge.message.emit("Лицензия не активна")
             return False
-        self._prepare_stats_for_new_run()
         return self.bot.start(skip_license_check=True)
 
     def stop_bot(self) -> None:
@@ -2779,7 +2724,7 @@ class MainWindow(QMainWindow):
             )
             for event in visible_events
         )
-        if signature == self._recent_events_render_signature:
+        if signature == getattr(self, "_recent_events_render_signature", None):
             return
         self._recent_events_render_signature = signature
         clear_layout(self.recent_events_layout)
@@ -3009,8 +2954,6 @@ class MainWindow(QMainWindow):
         fishing_allowed = self._can_use_feature(FEATURE_FISHING)
         running = bool(fishing_allowed and self.bot.state.running)
         stopping = self.bot.state.phase == BotPhase.STOPPING
-        if self._last_bot_running and not running and not stopping:
-            self._archive_current_stats_session()
         self._last_bot_running = running
         if not active_license:
             title = "Лицензия не активна"
@@ -3108,7 +3051,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _format_tackle_presence(count: int | None) -> str:
         if count is None:
-            return "Не сканировалось"
+            return "—"
         if count <= 0:
             return "Нет"
         return "Есть" if count == 1 else f"Есть · {count}"
@@ -3118,6 +3061,17 @@ class MainWindow(QMainWindow):
         if count is None:
             return ""
         return f"Количество: {max(0, count)}"
+
+    @staticmethod
+    def _format_tackle_items_html(items: tuple[object, ...] | list[object]) -> str:
+        if not items:
+            return '<span style="color:#7583a2;">Снаряжение ещё не сканировалось</span>'
+        lines: list[str] = []
+        for item in items:
+            name = html.escape(str(getattr(item, "name", "")), quote=False)
+            count = html.escape(str(getattr(item, "count", "")), quote=False)
+            lines.append(f'<span style="color:#7583a2;">{name}:</span> <b>{count}шт.</b>')
+        return "<br>".join(lines)
 
     def _refresh_stats_tab(self, *, force: bool = False) -> None:
         if not hasattr(self, "stats_table"):
@@ -3170,7 +3124,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "overview_income_hour_metric"):
             self.overview_income_hour_metric.set_value(current_income_hour)
         if hasattr(self, "fishing_tackle_label"):
-            self.fishing_tackle_label.setText(format_tackle_items(self.session_stats.tackle_items()))
+            self.fishing_tackle_label.setText(self._format_tackle_items_html(list(self.session_stats.tackle_items())))
         self._refresh_catch_size_rows(force=force)
         if (
             self._is_current_stats_view()
@@ -3256,7 +3210,6 @@ class MainWindow(QMainWindow):
             row.addWidget(label, 1)
             row.addWidget(value)
             self.catch_size_legend_layout.addLayout(row)
-        self.catch_size_legend_layout.addStretch(1)
 
     def _stats_price_changed(self, item: QTableWidgetItem) -> None:
         if self._stats_refreshing or item.column() != 4 or not self._is_current_stats_view():

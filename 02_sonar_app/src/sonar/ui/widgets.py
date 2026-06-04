@@ -47,7 +47,7 @@ QFrame[card="true"] {
     border-radius: 10px;
 }
 QFrame[softCard="true"] {
-    background: #fbfdff;
+    background: #ffffff;
     border: 1px solid #e2ebf7;
     border-radius: 8px;
 }
@@ -249,7 +249,7 @@ QCheckBox::indicator:disabled {
 QTableWidget {
     background: #ffffff;
     border: 1px solid #dde8f6;
-    border-radius: 14px;
+    border-radius: 0;
     gridline-color: #e9eef7;
     alternate-background-color: #f8fbff;
     selection-background-color: #e8f2ff;
@@ -278,16 +278,16 @@ QAbstractScrollArea::corner {
     border: none;
 }
 QScrollBar:vertical {
-    width: 9px;
+    width: 10px;
     margin: 0;
     background: #edf3fb;
     border: none;
-    border-radius: 4px;
+    border-radius: 5px;
 }
 QScrollBar::handle:vertical {
     background: #b9c7dc;
     min-height: 28px;
-    border-radius: 3px;
+    border-radius: 5px;
     margin: 2px;
 }
 QScrollBar::handle:vertical:hover {
@@ -304,16 +304,16 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     border: none;
 }
 QScrollBar:horizontal {
-    height: 9px;
+    height: 10px;
     margin: 0;
     background: #edf3fb;
     border: none;
-    border-radius: 4px;
+    border-radius: 5px;
 }
 QScrollBar::handle:horizontal {
     background: #b9c7dc;
     min-width: 28px;
-    border-radius: 3px;
+    border-radius: 5px;
     margin: 2px;
 }
 QScrollBar::handle:horizontal:hover {
@@ -403,10 +403,15 @@ QProgressBar::chunk {
 QLabel#fishingPreview {
     background: #eef4fb;
     border: 1px solid #d9e5f3;
-    border-radius: 10px;
+    border-radius: 6px;
     color: #7583a2;
 }
 """
+
+
+_SVG_TEXT_CACHE: dict[str, str] = {}
+_SVG_BYTES_CACHE: dict[tuple[str, str], QByteArray] = {}
+_SVG_RENDERER_CACHE: dict[tuple[str, str], QSvgRenderer] = {}
 
 
 def apply_sonar_style(widget: QWidget) -> None:
@@ -465,10 +470,29 @@ def _tint_svg_text(text: str, color: QColor | str) -> str:
 
 
 def _svg_bytes(path: Path, color: QColor | str | None = None) -> QByteArray:
-    text = path.read_text(encoding="utf-8", errors="ignore")
+    cache_key = (str(path), QColor(color).name() if color is not None else "")
+    cached = _SVG_BYTES_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    path_key = str(path)
+    text = _SVG_TEXT_CACHE.get(path_key)
+    if text is None:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        _SVG_TEXT_CACHE[path_key] = text
     if color is not None:
         text = _tint_svg_text(text, color)
-    return QByteArray(text.encode("utf-8"))
+    data = QByteArray(text.encode("utf-8"))
+    _SVG_BYTES_CACHE[cache_key] = data
+    return data
+
+
+def _svg_renderer(path: Path, color: QColor | str | None = None) -> QSvgRenderer:
+    cache_key = (str(path), QColor(color).name() if color is not None else "")
+    renderer = _SVG_RENDERER_CACHE.get(cache_key)
+    if renderer is None:
+        renderer = QSvgRenderer(_svg_bytes(path, color))
+        _SVG_RENDERER_CACHE[cache_key] = renderer
+    return renderer
 
 
 def tinted_icon_from_path(path: Path, color: str | QColor, size: int = 32) -> QIcon:
@@ -476,7 +500,7 @@ def tinted_icon_from_path(path: Path, color: str | QColor, size: int = 32) -> QI
         return QIcon()
     if path.suffix.lower() != ".svg":
         return QIcon(str(path))
-    renderer = QSvgRenderer(_svg_bytes(path, color))
+    renderer = _svg_renderer(path, color)
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -525,7 +549,7 @@ class SvgIcon(QWidget):
         del event
         if not self.path.exists():
             return
-        renderer = QSvgRenderer(_svg_bytes(self.path, self._color))
+        renderer = _svg_renderer(self.path, self._color)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         renderer.render(painter)
@@ -544,9 +568,9 @@ class Card(QFrame):
         self.setAutoFillBackground(True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(18)
-        shadow.setOffset(0, 5)
-        shadow.setColor(QColor(32, 55, 95, 22))
+        shadow.setBlurRadius(14)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(32, 55, 95, 18))
         self.setGraphicsEffect(shadow)
 
 
@@ -1072,24 +1096,24 @@ def icon_widget(icon: str | Path, size: int = 28, fallback_style: str = "font-si
 class MetricCard(Card):
     def __init__(self, label: str, value: str = "—", icon: str | Path = "", parent: QWidget | None = None) -> None:
         super().__init__(parent, soft=True)
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(7)
-        if icon:
-            layout.addWidget(icon_widget(icon, 20))
-        text_layout = QVBoxLayout()
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(2)
+        layout.setSpacing(5)
         self.value_label = QLabel(value)
         self.value_label.setProperty("metricValue", True)
         self.value_label.setMinimumWidth(0)
         self.value_label.setWordWrap(True)
+        layout.addWidget(self.value_label)
+        label_row = QHBoxLayout()
+        label_row.setContentsMargins(0, 0, 0, 0)
+        label_row.setSpacing(6)
+        if icon:
+            label_row.addWidget(icon_widget(icon, 17), 0, Qt.AlignmentFlag.AlignVCenter)
         self.label_label = QLabel(label)
         self.label_label.setProperty("metricLabel", True)
         self.label_label.setWordWrap(True)
-        text_layout.addWidget(self.value_label)
-        text_layout.addWidget(self.label_label)
-        layout.addLayout(text_layout, 1)
+        label_row.addWidget(self.label_label, 1)
+        layout.addLayout(label_row)
 
     def set_value(self, value: str) -> None:
         if self.value_label.text() == value:
@@ -1122,6 +1146,7 @@ class SettingCard(Card):
         text_layout.setSpacing(2)
         title_label = QLabel(title)
         title_label.setProperty("sectionTitle", True)
+        title_label.setWordWrap(True)
         text_layout.addWidget(title_label)
         if subtitle:
             subtitle_label = QLabel(subtitle)

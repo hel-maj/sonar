@@ -65,6 +65,7 @@ load_dotenv()
 
 MIN_SALT_BYTES = 100 * 1024
 MAX_SALT_BYTES = 50 * 1024 * 1024
+BUILD_KEY_LENGTH = 11
 ICON_SIZES = ((16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256))
 INVALID_FILENAME_CHARS = set('<>:"/\\|?*')
 RESERVED_WINDOWS_NAMES = {
@@ -308,6 +309,10 @@ def random_hex(rng: random.Random, size: int) -> str:
     return random_bytes(rng, size).hex()
 
 
+def random_hex_chars(rng: random.Random, length: int) -> str:
+    return "".join(f"{rng.randrange(16):x}" for _ in range(length))
+
+
 def encrypt_literal(plain: str, build_key: str, salt: bytes) -> str:
     payload = plain.encode("utf-8")
     stream = key_stream(build_key, salt, len(payload))
@@ -349,7 +354,7 @@ def prepare_build(args: argparse.Namespace) -> dict[str, Any]:
     icon_png = choose_icon(args.icons_dir.resolve(), args.history_file.resolve(), rng, use_history=not bool(args.seed))
     app_name = sanitize_windows_stem(icon_png.stem)
     build_hash = random_hex(rng, 16)
-    build_key = args.build_key or random_hex(rng, 32)
+    build_key = args.build_key or random_hex_chars(rng, BUILD_KEY_LENGTH)
     icon_ico = resources_dir / "app.ico"
     salt_path = resources_dir / "build_salt.bin"
 
