@@ -703,6 +703,46 @@ def test_caught_fish_notification_decorates_valid_photo_with_blurred_background(
     assert "до 150 $" not in photo_call[1]["data"]["caption"]
 
 
+def test_catch_photo_release_uses_distinct_background_accent():
+    source = BytesIO()
+    Image.new("RGBA", (80, 44), (185, 112, 38, 255)).save(source, format="PNG")
+    source_bytes = source.getvalue()
+
+    kept_bytes = NotificationManager._decorate_catch_photo(source_bytes, released=False)
+    released_bytes = NotificationManager._decorate_catch_photo(source_bytes, released=True)
+
+    assert kept_bytes != source_bytes
+    assert released_bytes != source_bytes
+    assert kept_bytes != released_bytes
+    assert Image.open(BytesIO(kept_bytes)).size == Image.open(BytesIO(released_bytes)).size
+
+
+def test_catch_photo_output_size_is_fixed_for_different_source_crops():
+    first = BytesIO()
+    second = BytesIO()
+    Image.new("RGBA", (80, 44), (185, 112, 38, 255)).save(first, format="PNG")
+    Image.new("RGBA", (96, 48), (185, 112, 38, 255)).save(second, format="PNG")
+
+    first_decorated = Image.open(BytesIO(NotificationManager._decorate_catch_photo(first.getvalue())))
+    second_decorated = Image.open(BytesIO(NotificationManager._decorate_catch_photo(second.getvalue())))
+    expected_size = (
+        notifier_module.CATCH_FOREGROUND_TARGET_SIZE[0] + notifier_module.CATCH_CANVAS_PADDING_PX,
+        notifier_module.CATCH_FOREGROUND_TARGET_SIZE[1] + notifier_module.CATCH_CANVAS_PADDING_PX,
+    )
+
+    assert first_decorated.size == expected_size
+    assert second_decorated.size == expected_size
+
+
+def test_catch_foreground_frame_layer_has_fixed_size_without_shadow_margin():
+    source = Image.new("RGBA", notifier_module.CATCH_FOREGROUND_TARGET_SIZE, (185, 112, 38, 255))
+    framed = NotificationManager._decorate_catch_foreground(source)
+    expected_width = notifier_module.CATCH_FOREGROUND_TARGET_SIZE[0] + notifier_module.CATCH_FOREGROUND_EDGE_PADDING_PX * 2 + 4
+    expected_height = notifier_module.CATCH_FOREGROUND_TARGET_SIZE[1] + notifier_module.CATCH_FOREGROUND_EDGE_PADDING_PX * 2 + 4
+
+    assert framed.size == (expected_width, expected_height)
+
+
 def test_meal_notification_includes_item_effect_details(monkeypatch):
     calls = []
     manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1], notify_meal=True))

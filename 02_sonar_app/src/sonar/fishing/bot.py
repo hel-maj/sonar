@@ -62,6 +62,7 @@ DEBUG_CAPTURE_CSV_NAME = "metadata.csv"
 DEBUG_CAPTURE_WEIGHT_THRESHOLD_KG = 15.0
 START_STOP_SOUND_VOLUME = 0.3
 AUTO_STOP_TIMEOUT_SECONDS = 40.0
+AUTO_STOP_SCREENSHOT_DELAY_SECONDS = 5.0
 STOP_REASON_MANUAL = "вручную"
 STOP_REASON_START_FAILED = "не смог начать рыбалку в течение 40 секунд"
 STOP_REASON_NO_STAGE = "не в зоне рыбалки или не видно стадии рыбалки 40 секунд"
@@ -218,6 +219,7 @@ class FishingBot:
         self._inventory_space_low_notified = False
         self._player_status_scan_requested = False
         self._active_tackle_scanned_stages: set[str] = set()
+        self._session_started_with_net: bool | None = None
         self.inventory_full = False
         self.settings: FishingSettings = self.config_manager.load().fishing
         self.reeling_tracker.configure_manual_mode(self.manual_reeling_mode)
@@ -352,6 +354,7 @@ class FishingBot:
         self._inventory_space_low_notified = False
         self._player_status_scan_requested = False
         self._active_tackle_scanned_stages = set()
+        self._session_started_with_net = None
         self._last_catch_result = None
         self._no_stage_since = None
         self._start_attempt_since = None
@@ -389,8 +392,7 @@ class FishingBot:
 
     def _stop_from_brain(self, reason: str) -> None:
         was_running = self._begin_stop()
-        screenshot_bytes = self._capture_auto_stop_screenshot(reason) if was_running else None
-        self._finish_stop(was_running, reason, auto_stop_screenshot=screenshot_bytes)
+        self._finish_stop(was_running, reason, capture_auto_stop_screenshot=was_running)
 
     def _begin_stop(self) -> bool:
         lock = getattr(self, "_stop_state_lock", None)
@@ -413,15 +415,34 @@ class FishingBot:
         finally:
             self._join_brain_thread()
 
-    def _finish_stop(self, was_running: bool, reason: str, *, auto_stop_screenshot: bytes | None = None) -> None:
+    def _finish_stop(
+        self,
+        was_running: bool,
+        reason: str,
+        *,
+        auto_stop_screenshot: bytes | None = None,
+        capture_auto_stop_screenshot: bool = False,
+    ) -> None:
         cleanup_lock = getattr(self, "_stop_cleanup_lock", None)
         if cleanup_lock is None:
             cleanup_lock = threading.Lock()
             self._stop_cleanup_lock = cleanup_lock
         with cleanup_lock:
-            self._finish_stop_locked(was_running, reason, auto_stop_screenshot=auto_stop_screenshot)
+            self._finish_stop_locked(
+                was_running,
+                reason,
+                auto_stop_screenshot=auto_stop_screenshot,
+                capture_auto_stop_screenshot=capture_auto_stop_screenshot,
+            )
 
-    def _finish_stop_locked(self, was_running: bool, reason: str, *, auto_stop_screenshot: bytes | None = None) -> None:
+    def _finish_stop_locked(
+        self,
+        was_running: bool,
+        reason: str,
+        *,
+        auto_stop_screenshot: bytes | None = None,
+        capture_auto_stop_screenshot: bool = False,
+    ) -> None:
         if hasattr(self, "_chat_pause_event"):
             self._chat_pause_event.clear()
         self._run_stop_step("reeling tracker", self.reeling_tracker.stop)
@@ -449,6 +470,11 @@ class FishingBot:
             if self.settings.start_stop_sound_enabled:
                 self._run_stop_step("stop sound", lambda: play_sound("bot_stop.wav", volume=START_STOP_SOUND_VOLUME))
             totals = self._run_stop_step("session totals", self.session_stats.totals)
+            if capture_auto_stop_screenshot:
+                auto_stop_screenshot = self._run_stop_step(
+                    "auto-stop screenshot",
+                    lambda: self._capture_auto_stop_screenshot(reason),
+                )
             if totals is not None:
                 self._run_stop_step(
                     "stop notification",
@@ -474,11 +500,18 @@ class FishingBot:
         if reason not in AUTO_STOP_SCREENSHOT_REASONS:
             return None
         try:
+            self._wait_before_auto_stop_screenshot()
             return self._capture_screenshot_bytes()
         except Exception as exc:
             debug_log(f"AUTO_STOP_SCREENSHOT_FAILED reason={reason} error={exc}")
-            self._log(f"Автостоп: не удалось сделать скриншот перед остановкой: {exc}")
+            self._log(f"Автостоп: не удалось сделать скриншот после остановки: {exc}")
             return None
+
+    def _wait_before_auto_stop_screenshot(self) -> None:
+        delay = max(0.0, AUTO_STOP_SCREENSHOT_DELAY_SECONDS)
+        deadline = time.time() + delay
+        while time.time() < deadline:
+            time.sleep(min(0.05, deadline - time.time()))
 
     def pause_for_chat(self, enabled: bool, *, restart_on_resume: bool = True) -> None:
         if not hasattr(self, "_chat_pause_event"):
@@ -2149,11 +2182,7 @@ class FishingBot:
             self._inventory_retry_after = float("inf")
             self._log("Питание: поиск еды отключён до следующего ручного перезапуска рыбалки")
             return
-        if action == "exit_game":
-            self._shutdown_game()
-        self._stop_from_brain("Закончилась еда")
-        if action == "shutdown_pc":
-            self._shutdown_pc()
+        self._stop_then_run_terminal_action(action, "Закончилась еда")
 
     def _do_backpack_actions(self) -> None:
         fish_to_keep = self.config_manager.get_fish_to_keep()
@@ -2310,11 +2339,17 @@ class FishingBot:
             return
         if action == "exit_game":
             self._log("Перевес: выключаю игру")
-            self._shutdown_game()
-            self._stop_from_brain(STOP_REASON_OVERWEIGHT)
+            self._stop_then_run_terminal_action(action, STOP_REASON_OVERWEIGHT)
             return
         self._log("Перевес: останавливаю рыбалку")
-        self._stop_from_brain(STOP_REASON_OVERWEIGHT)
+        self._stop_then_run_terminal_action(action, STOP_REASON_OVERWEIGHT)
+
+    def _stop_then_run_terminal_action(self, action: str, reason: str) -> None:
+        self._stop_from_brain(reason)
+        if action == "exit_game":
+            self._shutdown_game()
+        elif action == "shutdown_pc":
+            self._shutdown_pc()
 
     def _shutdown_game(self) -> None:
         wanted = self.process_name.lower()
@@ -2438,6 +2473,7 @@ class FishingBot:
         if scan.obscured:
             self._log("Снаряжение: проверка пропущена, панель всё ещё перекрыта уведомлением")
             return True
+        self._remember_session_start_net_state(scan)
         self._log("Снаряжение:\n" + format_tackle_items(scan.items))
         depletion = self._find_tackle_depletion(scan)
         if depletion is None:
@@ -2561,6 +2597,8 @@ class FishingBot:
                 )
                 self._log("Снаряжение: Закончились крючки/поводки, продолжаю по настройке")
             if item.key == "net" and self.settings.fish_without_net:
+                if not self._should_notify_net_depleted():
+                    continue
                 self._publish_ui_event(
                     "Подсак закончился",
                     event_type="warning",
@@ -2578,11 +2616,14 @@ class FishingBot:
     def _perform_tackle_depleted_action(self, action: str, reason: str) -> None:
         self._publish_ui_event("Снаряжение закончилось", event_type="danger", icon="warning.svg", detail=reason)
         self._log(f"Снаряжение закончилось: {reason}")
-        if action == "exit_game":
-            self._shutdown_game()
-        self._stop_from_brain(reason)
-        if action == "shutdown_pc":
-            self._shutdown_pc()
+        self._stop_then_run_terminal_action(action, reason)
+
+    def _remember_session_start_net_state(self, scan: TackleScanResult) -> None:
+        if getattr(self, "_session_started_with_net", None) is None:
+            self._session_started_with_net = scan.count_for("net") > 0
+
+    def _should_notify_net_depleted(self) -> bool:
+        return getattr(self, "_session_started_with_net", None) is not False
 
     def _press_fishing_start(self) -> bool:
         self._focus_game()

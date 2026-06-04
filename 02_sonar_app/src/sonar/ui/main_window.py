@@ -1859,6 +1859,12 @@ class MainWindow(QMainWindow):
             ("Stream URL", self.stream_url_label),
         ):
             status_layout.addLayout(self._compact_form_row(label, widget, label_stretch=2, value_stretch=1))
+        stream_public_link_note = QLabel(
+            "Публичная ссылка может быть недоступна из-за ограничений провайдера в сторону cloudflare. Vpn может помочь"
+        )
+        stream_public_link_note.setWordWrap(True)
+        stream_public_link_note.setStyleSheet("font-size: 10px; font-weight: 700; color: #f59e0b;")
+        status_layout.addWidget(stream_public_link_note)
         buttons = QHBoxLayout()
         buttons.setSpacing(9)
         self.stream_start_button = ActionButton("Запустить стрим", "primary", icon=ui_icon("play_white.svg"), size="s")

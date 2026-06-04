@@ -913,6 +913,40 @@ def test_missing_net_is_allowed_by_default():
     assert reasons == []
 
 
+def test_missing_net_from_session_start_does_not_publish_allowed_warning():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings()
+    bot._session_started_with_net = False
+    reasons: list[str] = []
+    events: list[str] = []
+    logs: list[str] = []
+    bot._publish_ui_event = lambda title, **kwargs: events.append(title)
+    bot._log = logs.append
+    bot._stop_from_brain = reasons.append
+
+    handled = bot._handle_tackle_depletion(make_tackle_scan({"net": 0}))
+
+    assert handled is False
+    assert reasons == []
+    assert events == []
+    assert not any("Подсак закончился" in message for message in logs)
+
+
+def test_missing_net_from_session_start_still_stops_when_required():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(fish_without_net=False)
+    bot._session_started_with_net = False
+    reasons: list[str] = []
+    bot._publish_ui_event = lambda title, **kwargs: None
+    bot._log = lambda message: None
+    bot._stop_from_brain = reasons.append
+
+    handled = bot._handle_tackle_depletion(make_tackle_scan({"net": 0}))
+
+    assert handled is True
+    assert reasons == ["Подсак закончился"]
+
+
 def test_empty_tackle_scan_is_retried_instead_of_missing_rod_stop():
     class SequenceTackleDetector:
         def __init__(self) -> None:
@@ -1090,7 +1124,7 @@ def test_generic_equipment_action_can_close_game():
     handled = bot._handle_tackle_depletion(make_tackle_scan({"line": 0}))
 
     assert handled is True
-    assert calls == ["shutdown_game", "Кончилась леска"]
+    assert calls == ["Кончилась леска", "shutdown_game"]
 
 
 def test_debug_capture_writes_only_when_debug_enabled(tmp_path, monkeypatch):
@@ -1184,20 +1218,25 @@ def test_reeling_loss_release_log_is_encrypted_and_rotated(tmp_path, monkeypatch
 
 
 def test_auto_stop_sends_screenshot_with_stop_notification():
+    events: list[str] = []
+
     class DummyReelingTracker:
         def stop(self) -> None:
-            pass
+            events.append("reeling_stop")
 
     class DummyCloser:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
         def close(self) -> None:
-            pass
+            events.append(self.name)
 
     class DummyMealSystem:
-        status_memory_detector = DummyCloser()
+        status_memory_detector = DummyCloser("meal_close")
 
     class DummyInputController:
         def release_all_keys(self) -> None:
-            pass
+            events.append("release_all")
 
     class DummySessionStats:
         def __init__(self) -> None:
@@ -1205,6 +1244,7 @@ def test_auto_stop_sends_screenshot_with_stop_notification():
 
         def stop_timer(self) -> None:
             self.stopped = True
+            events.append("timer_stop")
 
         def totals(self):
             return object()
@@ -1217,12 +1257,13 @@ def test_auto_stop_sends_screenshot_with_stop_notification():
         def notify_fishing_stopped(self, _totals, *, reason=None, image_bytes=None) -> None:
             self.reason = reason
             self.image_bytes = image_bytes
+            events.append("notify_stop")
 
     bot = FishingBot.__new__(FishingBot)
     bot.state = BotState(running=True)
     bot._stop_event = threading.Event()
     bot.reeling_tracker = DummyReelingTracker()
-    bot.inventory_memory_detector = DummyCloser()
+    bot.inventory_memory_detector = DummyCloser("inventory_close")
     bot.meal_system = DummyMealSystem()
     bot.input_controller = DummyInputController()
     bot.settings = FishingSettings(start_stop_sound_enabled=False)
@@ -1230,13 +1271,17 @@ def test_auto_stop_sends_screenshot_with_stop_notification():
     bot.notification_manager = DummyNotifier()
     bot._log = lambda _message: None
     bot._publish_ui_event = lambda *_args, **_kwargs: None
-    bot._capture_screenshot_bytes = lambda: b"screen"
+    bot._wait_before_auto_stop_screenshot = lambda: events.append("wait_screenshot")
+    bot._capture_screenshot_bytes = lambda: events.append("capture_screenshot") or b"screen"
 
     bot._stop_from_brain(bot_module.STOP_REASON_NO_STAGE)
 
     assert bot.notification_manager.reason == bot_module.STOP_REASON_NO_STAGE
     assert bot.notification_manager.image_bytes == b"screen"
     assert bot.session_stats.stopped is True
+    assert events.index("timer_stop") < events.index("wait_screenshot")
+    assert events.index("wait_screenshot") < events.index("capture_screenshot")
+    assert events.index("capture_screenshot") < events.index("notify_stop")
 
 
 def test_stop_async_returns_before_cleanup_finishes():
@@ -1760,7 +1805,7 @@ def test_food_depleted_continue_disables_meal_search_until_restart():
     assert bot._stop_reasons == []
 
 
-def test_food_depleted_shutdown_game_stops_bot_after_closing_game():
+def test_food_depleted_shutdown_game_runs_after_stop():
     bot = make_food_depleted_bot("exit_game")
 
     bot._handle_food_depleted()
