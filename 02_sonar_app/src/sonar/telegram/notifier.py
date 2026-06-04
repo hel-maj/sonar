@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import ipaddress
 import random
 import re
@@ -15,7 +16,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 import requests
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 
 from sonar.config.models import TelegramSettings
 from sonar.fishing.item_info import ItemInfo
@@ -38,6 +39,15 @@ STREAM_MENU_REFRESH_MAX_SECONDS = 4 * 60 * 60.0
 STREAM_MENU_PUBLIC_URL_GRACE_SECONDS = 8.0
 STREAM_LINK_DELIVERY_INTERVAL_SECONDS = 1.0
 STREAM_LINK_DELIVERY_MAX_SECONDS = 60.0
+CATCH_BACKGROUND_COLORS = ((11, 11, 11), (36, 36, 36), (232, 28, 90))
+CATCH_BACKGROUND_RELEASE_ACCENT = (135, 103, 114)
+CATCH_FOREGROUND_TARGET_SIZE = (410, 478)
+CATCH_CANVAS_PADDING_PX = 180
+CATCH_FOREGROUND_EDGE_FILL = (11, 11, 11, 255)
+CATCH_FOREGROUND_EDGE_PADDING_PX = 8
+CATCH_FRAME_INSET_PX = 8
+CATCH_FRAME_SHADOW_PRIMARY_ALPHA = 124
+CATCH_FRAME_SHADOW_SECONDARY_ALPHA = 68
 
 
 @dataclass(slots=True)
@@ -197,7 +207,7 @@ class NotificationManager:
             released=released,
         )
         if image_bytes is not None:
-            image_bytes = self._decorate_catch_photo(image_bytes)
+            image_bytes = self._decorate_catch_photo(image_bytes, released=bool(released))
         if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message):
             return
         self.send_message(message)
@@ -941,7 +951,7 @@ class NotificationManager:
             return None
 
     @staticmethod
-    def _decorate_catch_photo(image_bytes: bytes) -> bytes:
+    def _decorate_catch_photo(image_bytes: bytes, *, released: bool = False) -> bytes:
         try:
             with Image.open(BytesIO(image_bytes)) as image:
                 original = ImageOps.exif_transpose(image).convert("RGBA")
@@ -952,34 +962,264 @@ class NotificationManager:
                 crop_top = min(height // 3, max(0, int(round(height * 0.01))))
                 if (crop_x > 0 or crop_top > 0) and width - crop_x * 2 > 1 and height - crop_top > 1:
                     original = original.crop((crop_x, crop_top, width - crop_x, height))
-                    width, height = original.size
-                canvas_width = max(width, int(round(width * 1.35)))
-                canvas_height = max(height, int(round(height * 1.35)))
-                sample_source = Image.new("RGB", original.size, (34, 48, 64))
-                sample_source.paste(original.convert("RGB"), mask=original.getchannel("A"))
-                sample = sample_source.resize((24, 24), Image.Resampling.BILINEAR)
-                colors = list(sample.getdata())
-                random.SystemRandom().shuffle(colors)
-                background_seed = Image.new("RGB", sample.size)
-                background_seed.putdata(colors)
-                background = background_seed.resize((canvas_width, canvas_height), Image.Resampling.BICUBIC)
-                background = background.filter(ImageFilter.GaussianBlur(radius=max(18, max(canvas_width, canvas_height) // 14)))
-                background = ImageEnhance.Color(background).enhance(1.65)
-                background = ImageEnhance.Contrast(background).enhance(1.18)
-                background = ImageEnhance.Brightness(background).enhance(1.06)
-                max_foreground_width = int(canvas_width * 0.82)
-                max_foreground_height = int(canvas_height * 0.82)
-                foreground = original.copy()
-                foreground.thumbnail((max_foreground_width, max_foreground_height), Image.Resampling.LANCZOS)
-                x = (canvas_width - foreground.width) // 2
-                y = (canvas_height - foreground.height) // 2
-                background = background.convert("RGBA")
-                background.alpha_composite(foreground, (x, y))
+                original = original.resize(CATCH_FOREGROUND_TARGET_SIZE, Image.Resampling.BICUBIC)
+                width, height = original.size
+                canvas_width = width + CATCH_CANVAS_PADDING_PX
+                canvas_height = height + CATCH_CANVAS_PADDING_PX
+                framed = NotificationManager._decorate_catch_foreground(original)
+                background = NotificationManager._build_catch_background(
+                    original,
+                    canvas_width,
+                    canvas_height,
+                    released=released,
+                )
+                x = (canvas_width - framed.width) // 2
+                y = (canvas_height - framed.height) // 2
+                NotificationManager._draw_catch_frame_shadow(
+                    background,
+                    (x, y, x + framed.width - 1, y + framed.height - 1),
+                )
+                background.alpha_composite(framed, (x, y))
                 output = BytesIO()
                 background.save(output, format="PNG")
                 return output.getvalue()
         except Exception:
             return image_bytes
+
+    @staticmethod
+    def _build_catch_background(image: Image.Image, canvas_width: int, canvas_height: int, *, released: bool) -> Image.Image:
+        center_color = NotificationManager._sample_center_color(image)
+        accent = CATCH_BACKGROUND_RELEASE_ACCENT if released else CATCH_BACKGROUND_COLORS[2]
+        palette = (CATCH_BACKGROUND_COLORS[0], CATCH_BACKGROUND_COLORS[1], accent, center_color)
+
+        sample_source = Image.new("RGB", image.size, palette[1])
+        sample_source.paste(image.convert("RGB"), mask=image.getchannel("A"))
+        sample = sample_source.resize((30, 30), Image.Resampling.BILINEAR)
+        seed = int.from_bytes(hashlib.blake2b(image.tobytes(), digest_size=8).digest(), "big")
+        rng = random.Random(seed)
+
+        colors: list[tuple[int, int, int]] = []
+        for red, green, blue in sample.getdata():
+            luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0
+            saturation = (max(red, green, blue) - min(red, green, blue)) / 255.0
+            tone = luminance + rng.uniform(-0.14, 0.14)
+            accent_chance = 0.16 + saturation * 0.24 + max(0.0, tone - 0.24) * 0.22
+            center_chance = 0.07 + saturation * 0.16 + luminance * 0.08
+            roll = rng.random()
+            if roll < accent_chance:
+                color = palette[2]
+            elif roll < accent_chance + center_chance:
+                color = palette[3]
+            elif tone < 0.22:
+                color = palette[0]
+            elif tone < 0.48:
+                color = palette[1]
+            else:
+                color = palette[2] if rng.random() < 0.72 else palette[3]
+            colors.append(NotificationManager._mix_rgb(color, palette[1], rng.random() * 0.12))
+        rng.shuffle(colors)
+
+        background_seed = Image.new("RGB", sample.size)
+        background_seed.putdata(colors)
+        background = background_seed.resize((canvas_width, canvas_height), Image.Resampling.BICUBIC)
+        background = background.filter(ImageFilter.GaussianBlur(radius=max(18, max(canvas_width, canvas_height) // 14)))
+        background = ImageEnhance.Color(background).enhance(1.35)
+        background = ImageEnhance.Contrast(background).enhance(1.12)
+        background = background.convert("RGBA")
+
+        vignette = Image.new("L", (96, 96), 0)
+        vignette_pixels = vignette.load()
+        for y in range(96):
+            for x in range(96):
+                dx = (x - 47.5) / 47.5
+                dy = (y - 47.5) / 47.5
+                alpha = int(max(0.0, min(1.0, (dx * dx + dy * dy - 0.25) / 0.9)) * 88)
+                vignette_pixels[x, y] = alpha
+        vignette = vignette.resize((canvas_width, canvas_height), Image.Resampling.BICUBIC)
+        background.alpha_composite(Image.new("RGBA", background.size, (0, 0, 0, 0)))
+        background.alpha_composite(Image.composite(Image.new("RGBA", background.size, (0, 0, 0, 120)), Image.new("RGBA", background.size, (0, 0, 0, 0)), vignette))
+        return background
+
+    @staticmethod
+    def _sample_center_color(image: Image.Image) -> tuple[int, int, int]:
+        width, height = image.size
+        box_width = max(1, width // 8)
+        box_height = max(1, height // 8)
+        left = max(0, width // 2 - box_width // 2)
+        top = max(0, height // 2 - box_height // 2)
+        crop = image.crop((left, top, min(width, left + box_width), min(height, top + box_height))).convert("RGBA")
+        total_alpha = 0
+        red_total = green_total = blue_total = 0
+        for red, green, blue, alpha in crop.getdata():
+            if alpha <= 8:
+                continue
+            total_alpha += alpha
+            red_total += red * alpha
+            green_total += green * alpha
+            blue_total += blue * alpha
+        if total_alpha <= 0:
+            return CATCH_BACKGROUND_COLORS[1]
+        return red_total // total_alpha, green_total // total_alpha, blue_total // total_alpha
+
+    @staticmethod
+    def _mix_rgb(first: tuple[int, int, int], second: tuple[int, int, int], amount: float) -> tuple[int, int, int]:
+        amount = max(0.0, min(1.0, amount))
+        return tuple(int(round(a * (1.0 - amount) + b * amount)) for a, b in zip(first, second))
+
+    @staticmethod
+    def _decorate_catch_foreground(foreground: Image.Image) -> Image.Image:
+        foreground = foreground.convert("RGBA")
+        foreground = ImageOps.expand(foreground, border=CATCH_FOREGROUND_EDGE_PADDING_PX, fill=CATCH_FOREGROUND_EDGE_FILL)
+        width, height = foreground.size
+        padding = 2
+        outer_width = width + padding * 2
+        outer_height = height + padding * 2
+        radius = max(14, int(round(min(width, height) * 0.045)))
+        inner_radius = max(10, radius - 3)
+        canvas = Image.new("RGBA", (outer_width, outer_height), (0, 0, 0, 0))
+        outer_rect = (
+            0,
+            0,
+            outer_width - 1,
+            outer_height - 1,
+        )
+
+        draw = ImageDraw.Draw(canvas, "RGBA")
+        draw.rounded_rectangle(outer_rect, radius=radius, fill=(255, 255, 255, 31), outline=(255, 255, 255, 61), width=1)
+        image_pos = (padding, padding)
+        image_mask = NotificationManager._rounded_mask(foreground.size, inner_radius)
+        foreground_alpha = ImageChops.multiply(foreground.getchannel("A"), image_mask)
+        foreground.putalpha(foreground_alpha)
+        canvas.alpha_composite(foreground, image_pos)
+
+        glass = NotificationManager._glass_overlay((outer_width, outer_height), radius)
+        canvas.alpha_composite(glass, (0, 0))
+        inset = CATCH_FRAME_INSET_PX
+        inner_rect = (
+            outer_rect[0] + inset,
+            outer_rect[1] + inset,
+            outer_rect[2] - inset,
+            outer_rect[3] - inset,
+        )
+        draw.rounded_rectangle(inner_rect, radius=max(6, radius - 7), outline=(0, 0, 0, 26), width=2)
+        draw.rounded_rectangle(inner_rect, radius=max(6, radius - 7), outline=(255, 255, 255, 61), width=1)
+        NotificationManager._add_catch_glare(canvas, outer_rect, small=False)
+        NotificationManager._add_catch_glare(canvas, outer_rect, small=True)
+        return canvas
+
+    @staticmethod
+    def _draw_catch_frame_shadow(canvas: Image.Image, rect: tuple[int, int, int, int]) -> None:
+        width = rect[2] - rect[0] + 1
+        height = rect[3] - rect[1] + 1
+        radius = max(14, int(round(min(width, height) * 0.045)))
+        shadow_base = max(18, int(round(min(width, height) * 0.055)))
+        NotificationManager._draw_rounded_shadow(
+            canvas,
+            rect,
+            radius,
+            (0, int(shadow_base * 0.9)),
+            int(shadow_base * 2.0),
+            (0, 0, 0, CATCH_FRAME_SHADOW_PRIMARY_ALPHA),
+        )
+        NotificationManager._draw_rounded_shadow(
+            canvas,
+            rect,
+            radius,
+            (0, int(shadow_base * 0.35)),
+            int(shadow_base * 0.75),
+            (0, 0, 0, CATCH_FRAME_SHADOW_SECONDARY_ALPHA),
+        )
+
+    @staticmethod
+    def _draw_rounded_shadow(
+        canvas: Image.Image,
+        rect: tuple[int, int, int, int],
+        radius: int,
+        offset: tuple[int, int],
+        blur: int,
+        color: tuple[int, int, int, int],
+    ) -> None:
+        mask = Image.new("L", canvas.size, 0)
+        shadow_rect = (
+            rect[0] + offset[0],
+            rect[1] + offset[1],
+            rect[2] + offset[0],
+            rect[3] + offset[1],
+        )
+        ImageDraw.Draw(mask).rounded_rectangle(shadow_rect, radius=radius, fill=color[3])
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=blur))
+        shadow = Image.new("RGBA", canvas.size, color[:3] + (0,))
+        shadow.putalpha(mask)
+        canvas.alpha_composite(shadow)
+
+    @staticmethod
+    def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
+        mask = Image.new("L", size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius=radius, fill=255)
+        return mask
+
+    @staticmethod
+    def _glass_overlay(size: tuple[int, int], radius: int) -> Image.Image:
+        width, height = size
+        overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+        pixels = overlay.load()
+        for y in range(height):
+            for x in range(width):
+                diagonal = (x + y) / max(1, width + height)
+                if diagonal < 0.22:
+                    alpha = int(36 * (1.0 - diagonal / 0.22))
+                    pixels[x, y] = (255, 255, 255, alpha)
+                elif diagonal > 0.58:
+                    alpha = int(22 * min(1.0, (diagonal - 0.58) / 0.42))
+                    pixels[x, y] = (0, 0, 0, alpha)
+        mask = NotificationManager._rounded_mask(size, max(1, radius - 3))
+        radial = Image.new("L", size, 0)
+        radial_pixels = radial.load()
+        center_x = width * 0.24
+        center_y = height * 0.10
+        max_distance = max(1.0, min(width, height) * 0.38)
+        for y in range(height):
+            for x in range(width):
+                distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                if distance < max_distance:
+                    radial_pixels[x, y] = int((1.0 - distance / max_distance) * 32)
+        radial_layer = Image.new("RGBA", size, (255, 255, 255, 0))
+        radial_layer.putalpha(ImageChops.multiply(radial, mask))
+        overlay.putalpha(ImageChops.multiply(overlay.getchannel("A"), mask))
+        overlay.alpha_composite(radial_layer)
+        return overlay
+
+    @staticmethod
+    def _add_catch_glare(canvas: Image.Image, rect: tuple[int, int, int, int], *, small: bool) -> None:
+        left, top, right, bottom = rect
+        width = right - left + 1
+        height = bottom - top + 1
+        if small:
+            glare_size = (max(12, int(width * 0.22)), max(18, int(height * 0.38)))
+            position = (right - int(width * 0.26), bottom - int(height * 0.45))
+            angle = 6
+            alpha = 14
+        else:
+            glare_size = (max(24, int(width * 0.52)), max(16, int(height * 0.24)))
+            position = (left + int(width * 0.05), top + int(height * 0.04))
+            angle = -12
+            alpha = 24
+        glare = Image.new("RGBA", glare_size, (0, 0, 0, 0))
+        glare_pixels = glare.load()
+        center_x = glare_size[0] * (0.18 if not small else 0.5)
+        center_y = glare_size[1] * (0.25 if not small else 0.0)
+        max_distance = max(1.0, (glare_size[0] ** 2 + glare_size[1] ** 2) ** 0.5)
+        for y in range(glare_size[1]):
+            for x in range(glare_size[0]):
+                distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                fade = max(0.0, 1.0 - distance / max_distance)
+                directional = max(0.0, 1.0 - x / max(1, glare_size[0])) if not small else max(0.0, 1.0 - y / max(1, glare_size[1]))
+                glare_pixels[x, y] = (255, 255, 255, int(alpha * fade * (0.35 + directional * 0.65)))
+        glare_mask = NotificationManager._rounded_mask(glare_size, max(6, min(glare_size) // 2))
+        glare.putalpha(ImageChops.multiply(glare.getchannel("A"), glare_mask))
+        glare = glare.filter(ImageFilter.GaussianBlur(radius=0.4 if not small else 0.3))
+        glare = glare.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+        canvas.alpha_composite(glare, position)
 
     @staticmethod
     def _format_meal_message(item_name: str, item_info: ItemInfo | None, player_status: PlayerStatus | None = None) -> str:
