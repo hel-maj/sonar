@@ -80,6 +80,7 @@ from sonar.self_uninstall import get_uninstall_availability, schedule_self_unins
 from sonar.streaming import StreamingService
 from sonar.streaming.chat import ChatActionResult, ChatDetection, MajesticChatController
 from sonar.streaming.service import STREAM_QUALITIES
+from sonar.telegram.notifier import check_telegram_bot_access
 from sonar.ui.feature_gate import apply_page_feature_gate, fallback_page
 from sonar.ui.widgets import (
     ActionButton,
@@ -120,6 +121,9 @@ RECENT_EVENT_LIMIT = 400
 RECENT_EVENT_RENDER_LIMIT = 80
 SYSTEM_STATE_REFRESH_INTERVAL_SECONDS = 1.5
 FISHING_PREVIEW_INTERVAL_MS = 2000
+TELEGRAM_AVAILABILITY_CHECK_INTERVAL_MS = 5000
+TELEGRAM_AVAILABILITY_DEBOUNCE_MS = 700
+TELEGRAM_AVAILABILITY_TIMEOUT_SECONDS = 4.0
 
 STATS_FILTER_CURRENT = "current"
 STATS_FILTER_SESSION = "session"
@@ -137,6 +141,13 @@ class RecentUiEvent:
     extra_green: str = ""
     extra_red: str = ""
     created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramAvailabilityResult:
+    signature: tuple[str, tuple[int, ...]]
+    ok: bool
+    error: str = ""
 
 
 def ui_icon(name: str) -> Path:
@@ -258,6 +269,10 @@ class LicenseBridge(QObject):
 
 class TelegramSettingsBridge(QObject):
     changed = Signal(object)
+
+
+class TelegramAvailabilityBridge(QObject):
+    result = Signal(object)
 
 
 class PlayerStatusBridge(QObject):
@@ -382,6 +397,8 @@ class MainWindow(QMainWindow):
         self.license_bridge.result.connect(self._handle_license_result)
         self.telegram_settings_bridge = TelegramSettingsBridge()
         self.telegram_settings_bridge.changed.connect(self._handle_telegram_settings_changed)
+        self.telegram_availability_bridge = TelegramAvailabilityBridge()
+        self.telegram_availability_bridge.result.connect(self._handle_telegram_availability_result)
         self.session_stats = FishingSessionStats(
             default_prices=parse_fish_prices_from_markdown(),
             custom_prices=self.settings.fishing.custom_fish_prices,
@@ -399,6 +416,14 @@ class MainWindow(QMainWindow):
         self._recent_events_render_signature: tuple[object, ...] | None = None
         self._last_bot_running = False
         self._archived_stats_signature: tuple[object, ...] | None = None
+        self._saved_fishing_settings_state: dict[str, object] = {}
+        self._saved_telegram_settings_state: dict[str, object] = {}
+        self._telegram_availability_signature: tuple[str, tuple[int, ...]] | None = None
+        self._telegram_available: bool | None = None
+        self._telegram_availability_error = ""
+        self._telegram_availability_checking = False
+        self._telegram_availability_checking_signature: tuple[str, tuple[int, ...]] | None = None
+        self._telegram_last_availability_check_at = 0.0
         self.log_bridge = LogBridge()
         self.log_bridge.message.connect(self.append_log)
         self.ui_events_bridge = UiEventsBridge()
@@ -418,7 +443,7 @@ class MainWindow(QMainWindow):
             session_stats=self.session_stats,
             can_start_callback=self._can_start_fishing,
             start_command_callback=self._start_bot_from_remote,
-            telegram_runtime_enabled_callback=lambda: self._can_use_feature(FEATURE_TELEGRAM),
+            telegram_runtime_enabled_callback=self._can_use_telegram_runtime,
             telegram_settings_changed_callback=self.telegram_settings_bridge.changed.emit,
             player_status_callback=self.player_status_bridge.updated.emit,
             keep_debug_capture=keep_debug_capture,
@@ -460,9 +485,15 @@ class MainWindow(QMainWindow):
         if icon_path is not None:
             self.setWindowIcon(QIcon(str(icon_path)))
         self.setFixedSize(1014, 690)
+        self.telegram_availability_debounce_timer = QTimer(self)
+        self.telegram_availability_debounce_timer.setSingleShot(True)
+        self.telegram_availability_debounce_timer.timeout.connect(self._telegram_availability_tick)
         self._build_ui()
         self._load_settings_to_ui(self.settings)
         self.telegram_enabled_check.stateChanged.connect(self._telegram_enabled_changed)
+        self._remember_saved_settings_state()
+        self._connect_settings_dirty_tracking()
+        self._refresh_settings_dirty_state()
         self._refresh_license_ui()
         self._refresh_update_block()
         if initial_license_status is not None:
@@ -494,11 +525,15 @@ class MainWindow(QMainWindow):
         self.stream_timer = QTimer(self)
         self.stream_timer.timeout.connect(self._refresh_stream_tab)
         self.stream_timer.start(1000)
+        self.telegram_availability_timer = QTimer(self)
+        self.telegram_availability_timer.timeout.connect(self._telegram_availability_tick)
+        self.telegram_availability_timer.start(TELEGRAM_AVAILABILITY_CHECK_INTERVAL_MS)
         self.license_timer = QTimer(self)
         self.license_timer.timeout.connect(self._license_tick)
         self.license_timer.start(1000)
         QTimer.singleShot(500, self._refresh_player_status)
         QTimer.singleShot(800, self._refresh_fishing_preview)
+        QTimer.singleShot(1000, self._telegram_availability_tick)
         QTimer.singleShot(0, self._notify_app_started)
 
     def _build_ui(self) -> None:
@@ -1001,7 +1036,7 @@ class MainWindow(QMainWindow):
         header.addWidget(icon_widget(ui_icon("stream.svg"), 21, color="#1f7aff"))
         title = QLabel("Стрим")
         title.setProperty("sectionTitle", True)
-        self.overview_stream_badge = Badge("Ожидание", "gray")
+        self.overview_stream_badge = Badge("Выключен", "gray")
         header.addWidget(title, 1)
         header.addWidget(self.overview_stream_badge)
         layout.addLayout(header)
@@ -1756,13 +1791,19 @@ class MainWindow(QMainWindow):
         self.telegram_token_input.setPlaceholderText("Токен бота")
         self.telegram_admins_input = QLineEdit()
         self.telegram_admins_input.setPlaceholderText("123456789, 987654321")
+        self.telegram_token_input.textChanged.connect(self._refresh_telegram_controls_state)
+        self.telegram_admins_input.textChanged.connect(self._refresh_telegram_controls_state)
         form.addWidget(title)
         form.addWidget(self.telegram_enabled_check)
         form.addLayout(self._field_block("Токен бота", self.telegram_token_input))
         form.addLayout(self._field_block("ID администраторов", self.telegram_admins_input))
-        button = ActionButton("Сохранить Telegram", "primary", icon=ui_icon("telegram_outline_white.svg"))
-        button.clicked.connect(self.save_settings)
-        form.addWidget(button)
+        self.telegram_bot_status_label = QLabel("Статус: Отключен")
+        self.telegram_bot_status_label.setProperty("muted", True)
+        self.telegram_bot_status_label.setWordWrap(True)
+        form.addWidget(self.telegram_bot_status_label)
+        self.save_telegram_button = ActionButton("Сохранить Telegram", "primary", icon=ui_icon("telegram_outline_white.svg"))
+        self.save_telegram_button.clicked.connect(self.save_settings)
+        form.addWidget(self.save_telegram_button)
         row.addWidget(group, 1, Qt.AlignmentFlag.AlignTop)
 
         notify = Card()
@@ -1805,6 +1846,24 @@ class MainWindow(QMainWindow):
                 notify_layout.addLayout(threshold_row)
         row.addWidget(notify, 1, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(row)
+        links = Card()
+        links_layout = QVBoxLayout(links)
+        links_layout.setContentsMargins(13, 12, 13, 13)
+        links_layout.setSpacing(7)
+        links_title = QLabel("Ссылки")
+        links_title.setProperty("sectionTitle", True)
+        links_text = QLabel(
+            'Получить токен бота: <a href="https://t.me/BotFather">https://t.me/BotFather</a><br>'
+            'Получить свой id: <a href="https://t.me/Getmyid_bot">https://t.me/Getmyid_bot</a>'
+        )
+        links_text.setTextFormat(Qt.TextFormat.RichText)
+        links_text.setOpenExternalLinks(True)
+        links_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        links_text.setWordWrap(True)
+        links_text.setProperty("muted", True)
+        links_layout.addWidget(links_title)
+        links_layout.addWidget(links_text)
+        layout.addWidget(links)
         layout.addStretch(1)
         return page
 
@@ -1829,6 +1888,183 @@ class MainWindow(QMainWindow):
             return max(1.0, round(float(value.replace(",", ".")), 2))
         except ValueError:
             return 1.0
+
+    @staticmethod
+    def _parse_telegram_admin_ids(value: str) -> list[int]:
+        return [int(item.strip()) for item in value.split(",") if item.strip().isdigit()]
+
+    @staticmethod
+    def _telegram_configuration_ready(bot_token: str, admin_ids: list[int]) -> bool:
+        return bool(bot_token.strip()) and bool(admin_ids)
+
+    def _telegram_credentials_from_ui(self) -> tuple[str, list[int]]:
+        return (
+            self.telegram_token_input.text().strip(),
+            self._parse_telegram_admin_ids(self.telegram_admins_input.text()),
+        )
+
+    @staticmethod
+    def _telegram_availability_key(bot_token: str, admin_ids: list[int] | tuple[int, ...]) -> tuple[str, tuple[int, ...]]:
+        return bot_token.strip(), tuple(admin_ids)
+
+    def _telegram_feature_allowed(self) -> bool:
+        if not hasattr(self, "license_status"):
+            return True
+        return self._can_use_feature(FEATURE_TELEGRAM)
+
+    def _telegram_accessible_for(self, bot_token: str, admin_ids: list[int] | tuple[int, ...]) -> bool:
+        signature = self._telegram_availability_key(bot_token, admin_ids)
+        return bool(getattr(self, "_telegram_available", None)) and signature == getattr(
+            self,
+            "_telegram_availability_signature",
+            None,
+        )
+
+    def _can_use_telegram_runtime(self) -> bool:
+        telegram = self.settings.telegram
+        if not telegram.enabled:
+            return False
+        if not self._telegram_feature_allowed():
+            return False
+        if not self._telegram_configuration_ready(telegram.bot_token, telegram.admin_ids):
+            return False
+        return self._telegram_accessible_for(telegram.bot_token, telegram.admin_ids)
+
+    def _telegram_enable_block_reason(self, bot_token: str, admin_ids: list[int]) -> str:
+        if not self._telegram_configuration_ready(bot_token, admin_ids):
+            return "укажите токен бота и ID администраторов"
+        if not self._telegram_feature_allowed():
+            return "функция Telegram недоступна для лицензии"
+        if self._telegram_accessible_for(bot_token, admin_ids):
+            return ""
+        signature = self._telegram_availability_key(bot_token, admin_ids)
+        if getattr(self, "_telegram_availability_checking_signature", None) == signature:
+            return "проверка доступности ещё не завершена"
+        error = getattr(self, "_telegram_availability_error", "")
+        if signature == getattr(self, "_telegram_availability_signature", None) and error:
+            return error
+        return "Telegram недоступен"
+
+    def _refresh_telegram_bot_status_label(self, bot_token: str, admin_ids: list[int], *, enabled: bool) -> None:
+        if not hasattr(self, "telegram_bot_status_label"):
+            return
+        ready = self._telegram_configuration_ready(bot_token, admin_ids)
+        available = self._telegram_accessible_for(bot_token, admin_ids)
+        if enabled:
+            status = "Включен" if available else "Недоступен"
+        elif ready and not available:
+            status = "Недоступен"
+        else:
+            status = "Отключен"
+        self.telegram_bot_status_label.setText(f"Статус: {status}")
+        tooltip = ""
+        if status == "Недоступен":
+            tooltip = self._telegram_enable_block_reason(bot_token, admin_ids)
+        self.telegram_bot_status_label.setToolTip(tooltip)
+        self.telegram_enabled_check.setToolTip(tooltip)
+
+    def _should_check_telegram_availability(self, bot_token: str, admin_ids: list[int]) -> bool:
+        if not self._telegram_configuration_ready(bot_token, admin_ids):
+            return False
+        if not self._telegram_feature_allowed():
+            return False
+        if self.telegram_enabled_check.isChecked():
+            return True
+        telegram = getattr(getattr(self, "settings", None), "telegram", None)
+        if telegram is not None:
+            saved_signature = self._telegram_availability_key(telegram.bot_token, telegram.admin_ids)
+            if telegram.enabled and saved_signature == self._telegram_availability_key(bot_token, admin_ids):
+                return True
+        if hasattr(self, "stack") and hasattr(self, "telegram_tab"):
+            return self.stack.currentWidget() is self.telegram_tab
+        return True
+
+    def _queue_telegram_availability_check(self) -> None:
+        timer = getattr(self, "telegram_availability_debounce_timer", None)
+        if timer is not None:
+            timer.start(TELEGRAM_AVAILABILITY_DEBOUNCE_MS)
+            return
+        self._telegram_availability_tick()
+
+    def _set_telegram_enabled_checked(self, checked: bool) -> None:
+        old_state = self.telegram_enabled_check.blockSignals(True)
+        try:
+            self.telegram_enabled_check.setChecked(checked)
+        finally:
+            self.telegram_enabled_check.blockSignals(old_state)
+
+    def _refresh_telegram_controls_state(self, *args) -> None:
+        del args
+        if not hasattr(self, "telegram_enabled_check"):
+            return
+        token, admin_ids = self._telegram_credentials_from_ui()
+        enabled = self.telegram_enabled_check.isChecked()
+        ready = self._telegram_configuration_ready(token, admin_ids)
+        if not ready:
+            self._telegram_availability_error = ""
+        elif self._telegram_availability_key(token, admin_ids) != getattr(self, "_telegram_availability_signature", None):
+            self._telegram_availability_error = ""
+        can_enable = bool(enabled or (ready and self._telegram_feature_allowed() and self._telegram_accessible_for(token, admin_ids)))
+        self.telegram_enabled_check.setEnabled(can_enable)
+        self.telegram_token_input.setEnabled(not enabled)
+        self.telegram_admins_input.setEnabled(not enabled)
+        self._refresh_telegram_bot_status_label(token, admin_ids, enabled=enabled)
+        if ready and not enabled and not self._telegram_accessible_for(token, admin_ids) and self._should_check_telegram_availability(token, admin_ids):
+            self._queue_telegram_availability_check()
+        if hasattr(self, "_saved_fishing_settings_state") and hasattr(self, "_saved_telegram_settings_state"):
+            self._refresh_settings_dirty_state()
+
+    def _telegram_availability_tick(self) -> None:
+        self._request_telegram_availability_check()
+
+    def _request_telegram_availability_check(self, *, force: bool = False) -> None:
+        if getattr(self, "_telegram_availability_checking", False):
+            return
+        if not hasattr(self, "telegram_token_input"):
+            return
+        token, admin_ids = self._telegram_credentials_from_ui()
+        if not self._should_check_telegram_availability(token, admin_ids):
+            return
+        now = time.monotonic()
+        min_interval = TELEGRAM_AVAILABILITY_CHECK_INTERVAL_MS / 1000.0
+        if not force and now - getattr(self, "_telegram_last_availability_check_at", 0.0) < min_interval:
+            return
+        signature = self._telegram_availability_key(token, admin_ids)
+        self._telegram_last_availability_check_at = now
+        self._telegram_availability_checking = True
+        self._telegram_availability_checking_signature = signature
+
+        def worker() -> None:
+            try:
+                result = check_telegram_bot_access(token, timeout=TELEGRAM_AVAILABILITY_TIMEOUT_SECONDS)
+                ok = result.ok
+                error = result.error
+            except Exception as exc:
+                ok = False
+                error = str(exc) or "Telegram недоступен"
+            self.telegram_availability_bridge.result.emit(
+                TelegramAvailabilityResult(signature=signature, ok=ok, error=error)
+            )
+
+        threading.Thread(target=worker, name="sonar-telegram-access-check", daemon=True).start()
+
+    def _handle_telegram_availability_result(self, result: object) -> None:
+        if not isinstance(result, TelegramAvailabilityResult):
+            return
+        if getattr(self, "_telegram_availability_checking_signature", None) == result.signature:
+            self._telegram_availability_checking = False
+            self._telegram_availability_checking_signature = None
+        self._telegram_availability_signature = result.signature
+        self._telegram_available = result.ok
+        self._telegram_availability_error = result.error
+        self._refresh_telegram_runtime_state()
+        self._refresh_telegram_controls_state()
+        self._refresh_overview_telegram_card()
+
+    def _refresh_telegram_runtime_state(self) -> None:
+        manager = getattr(getattr(self, "bot", None), "notification_manager", None)
+        if manager is not None:
+            manager.set_runtime_enabled(self._can_use_telegram_runtime())
 
     def _build_stream_tab(self) -> QWidget:
         page, layout = self._page("Стрим", "Управление трансляцией и производительностью стрима.")
@@ -2058,7 +2294,9 @@ class MainWindow(QMainWindow):
         )
         old_states = [widget.blockSignals(True) for widget in widgets]
         try:
-            self.telegram_enabled_check.setChecked(telegram.enabled)
+            enabled = telegram.enabled and self._telegram_configuration_ready(telegram.bot_token, telegram.admin_ids)
+            telegram.enabled = enabled
+            self.telegram_enabled_check.setChecked(enabled)
             self.telegram_token_input.setText(telegram.bot_token)
             self.telegram_admins_input.setText(",".join(str(item) for item in telegram.admin_ids))
             self.telegram_notify_catch_check.setChecked(telegram.notify_catch)
@@ -2072,23 +2310,199 @@ class MainWindow(QMainWindow):
         finally:
             for widget, old_state in zip(widgets, old_states):
                 widget.blockSignals(old_state)
+        self._refresh_telegram_controls_state()
         self._refresh_overview_telegram_card()
+
+    def _remember_saved_settings_state(self) -> None:
+        self._saved_fishing_settings_state = self._fishing_settings_state_from_saved()
+        self._saved_telegram_settings_state = self._telegram_settings_state_from_saved()
+
+    def _connect_settings_dirty_tracking(self) -> None:
+        for checkbox in (
+            self.auto_meal_check,
+            self.auto_change_bait_check,
+            self.store_trunk_check,
+            self.start_stop_sound_check,
+            self.fish_without_leader_check,
+            self.fish_without_net_check,
+        ):
+            checkbox.stateChanged.connect(self._refresh_settings_dirty_state)
+        for checkbox in getattr(self, "garbage_checks", {}).values():
+            checkbox.stateChanged.connect(self._refresh_settings_dirty_state)
+        for checkbox in self.fish_checks.values():
+            checkbox.stateChanged.connect(self._refresh_settings_dirty_state)
+        for slider in (self.restore_food_slider, self.restore_water_slider):
+            slider.valueChanged.connect(self._refresh_settings_dirty_state)
+        if hasattr(self, "restore_health_slider"):
+            self.restore_health_slider.valueChanged.connect(self._refresh_settings_dirty_state)
+        for combo in (
+            self.overweight_action_combo,
+            self.leader_depleted_action_combo,
+            self.net_depleted_action_combo,
+            self.equipment_depleted_action_combo,
+            self.food_depleted_action_combo,
+        ):
+            combo.currentIndexChanged.connect(self._refresh_settings_dirty_state)
+        for input_widget in self._hotkey_inputs:
+            input_widget.hotkeyChanged.connect(self._refresh_settings_dirty_state)
+
+        for checkbox in (
+            self.telegram_enabled_check,
+            self.telegram_notify_catch_check,
+            self.telegram_notify_start_stop_check,
+            self.telegram_notify_meal_check,
+            self.telegram_notify_inventory_full_check,
+            self.telegram_notify_inventory_space_low_check,
+            self.telegram_notify_bait_tired_check,
+            self.telegram_notify_focus_lost_check,
+        ):
+            checkbox.stateChanged.connect(self._refresh_settings_dirty_state)
+        for line_edit in (
+            self.telegram_token_input,
+            self.telegram_admins_input,
+            self.telegram_inventory_space_low_input,
+        ):
+            line_edit.textChanged.connect(self._refresh_settings_dirty_state)
+
+    def _fishing_settings_state_from_saved(self) -> dict[str, object]:
+        fishing = self.settings.fishing
+        return {
+            "auto_meal": fishing.auto_meal,
+            "restore_food_from": fishing.restore_food_from,
+            "restore_water_from": fishing.restore_water_from,
+            "restore_health_from": fishing.restore_health_from,
+            "auto_change_bait": fishing.auto_change_bait,
+            "store_in_backpack": False,
+            "store_in_trunk": fishing.store_in_trunk,
+            "start_stop_sound_enabled": fishing.start_stop_sound_enabled,
+            "overweight_action": fishing.overweight_action,
+            "shutdown_on_overweight": fishing.overweight_action == "stop",
+            "fish_without_leader": fishing.fish_without_leader,
+            "leader_depleted_action": fishing.leader_depleted_action,
+            "fish_without_net": fishing.fish_without_net,
+            "net_depleted_action": fishing.net_depleted_action,
+            "equipment_depleted_action": fishing.equipment_depleted_action,
+            "food_depleted_action": fishing.food_depleted_action,
+            "hotkey": fishing.hotkey or "F9",
+            "inventory_hotkey": fishing.inventory_hotkey or "i",
+            "use_item_hotkey": fishing.use_item_hotkey or "e",
+            "backpack_move_hotkey": fishing.backpack_move_hotkey or "r",
+            "discard_key": fishing.discard_key or "q",
+            "chat_hotkey": fishing.chat_hotkey or "t",
+            "garbage_settings": {
+                key: fishing.garbage_settings.get(key, True)
+                for key in getattr(self, "garbage_checks", {})
+            },
+            "fish_settings": {
+                fish_id: fishing.fish_settings.get(fish_id, True)
+                for fish_id in self.fish_checks
+            },
+        }
+
+    def _fishing_settings_state_from_ui(self) -> dict[str, object]:
+        overweight_action = str(self.overweight_action_combo.currentData() or "stop")
+        return {
+            "auto_meal": self.auto_meal_check.isChecked(),
+            "restore_food_from": self.restore_food_slider.value(),
+            "restore_water_from": self.restore_water_slider.value(),
+            "restore_health_from": self.restore_health_slider.value() if hasattr(self, "restore_health_slider") else 1,
+            "auto_change_bait": self.auto_change_bait_check.isChecked(),
+            "store_in_backpack": False,
+            "store_in_trunk": self.store_trunk_check.isChecked(),
+            "start_stop_sound_enabled": self.start_stop_sound_check.isChecked(),
+            "overweight_action": overweight_action,
+            "shutdown_on_overweight": overweight_action == "stop",
+            "fish_without_leader": self.fish_without_leader_check.isChecked(),
+            "leader_depleted_action": str(self.leader_depleted_action_combo.currentData() or "stop"),
+            "fish_without_net": self.fish_without_net_check.isChecked(),
+            "net_depleted_action": str(self.net_depleted_action_combo.currentData() or "stop"),
+            "equipment_depleted_action": str(self.equipment_depleted_action_combo.currentData() or "stop"),
+            "food_depleted_action": str(self.food_depleted_action_combo.currentData() or "continue"),
+            "hotkey": self.hotkey_input.hotkey() or "F9",
+            "inventory_hotkey": self.inventory_hotkey_input.hotkey() or "i",
+            "use_item_hotkey": self.use_item_hotkey_input.hotkey() or "e",
+            "backpack_move_hotkey": self.backpack_move_hotkey_input.hotkey() or "r",
+            "discard_key": self.discard_key_input.hotkey() or "q",
+            "chat_hotkey": self.chat_hotkey_input.hotkey() or "t",
+            "garbage_settings": {
+                key: checkbox.isChecked()
+                for key, checkbox in getattr(self, "garbage_checks", {}).items()
+            },
+            "fish_settings": {
+                fish_id: checkbox.isChecked()
+                for fish_id, checkbox in self.fish_checks.items()
+            },
+        }
+
+    def _telegram_settings_state_from_saved(self) -> dict[str, object]:
+        telegram = self.settings.telegram
+        return {
+            "enabled": telegram.enabled,
+            "bot_token": telegram.bot_token.strip(),
+            "admin_ids": list(telegram.admin_ids),
+            "notify_catch": telegram.notify_catch,
+            "notify_start_stop": telegram.notify_start_stop,
+            "notify_meal": telegram.notify_meal,
+            "notify_inventory_full": telegram.notify_inventory_full,
+            "notify_inventory_space_low": telegram.notify_inventory_space_low,
+            "inventory_space_low_threshold_kg": telegram.inventory_space_low_threshold_kg,
+            "notify_bait_tired": telegram.notify_bait_tired,
+            "notify_focus_lost": telegram.notify_focus_lost,
+        }
+
+    def _telegram_settings_state_from_ui(self) -> dict[str, object]:
+        bot_token, admin_ids = self._telegram_credentials_from_ui()
+        return {
+            "enabled": self.telegram_enabled_check.isChecked()
+            and self._telegram_configuration_ready(bot_token, admin_ids),
+            "bot_token": bot_token,
+            "admin_ids": admin_ids,
+            "notify_catch": self.telegram_notify_catch_check.isChecked(),
+            "notify_start_stop": self.telegram_notify_start_stop_check.isChecked(),
+            "notify_meal": self.telegram_notify_meal_check.isChecked(),
+            "notify_inventory_full": self.telegram_notify_inventory_full_check.isChecked(),
+            "notify_inventory_space_low": self.telegram_notify_inventory_space_low_check.isChecked(),
+            "inventory_space_low_threshold_kg": self._parse_inventory_space_threshold(self.telegram_inventory_space_low_input.text()),
+            "notify_bait_tired": self.telegram_notify_bait_tired_check.isChecked(),
+            "notify_focus_lost": self.telegram_notify_focus_lost_check.isChecked(),
+        }
+
+    def _refresh_settings_dirty_state(self, *args) -> None:
+        del args
+        if not hasattr(self, "save_settings_button"):
+            return
+        fishing_dirty = self._fishing_settings_state_from_ui() != self._saved_fishing_settings_state
+        telegram_dirty = self._telegram_settings_state_from_ui() != self._saved_telegram_settings_state
+        self.save_settings_button.setEnabled(fishing_dirty)
+        if hasattr(self, "save_telegram_button"):
+            self.save_telegram_button.setEnabled(telegram_dirty)
 
     def _refresh_overview_telegram_card(self) -> None:
         if not hasattr(self, "overview_telegram_badge"):
             return
         telegram = self.settings.telegram
         enabled = bool(telegram.enabled)
-        self.overview_telegram_badge.setText("Подключен" if enabled else "Отключен")
-        self.overview_telegram_badge.set_tone("green" if enabled else "gray")
-        self.overview_telegram_description.setText(
-            "Бот активен и принимает команды." if enabled else "Бот отключён. Уведомления не отправляются."
-        )
+        available = self._telegram_accessible_for(telegram.bot_token, telegram.admin_ids)
+        if not enabled:
+            status = "Отключен"
+            tone = "gray"
+            description = "Бот отключён. Уведомления не отправляются."
+        elif available:
+            status = "Включен"
+            tone = "green"
+            description = "Бот активен и принимает команды."
+        else:
+            status = "Недоступен"
+            tone = "red"
+            description = self._telegram_availability_error or "Telegram недоступен."
+        self.overview_telegram_badge.setText(status)
+        self.overview_telegram_badge.set_tone(tone)
+        self.overview_telegram_description.setText(description)
         chat_id = ", ".join(str(item) for item in telegram.admin_ids[:2])
         if len(telegram.admin_ids) > 2:
             chat_id = f"{chat_id}, +{len(telegram.admin_ids) - 2}"
         self.overview_telegram_chat_id_label.setText(chat_id or "—")
-        self.overview_telegram_status_label.setText("Онлайн" if enabled else "Оффлайн")
+        self.overview_telegram_status_label.setText(status)
         notification_count = sum(
             bool(item)
             for item in (
@@ -2103,9 +2517,9 @@ class MainWindow(QMainWindow):
         )
         self.overview_telegram_notifications_label.setText(f"{notification_count} типов")
         if hasattr(self, "stream_telegram_badge"):
-            self.stream_telegram_badge.setText("Подключен" if enabled else "Отключен")
-            self.stream_telegram_badge.set_tone("green" if enabled else "gray")
-            self.stream_telegram_status_label.setText("Бот принимает команды" if enabled else "Бот отключён")
+            self.stream_telegram_badge.setText(status)
+            self.stream_telegram_badge.set_tone(tone)
+            self.stream_telegram_status_label.setText(description)
             self.stream_telegram_admins_label.setText(f"Chat ID: {chat_id or '—'}")
 
     def _refresh_overview_stream_card(self) -> None:
@@ -2113,7 +2527,7 @@ class MainWindow(QMainWindow):
             return
         snapshot = self.stream_service.snapshot()
         active = bool(snapshot.active)
-        self.overview_stream_badge.setText("Активен" if active else "Ожидание")
+        self.overview_stream_badge.setText("Активен" if active else "Выключен")
         self.overview_stream_badge.set_tone("green" if active else "gray")
         if snapshot.error:
             self.overview_stream_description.setText(snapshot.error)
@@ -2140,6 +2554,14 @@ class MainWindow(QMainWindow):
             return
         self.settings = self.config_manager.load()
         self._apply_telegram_settings_to_ui(self.settings.telegram)
+        self._saved_telegram_settings_state = self._telegram_settings_state_from_saved()
+        if hasattr(self, "_refresh_telegram_runtime_state"):
+            self._refresh_telegram_runtime_state()
+        elif hasattr(self, "bot"):
+            self.bot.notification_manager.set_runtime_enabled(self._can_use_feature(FEATURE_TELEGRAM))
+        if hasattr(self, "_queue_telegram_availability_check"):
+            self._queue_telegram_availability_check()
+        self._refresh_settings_dirty_state()
 
     def activate_license(self) -> None:
         key = self.license_key_input.text().strip()
@@ -2231,8 +2653,12 @@ class MainWindow(QMainWindow):
             nav_buttons=self._nav_buttons,
             license_context=context,
         )
-        if hasattr(self, "bot"):
+        if hasattr(self, "_refresh_telegram_runtime_state"):
+            self._refresh_telegram_runtime_state()
+        elif hasattr(self, "bot"):
             self.bot.notification_manager.set_runtime_enabled(self._can_use_feature(FEATURE_TELEGRAM))
+        if hasattr(self, "_queue_telegram_availability_check"):
+            self._queue_telegram_availability_check()
         if active and not self._can_use_feature(FEATURE_STREAM_CHAT) and hasattr(self, "stream_service"):
             snapshot = self.stream_service.snapshot()
             if snapshot.chat_mode_enabled:
@@ -2393,9 +2819,11 @@ class MainWindow(QMainWindow):
         for fish_id, checkbox in self.fish_checks.items():
             fishing.fish_settings[fish_id] = checkbox.isChecked()
         telegram = settings.telegram
-        telegram.enabled = self.telegram_enabled_check.isChecked()
-        telegram.bot_token = self.telegram_token_input.text().strip()
-        telegram.admin_ids = [int(item.strip()) for item in self.telegram_admins_input.text().split(",") if item.strip().isdigit()]
+        telegram.bot_token, telegram.admin_ids = self._telegram_credentials_from_ui()
+        telegram.enabled = self.telegram_enabled_check.isChecked() and self._telegram_configuration_ready(
+            telegram.bot_token,
+            telegram.admin_ids,
+        )
         telegram.notify_catch = self.telegram_notify_catch_check.isChecked()
         telegram.notify_start_stop = self.telegram_notify_start_stop_check.isChecked()
         telegram.notify_meal = self.telegram_notify_meal_check.isChecked()
@@ -2408,12 +2836,22 @@ class MainWindow(QMainWindow):
         return settings
 
     def save_settings(self) -> None:
+        token, admin_ids = self._telegram_credentials_from_ui()
+        telegram_block_reason = self._telegram_enable_block_reason(token, admin_ids) if self.telegram_enabled_check.isChecked() else ""
+        if telegram_block_reason:
+            self._set_telegram_enabled_checked(False)
+            self._refresh_telegram_controls_state()
+            self.append_log(f"Telegram не включён: {telegram_block_reason}")
         self.settings = self._collect_settings_from_ui()
         self.config_manager.save(self.settings)
         self.session_stats.set_custom_prices(self.settings.fishing.custom_fish_prices)
         self.bot.reload_settings()
+        self._refresh_telegram_runtime_state()
+        self._refresh_telegram_controls_state()
         self._refresh_overview_telegram_card()
         self._refresh_overview_stream_card()
+        self._remember_saved_settings_state()
+        self._refresh_settings_dirty_state()
         self.append_log("Настройки сохранены")
 
     def _refresh_uninstall_button(self) -> None:
@@ -2463,11 +2901,26 @@ class MainWindow(QMainWindow):
 
     def _telegram_enabled_changed(self, *args) -> None:
         del args
+        token, admin_ids = self._telegram_credentials_from_ui()
+        requested_enabled = self.telegram_enabled_check.isChecked()
+        telegram_block_reason = self._telegram_enable_block_reason(token, admin_ids) if requested_enabled else ""
+        if telegram_block_reason:
+            self._set_telegram_enabled_checked(False)
+            self._refresh_telegram_controls_state()
+            self.append_log(f"Telegram не включён: {telegram_block_reason}")
+            self._queue_telegram_availability_check()
+            return
         self.settings = self.config_manager.load()
-        self.settings.telegram.enabled = self.telegram_enabled_check.isChecked()
+        self.settings.telegram.enabled = requested_enabled
+        self.settings.telegram.bot_token = token
+        self.settings.telegram.admin_ids = admin_ids
         self.config_manager.save(self.settings)
         self.bot.reload_settings()
+        self._refresh_telegram_runtime_state()
+        self._refresh_telegram_controls_state()
+        self._saved_telegram_settings_state = self._telegram_settings_state_from_saved()
         self._refresh_overview_telegram_card()
+        self._refresh_settings_dirty_state()
 
     def start_bot(self) -> None:
         try:
@@ -2602,6 +3055,8 @@ class MainWindow(QMainWindow):
             getattr(self, "stats_timer", None),
             getattr(self, "fishing_preview_timer", None),
             getattr(self, "stream_timer", None),
+            getattr(self, "telegram_availability_timer", None),
+            getattr(self, "telegram_availability_debounce_timer", None),
             getattr(self, "license_timer", None),
         ):
             if timer is not None:

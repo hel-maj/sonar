@@ -30,6 +30,61 @@ class MessageResponse(Response):
         return {"result": {"message_id": self.message_id}}
 
 
+class JsonResponse(Response):
+    def __init__(self, *, ok: bool, status_code: int, payload: dict[str, object]) -> None:
+        self.ok = ok
+        self.status_code = status_code
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+
+def test_check_telegram_bot_access_accepts_get_me(monkeypatch):
+    calls: list[tuple[str, float | None]] = []
+
+    def fake_get(url, *, timeout=None):
+        calls.append((url, timeout))
+        return JsonResponse(ok=True, status_code=200, payload={"ok": True, "result": {"id": 1}})
+
+    monkeypatch.setattr(notifier_module.requests, "get", fake_get)
+
+    result = notifier_module.check_telegram_bot_access("token", timeout=2.5)
+
+    assert result.ok is True
+    assert result.error == ""
+    assert calls == [("https://api.telegram.org/bottoken/getMe", 2.5)]
+
+
+def test_check_telegram_bot_access_recognizes_invalid_token(monkeypatch):
+    monkeypatch.setattr(
+        notifier_module.requests,
+        "get",
+        lambda *args, **kwargs: JsonResponse(
+            ok=False,
+            status_code=401,
+            payload={"ok": False, "error_code": 401, "description": "Unauthorized"},
+        ),
+    )
+
+    result = notifier_module.check_telegram_bot_access("bad-token")
+
+    assert result.ok is False
+    assert result.error == "Неверный токен"
+
+
+def test_check_telegram_bot_access_reports_network_errors(monkeypatch):
+    def fake_get(*args, **kwargs):
+        raise notifier_module.requests.RequestException("blocked")
+
+    monkeypatch.setattr(notifier_module.requests, "get", fake_get)
+
+    result = notifier_module.check_telegram_bot_access("token")
+
+    assert result.ok is False
+    assert result.error == "Telegram недоступен"
+
+
 def test_runtime_gate_controls_polling(monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(NotificationManager, "start_polling", lambda self: calls.append("start"))

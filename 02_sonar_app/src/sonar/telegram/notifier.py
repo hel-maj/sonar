@@ -50,6 +50,36 @@ CATCH_FRAME_SHADOW_PRIMARY_ALPHA = 124
 CATCH_FRAME_SHADOW_SECONDARY_ALPHA = 68
 
 
+@dataclass(frozen=True, slots=True)
+class TelegramAccessCheck:
+    ok: bool
+    error: str = ""
+
+
+def check_telegram_bot_access(bot_token: str, *, timeout: float = 5.0) -> TelegramAccessCheck:
+    token = bot_token.strip()
+    if not token:
+        return TelegramAccessCheck(False, "Токен не указан")
+    url = f"{decrypt_text_literal('telegram_api_base')}/bot{token}/getMe"
+    try:
+        response = requests.get(url, timeout=timeout)
+    except requests.RequestException:
+        return TelegramAccessCheck(False, "Telegram недоступен")
+    try:
+        payload = response.json()
+    except (AttributeError, ValueError):
+        payload = {}
+    if response.ok and payload.get("ok") is True:
+        return TelegramAccessCheck(True)
+    error_code = payload.get("error_code") or response.status_code
+    description = str(payload.get("description") or "").strip()
+    if error_code in {401, 404} or response.status_code in {401, 404}:
+        return TelegramAccessCheck(False, "Неверный токен")
+    if response.status_code == 429:
+        return TelegramAccessCheck(False, "Telegram ограничил запросы")
+    return TelegramAccessCheck(False, description or f"HTTP {response.status_code}")
+
+
 @dataclass(slots=True)
 class NotificationManager:
     settings: TelegramSettings = field(default_factory=TelegramSettings)
