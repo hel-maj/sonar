@@ -116,7 +116,7 @@ docs/guides/available_urls.md
 ```
 
 На сервере выдачей занимается Docker-контейнер `sonar-random-build-download` в сети `sonar-keygen`.
-Caddy проксирует `/download`, `/api/random-build.zip` и `/random-build-health` в этот контейнер.
+Caddy проксирует `/download`, `/api/random-build.zip`, `/api/startup-block` и `/random-build-health` в этот контейнер.
 
 Проверить контейнер на сервере:
 

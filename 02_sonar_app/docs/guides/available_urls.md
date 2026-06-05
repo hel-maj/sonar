@@ -14,6 +14,7 @@ HTTP-версии этих адресов Caddy перенаправляет н�
 | --- | --- |
 | `https://m-sonar-addr.ru/download` | Страница загрузки. Автоматически переводит браузер на случайный zip из latest version folder в `builds`. |
 | `https://m-sonar-addr.ru/api/random-build.zip` | Прямая ссылка на случайный готовый zip из latest version folder. Отдает файл как attachment. |
+| `https://m-sonar-addr.ru/api/startup-block` | Подписанная POST-проверка blocklist по build key и license key перед запуском приложения. |
 | `https://m-sonar-addr.ru/sonar-release.json` | Глобальная release metadata для приложения: версия, сообщение обновления, `download_link`. |
 
 ## Для проверки сервера

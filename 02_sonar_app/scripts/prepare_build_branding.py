@@ -77,11 +77,13 @@ RESERVED_WINDOWS_NAMES = {
     *(f"LPT{index}" for index in range(1, 10)),
 }
 DEFAULT_LICENSE_SERVER_URL = "https://updates.example.invalid"
+DEFAULT_STARTUP_BLOCK_URL = "https://m-sonar-addr.ru/api/startup-block"
+DEFAULT_STARTUP_BLOCK_PUBLIC_KEY = "8fdff2bf7962162273a0e97a1ed1c3375c9fd8d174f531143dc6866f49007874"
 RUNTIME_LITERAL_VALUES = {
     "license_server_url": DEFAULT_LICENSE_SERVER_URL,
     "license_account_id": "",
-    "startup_block_url": "",
-    "startup_block_public_key": "",
+    "startup_block_url": DEFAULT_STARTUP_BLOCK_URL,
+    "startup_block_public_key": DEFAULT_STARTUP_BLOCK_PUBLIC_KEY,
     "public_ip_services": [
         "https://api.ipify.org",
         "https://ifconfig.me/ip",
