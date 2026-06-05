@@ -26,6 +26,8 @@ cd P:\projects\Majestic\Sonar\02_sonar_app
 python scripts\upload_build_archives.py
 ```
 
+Upload-скрипт сам читает `APP_VERSION` из `src\sonar\version.py`, сканирует `dist/<APP_VERSION>`, если такая папка есть, и отправляет архивы в `/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/<APP_VERSION>`.
+
 ## Куда вставлять переменные в PowerShell
 
 Если хочется задавать значения через переменные окружения, вставляйте их в тот же PowerShell перед командой сборки или загрузки:
@@ -136,6 +138,7 @@ Remove-Item Env:\SONAR_UPLOAD_HOST -ErrorAction SilentlyContinue
 | `SONAR_LICENSE_SERVER_URL` | На локальном ПК перед сборкой | Вшивается в exe как сервер проверки лицензии и release metadata | `https://m-sonar-addr.ru` |
 | `SONAR_LICENSE_ACCOUNT_ID` | На локальном ПК перед сборкой | Необязательный account id для account-scoped Keygen routes | Пусто |
 | `SONAR_UPLOAD_HOST` | На локальном ПК перед upload-скриптом | SSH/SCP host для загрузки готовых zip | `m-sonar-addr.ru` |
+| `SONAR_UPLOAD_VERSION` | На локальном ПК перед upload-скриптом | Редкий override version-папки для загрузки zip, если нельзя брать `APP_VERSION` из кода | Обычно не задавать |
 | `SONAR_RELEASE_METADATA_URL` | Только для отладки runtime | Заставляет приложение читать release metadata из отдельного URL вместо `<license_server_url>/sonar-release.json` | Обычно не задавать |
 | `SONAR_DOTENV_PATH` | На локальном ПК перед сборкой/upload | Нестандартный путь к `.env` | Обычно не задавать |
 

@@ -67,14 +67,20 @@ from sonar.license.client import LicenseStatus
 from sonar.license.context import LicenseContext
 from sonar.license.features import (
     FEATURE_FISHING,
+    FEATURE_FISHING_BOT,
+    FEATURE_FISHING_TACKLE,
     FEATURE_OVERVIEW,
-    FEATURE_SETTINGS,
+    FEATURE_OVERVIEW_SESSION_STATS,
     FEATURE_STATISTICS,
     FEATURE_STREAM,
     FEATURE_STREAM_CHAT,
     FEATURE_TELEGRAM,
+    subscription_description,
+    subscription_label,
+    subscription_product_name,
 )
 from sonar.license.manager import LicenseManager
+from sonar.license.startup_block import StartupBlockClient, StartupBlockStatus
 from sonar.paths import APP_DIR, CONFIG_DIR, RESOURCE_DIR
 from sonar.self_uninstall import get_uninstall_availability, schedule_self_uninstall
 from sonar.streaming import StreamingService
@@ -109,6 +115,8 @@ from sonar.version import APP_VERSION
 URL_RE = re.compile(r"https?://[^\s<>'\"]+", re.IGNORECASE)
 TRAILING_URL_PUNCTUATION = ".,;:!?)]}"
 LICENSE_REFRESH_INTERVAL_SECONDS = 600
+STARTUP_BLOCK_CHECK_INTERVAL_SECONDS = 300
+STARTUP_BLOCK_FALLBACK_DOWNLOAD_URL = "https://m-sonar-addr.ru/download"
 KEEP_DEBUG_CAPTURE_ARG = "--keep-debug-capture"
 MANUAL_REELING_ARG = "--manual-reeling"
 UI_ICON_DIR = RESOURCE_DIR / "ui_icons"
@@ -267,6 +275,10 @@ class LicenseBridge(QObject):
     result = Signal(object)
 
 
+class StartupBlockBridge(QObject):
+    result = Signal(object)
+
+
 class TelegramSettingsBridge(QObject):
     changed = Signal(object)
 
@@ -395,6 +407,11 @@ class MainWindow(QMainWindow):
         self._pending_bot_start_after_license = False
         self.license_bridge = LicenseBridge()
         self.license_bridge.result.connect(self._handle_license_result)
+        self.startup_block_bridge = StartupBlockBridge()
+        self.startup_block_bridge.result.connect(self._handle_startup_block_result)
+        self._startup_block_checking = False
+        self._startup_blocked = False
+        self._startup_block_window: StartupBlockedWindow | None = None
         self.telegram_settings_bridge = TelegramSettingsBridge()
         self.telegram_settings_bridge.changed.connect(self._handle_telegram_settings_changed)
         self.telegram_availability_bridge = TelegramAvailabilityBridge()
@@ -446,6 +463,9 @@ class MainWindow(QMainWindow):
             telegram_runtime_enabled_callback=self._can_use_telegram_runtime,
             telegram_settings_changed_callback=self.telegram_settings_bridge.changed.emit,
             player_status_callback=self.player_status_bridge.updated.emit,
+            fishing_runtime_enabled_callback=self._can_start_fishing,
+            stats_runtime_enabled_callback=lambda: self._can_use_feature(FEATURE_STATISTICS),
+            tackle_runtime_enabled_callback=lambda: self._can_use_feature(FEATURE_FISHING_TACKLE),
             keep_debug_capture=keep_debug_capture,
             manual_reeling_mode=manual_reeling_mode,
         )
@@ -476,6 +496,7 @@ class MainWindow(QMainWindow):
             set_quality_callback=self.stream_service.set_quality,
             set_chat_zoom_callback=self.stream_service.set_chat_zoom_enabled,
             set_snapshot_mode_callback=self._set_stream_snapshot_mode_from_remote,
+            stream_runtime_enabled_callback=lambda: self._can_use_feature(FEATURE_STREAM),
         )
         self._stats_refreshing = False
         self._app_stopped_notified = False
@@ -531,9 +552,13 @@ class MainWindow(QMainWindow):
         self.license_timer = QTimer(self)
         self.license_timer.timeout.connect(self._license_tick)
         self.license_timer.start(1000)
+        self.startup_block_timer = QTimer(self)
+        self.startup_block_timer.timeout.connect(self._startup_block_tick)
+        self.startup_block_timer.start(STARTUP_BLOCK_CHECK_INTERVAL_SECONDS * 1000)
         QTimer.singleShot(500, self._refresh_player_status)
         QTimer.singleShot(800, self._refresh_fishing_preview)
         QTimer.singleShot(1000, self._telegram_availability_tick)
+        QTimer.singleShot(1500, self._startup_block_tick)
         QTimer.singleShot(0, self._notify_app_started)
 
     def _build_ui(self) -> None:
@@ -602,7 +627,7 @@ class MainWindow(QMainWindow):
         self._register_page(self.overview_tab, "Обзор", ui_icon("menu.svg"), licensed=True, feature_key=FEATURE_OVERVIEW)
         self._register_page(self.license_tab, "Лицензия", ui_icon("id_card.svg"), licensed=False)
         self._register_page(self.fishing_tab, "Рыбалка", ui_icon("fishing_rod.svg"), licensed=True, feature_key=FEATURE_FISHING)
-        self._register_page(self.settings_tab, "Настройки", ui_icon("settings.svg"), licensed=True, feature_key=FEATURE_SETTINGS)
+        self._register_page(self.settings_tab, "Настройки", ui_icon("settings.svg"), licensed=False)
         self._register_page(self.statistics_tab, "Статистика", ui_icon("chart.svg"), licensed=True, feature_key=FEATURE_STATISTICS)
         self._register_page(self.stream_tab, "Стрим", ui_icon("stream.svg"), licensed=True, feature_key=FEATURE_STREAM)
         self._register_page(self.telegram_tab, "Telegram", ui_icon("telegram_outline.svg"), licensed=True, feature_key=FEATURE_TELEGRAM)
@@ -755,6 +780,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(top)
 
         session_card = Card()
+        self.overview_session_card = session_card
         session_card.setMinimumHeight(78)
         session_card.setMaximumHeight(86)
         session_layout = QVBoxLayout(session_card)
@@ -770,6 +796,12 @@ class MainWindow(QMainWindow):
         self.overview_released_metric = CompactMetric("Отпущено", "0", ui_icon("fish.svg"))
         self.overview_income_metric = CompactMetric("Доход", "0 $", ui_icon("dollar.svg"))
         self.overview_income_hour_metric = CompactMetric("Доход / час", "0 $", ui_icon("profit.svg"))
+        self.overview_premium_session_metrics = (
+            self.overview_caught_metric,
+            self.overview_released_metric,
+            self.overview_income_metric,
+            self.overview_income_hour_metric,
+        )
         for widget in (
             self.overview_duration_metric,
             self.overview_caught_metric,
@@ -784,7 +816,8 @@ class MainWindow(QMainWindow):
         bottom = QHBoxLayout()
         bottom.setSpacing(12)
         bottom.addWidget(self._build_overview_telegram_card(), 1, Qt.AlignmentFlag.AlignTop)
-        bottom.addWidget(self._build_overview_stream_card(), 1, Qt.AlignmentFlag.AlignTop)
+        self.overview_stream_card = self._build_overview_stream_card()
+        bottom.addWidget(self.overview_stream_card, 1, Qt.AlignmentFlag.AlignTop)
         bottom.addWidget(self._build_recent_events_card(), 2)
         layout.addLayout(bottom, 3)
         return page
@@ -1159,11 +1192,13 @@ class MainWindow(QMainWindow):
         info_title = QLabel("Аккаунт")
         info_title.setProperty("sectionTitle", True)
         self.license_account_status = MetricCard("Статус", "Не активна", ui_icon("shield_check.svg"))
+        self.license_account_tier = MetricCard("Подписка", "—", ui_icon("id_card.svg"))
         self.license_account_expiry = MetricCard("Действует до", "—", ui_icon("calendar.svg"))
         self.license_account_role = MetricCard("Роль", "user", ui_icon("id_card.svg"))
         self.license_account_role.hide()
         info_layout.addWidget(info_title)
         info_layout.addWidget(self.license_account_status)
+        info_layout.addWidget(self.license_account_tier)
         info_layout.addWidget(self.license_account_expiry)
         row.addWidget(info, 1, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(row)
@@ -1181,6 +1216,7 @@ class MainWindow(QMainWindow):
         summary_row = QHBoxLayout()
         summary_row.setSpacing(12)
         details = Card()
+        self.fishing_session_details_card = details
         details_layout = QHBoxLayout(details)
         details_layout.setContentsMargins(12, 10, 12, 12)
         details_layout.setSpacing(9)
@@ -1188,6 +1224,10 @@ class MainWindow(QMainWindow):
         self.fishing_caught_metric = MetricCard("Поймано", "0", ui_icon("fish_solid.svg"))
         self.fishing_released_metric = MetricCard("Отпущено", "0", ui_icon("fish.svg"))
         self.fishing_income_metric = MetricCard("Доход", "0 $", ui_icon("dollar.svg"))
+        self.fishing_intro_hidden_metrics = (
+            self.fishing_caught_metric,
+            self.fishing_income_metric,
+        )
         for widget in (
             self.fishing_duration_metric,
             self.fishing_caught_metric,
@@ -1198,6 +1238,7 @@ class MainWindow(QMainWindow):
         summary_row.addWidget(details, 3, Qt.AlignmentFlag.AlignTop)
 
         tackle_group = Card()
+        self.fishing_tackle_group = tackle_group
         tackle_layout = QVBoxLayout(tackle_group)
         tackle_layout.setContentsMargins(12, 10, 12, 12)
         tackle_layout.setSpacing(6)
@@ -2216,19 +2257,20 @@ class MainWindow(QMainWindow):
         app_layout = QVBoxLayout(app_card)
         app_layout.setContentsMargins(13, 12, 13, 13)
         app_layout.setSpacing(8)
-        app_title = QLabel(APP_NAME)
-        app_title.setProperty("sectionTitle", True)
-        app_note = QLabel("Автоматизация рыбалки, уведомления и локальный стрим для Majestic RP.")
-        app_note.setWordWrap(True)
-        app_note.setProperty("muted", True)
-        app_layout.addWidget(app_title)
-        app_layout.addWidget(app_note)
+        self.about_app_title_label = QLabel("")
+        self.about_app_title_label.setProperty("sectionTitle", True)
+        self.about_app_note_label = QLabel("")
+        self.about_app_note_label.setWordWrap(True)
+        self.about_app_note_label.setProperty("muted", True)
+        app_layout.addWidget(self.about_app_title_label)
+        app_layout.addWidget(self.about_app_note_label)
         app_layout.addStretch(1)
         top.addWidget(app_card, 1)
 
         layout.addLayout(top)
         layout.addWidget(self._build_update_card())
         layout.addStretch(1)
+        self._refresh_about_subscription_text()
         return page
 
     def _load_settings_to_ui(self, settings: SonarSettings) -> None:
@@ -2541,7 +2583,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "stream_license_status_label"):
             return
         status = self.license_status
-        if status.valid:
+        if status.valid and not status.expired:
             expires = self._format_license_expiry(status.expires_at)
             self.stream_license_status_label.setText("Статус: активна")
             self.stream_license_expires_label.setText(f"Действует до: {expires}")
@@ -2603,7 +2645,7 @@ class MainWindow(QMainWindow):
         self.license_status = status
         self._schedule_next_license_refresh(status)
         self.settings = self.config_manager.load()
-        if status.valid:
+        if status.valid and not status.expired:
             self.bot.reload_settings()
         self._refresh_license_ui()
         self._apply_license_gate()
@@ -2627,7 +2669,7 @@ class MainWindow(QMainWindow):
         return self._license_context().can(feature_key)
 
     def _can_start_fishing(self) -> bool:
-        return self._can_use_feature(FEATURE_FISHING)
+        return self._can_use_feature(FEATURE_FISHING_BOT)
 
     def _schedule_next_license_refresh(self, status: LicenseStatus) -> None:
         now = datetime.now(timezone.utc)
@@ -2642,6 +2684,63 @@ class MainWindow(QMainWindow):
             or self.license_status.license_key.strip()
             or self.settings.license.license_key.strip()
         )
+
+    def _startup_block_tick(self) -> None:
+        if self._startup_blocked or self._startup_block_checking:
+            return
+        self._run_startup_block_check()
+
+    def _run_startup_block_check(self) -> None:
+        if self._startup_blocked or self._startup_block_checking:
+            return
+        self._startup_block_checking = True
+        license_key = self._current_license_key()
+
+        def worker() -> None:
+            status = StartupBlockClient().check(license_key=license_key)
+            self.startup_block_bridge.result.emit(status)
+
+        threading.Thread(target=worker, name="sonar-startup-block-check", daemon=True).start()
+
+    def _handle_startup_block_result(self, status: object) -> None:
+        self._startup_block_checking = False
+        if not isinstance(status, StartupBlockStatus):
+            status = StartupBlockStatus(error="Startup block check did not return a valid result")
+        if not startup_block_allows_launch(status):
+            self._enter_startup_blocked_state(_startup_block_download_url(status, self.license_status))
+
+    def _enter_startup_blocked_state(self, download_url: str) -> None:
+        if self._startup_blocked:
+            return
+        self._startup_blocked = True
+        self._pending_bot_start_after_license = False
+        for timer in (
+            getattr(self, "startup_block_timer", None),
+            getattr(self, "license_timer", None),
+            getattr(self, "hotkey_timer", None),
+            getattr(self, "status_timer", None),
+            getattr(self, "player_status_timer", None),
+            getattr(self, "stats_timer", None),
+            getattr(self, "fishing_preview_timer", None),
+            getattr(self, "stream_timer", None),
+            getattr(self, "telegram_availability_timer", None),
+            getattr(self, "telegram_availability_debounce_timer", None),
+        ):
+            if timer is not None:
+                timer.stop()
+        try:
+            if hasattr(self, "stream_service"):
+                self.stream_service.stop_stream("startup blocked")
+            if hasattr(self, "bot") and self.bot.state.running:
+                self.bot.stop("startup blocked")
+            if hasattr(self, "bot"):
+                self.bot.notification_manager.stop_polling()
+        except Exception:
+            pass
+        blocked_window = StartupBlockedWindow(download_url)
+        self._startup_block_window = blocked_window
+        blocked_window.show()
+        self.hide()
 
     def _apply_license_gate(self) -> None:
         if not hasattr(self, "stack") or not hasattr(self, "license_tab"):
@@ -2663,6 +2762,8 @@ class MainWindow(QMainWindow):
             snapshot = self.stream_service.snapshot()
             if snapshot.chat_mode_enabled:
                 self.stream_service.disable_chat_mode(force=True)
+        if hasattr(self, "_apply_subscription_ui"):
+            self._apply_subscription_ui()
         if not active:
             self._select_page(self.license_tab)
             if hasattr(self, "bot") and self.bot.state.running:
@@ -2671,12 +2772,46 @@ class MainWindow(QMainWindow):
                 self.stream_service.stop_stream("license inactive")
         elif self.stack.currentWidget() in self._licensed_page_features and self.stack.currentWidget() not in allowed_pages:
             self._select_page(allowed_pages[0] if allowed_pages else self.license_tab)
-        if active and not self._can_use_feature(FEATURE_FISHING) and hasattr(self, "bot") and self.bot.state.running:
+        can_start_fishing = self._can_start_fishing() if hasattr(self, "_can_start_fishing") else self._can_use_feature(FEATURE_FISHING)
+        if active and not can_start_fishing and hasattr(self, "bot") and self.bot.state.running:
             self.bot.stop()
         if active and not self._can_use_feature(FEATURE_STREAM) and hasattr(self, "stream_service"):
             self.stream_service.stop_stream("stream feature inactive")
         if active and self.stack.currentWidget() is self.license_tab:
             self._select_page(fallback_page(preferred=self.overview_tab, license_page=self.license_tab, allowed_pages=allowed_pages))
+        if hasattr(self, "_refresh_status_label"):
+            self._refresh_status_label()
+
+    def _subscription_label(self) -> str:
+        return subscription_label(self._license_context().group)
+
+    def _apply_subscription_ui(self) -> None:
+        active = self._has_active_license()
+        overview_stats_allowed = active and self._can_use_feature(FEATURE_OVERVIEW_SESSION_STATS)
+        stream_allowed = active and self._can_use_feature(FEATURE_STREAM)
+        fishing_bot_allowed = active and self._can_start_fishing()
+        fishing_tackle_allowed = active and self._can_use_feature(FEATURE_FISHING_TACKLE)
+
+        for widget in getattr(self, "overview_premium_session_metrics", ()):
+            widget.setVisible(overview_stats_allowed)
+        if hasattr(self, "overview_stream_card"):
+            self.overview_stream_card.setVisible(stream_allowed)
+        for widget in getattr(self, "fishing_intro_hidden_metrics", ()):
+            widget.setVisible(fishing_bot_allowed)
+        if hasattr(self, "fishing_tackle_group"):
+            self.fishing_tackle_group.setVisible(fishing_tackle_allowed)
+        for button in getattr(self, "_start_buttons", []):
+            button.setToolTip("" if fishing_bot_allowed else "Запуск бота недоступен для этой подписки")
+
+        self._refresh_about_subscription_text()
+
+    def _refresh_about_subscription_text(self) -> None:
+        if not hasattr(self, "about_app_title_label"):
+            return
+        active = self._has_active_license()
+        group = self._license_context().group
+        self.about_app_title_label.setText(subscription_product_name(group) if active else "Sonar - нет лицензии")
+        self.about_app_note_label.setText(subscription_description(group, active=active))
 
     def _refresh_license_ui(self) -> None:
         if not hasattr(self, "license_summary_label"):
@@ -2685,23 +2820,26 @@ class MainWindow(QMainWindow):
         if status.valid:
             expires = self._format_license_expiry(status.expires_at)
             left = self._format_license_left(status.expires_at)
+            tier = self._subscription_label()
             self.license_summary_label.setText(f"Лицензия {status.masked_key}")
-            self.license_status_label.setText(f"Статус: активна\nИстекает: {expires}\nОсталось: {left}")
+            self.license_status_label.setText(f"Статус: активна\nПодписка: {tier}\nИстекает: {expires}\nОсталось: {left}")
             self.license_key_input.setText(status.license_key)
             self.license_account_status.set_value("Активна")
+            self.license_account_tier.set_value(tier)
             self.license_account_expiry.set_value(expires)
             self.license_account_role.set_value(status.role or "user")
             self.sidebar_license_title.setText("Лицензия активна")
-            self.sidebar_license_subtitle.setText(f"до {expires}")
+            self.sidebar_license_subtitle.setText(f"{tier} · до {expires}")
             if hasattr(self, "sidebar_license_icon"):
                 self.sidebar_license_icon.set_color("#31c65b")
             for label in getattr(self, "_license_overview_lines", []):
-                label.setText(f"Лицензия: активна до {expires}")
+                label.setText(f"Лицензия: {tier}, активна до {expires}")
         else:
             error = status.error or "Лицензия не активна"
             self.license_summary_label.setText("Введите ключ лицензии")
             self.license_status_label.setText(f"Статус: не активна\n{error}")
             self.license_account_status.set_value("Не активна")
+            self.license_account_tier.set_value("—")
             self.license_account_expiry.set_value("—")
             self.license_account_role.set_value("user")
             self.sidebar_license_title.setText("Лицензия не активна")
@@ -2712,6 +2850,7 @@ class MainWindow(QMainWindow):
                 label.setText("Лицензия: не активна")
         self._refresh_sidebar_version_status()
         self._refresh_stream_license_card()
+        self._refresh_about_subscription_text()
 
     def _license_tick(self) -> None:
         self._refresh_license_ui()
@@ -2941,10 +3080,10 @@ class MainWindow(QMainWindow):
 
     def _start_bot_now(self) -> None:
         try:
-            if not self._can_use_feature(FEATURE_FISHING):
+            if not self._can_start_fishing():
                 self._select_page(self.license_tab)
-                self.status_label.setText("Лицензия не активна")
-                self.append_log("Лицензия не активна")
+                self.status_label.setText("Бот недоступен")
+                self.append_log("Запуск бота недоступен для этой подписки")
                 return
             self.save_settings()
             if self.bot.start(skip_license_check=True):
@@ -2966,7 +3105,7 @@ class MainWindow(QMainWindow):
         self.license_status = status
         self._schedule_next_license_refresh(status)
         self.license_bridge.result.emit(status)
-        if not status.valid or status.expired or not self._can_use_feature(FEATURE_FISHING):
+        if not status.valid or status.expired or not self._can_start_fishing():
             self.log_bridge.message.emit("Лицензия не активна")
             return False
         return self.bot.start(skip_license_check=True)
@@ -3027,7 +3166,7 @@ class MainWindow(QMainWindow):
         if self._hotkey_capture_is_active():
             self._suppress_hotkey_until_release()
             return
-        if not self._can_use_feature(FEATURE_FISHING):
+        if not self._can_start_fishing():
             self._hotkey_down = False
             return
         vks = self._current_hotkey_vks()
@@ -3058,6 +3197,7 @@ class MainWindow(QMainWindow):
             getattr(self, "telegram_availability_timer", None),
             getattr(self, "telegram_availability_debounce_timer", None),
             getattr(self, "license_timer", None),
+            getattr(self, "startup_block_timer", None),
         ):
             if timer is not None:
                 timer.stop()
@@ -3413,7 +3553,8 @@ class MainWindow(QMainWindow):
     def _refresh_status_label(self) -> None:
         active_license = self._has_active_license()
         fishing_allowed = self._can_use_feature(FEATURE_FISHING)
-        running = bool(fishing_allowed and self.bot.state.running)
+        start_allowed = self._can_start_fishing()
+        running = bool(start_allowed and self.bot.state.running)
         stopping = self.bot.state.phase == BotPhase.STOPPING
         self._last_bot_running = running
         if not active_license:
@@ -3422,6 +3563,9 @@ class MainWindow(QMainWindow):
         elif not fishing_allowed:
             title = "Рыбалка недоступна"
             description = "Функция отключена для этой лицензии"
+        elif not start_allowed:
+            title = "Просмотр"
+            description = "Запуск бота недоступен для этой подписки"
         elif stopping:
             title = "Останавливаем"
             description = "Завершаем текущие операции"
@@ -3436,16 +3580,19 @@ class MainWindow(QMainWindow):
         for label in getattr(self, "_status_description_labels", []):
             label.setText(description)
         for button in getattr(self, "_start_buttons", []):
-            button.setEnabled(fishing_allowed and not running and not stopping and not self._license_checking)
+            button.setEnabled(start_allowed and not running and not stopping and not self._license_checking)
         for button in getattr(self, "_stop_buttons", []):
             button.setEnabled(running and not stopping)
         for badge in getattr(self, "_ready_badges", []):
             if running:
                 badge.setText("Активен")
                 badge.set_tone("green")
-            elif fishing_allowed:
+            elif start_allowed:
                 badge.setText("Готов")
                 badge.set_tone("green")
+            elif fishing_allowed:
+                badge.setText("Intro")
+                badge.set_tone("blue")
             else:
                 badge.setText("Нужна лицензия")
                 badge.set_tone("red")
@@ -3701,6 +3848,9 @@ class MainWindow(QMainWindow):
         self.stream_service.stop_stream("telegram")
 
     def _set_stream_snapshot_mode_from_remote(self, enabled: bool) -> bool:
+        if not self._can_use_feature(FEATURE_STREAM):
+            self.log_bridge.message.emit("Лицензия не активна: режим стрима не изменён")
+            return False
         ok = self.stream_service.set_snapshot_mode_enabled(enabled)
         self.settings = self.config_manager.load()
         self.settings.fishing.stream_snapshot_mode = bool(enabled)
@@ -3782,17 +3932,28 @@ class MainWindow(QMainWindow):
         return result
 
     def _detect_stream_chat_state(self) -> ChatDetection:
+        if not self._can_use_feature(FEATURE_STREAM_CHAT):
+            return ChatDetection(error="Режим чата недоступен для этой лицензии")
         return self.chat_controller.detect()
 
     def _select_stream_chat_tab(self, tab_id: str | None) -> ChatActionResult:
+        if not self._can_use_feature(FEATURE_STREAM_CHAT):
+            detection = ChatDetection(error="Режим чата недоступен для этой лицензии")
+            return ChatActionResult(False, detection.error, detection)
         self.settings = self.config_manager.load()
         return self.chat_controller.select_tab(tab_id, chat_hotkey=self.settings.fishing.chat_hotkey)
 
     def _send_stream_chat_message(self, tab_id: str | None, message: str) -> ChatActionResult:
+        if not self._can_use_feature(FEATURE_STREAM_CHAT):
+            detection = ChatDetection(error="Режим чата недоступен для этой лицензии")
+            return ChatActionResult(False, detection.error, detection)
         self.settings = self.config_manager.load()
         return self.chat_controller.send_message(tab_id, message, chat_hotkey=self.settings.fishing.chat_hotkey)
 
     def _clear_stream_chat(self) -> ChatActionResult:
+        if not self._can_use_feature(FEATURE_STREAM_CHAT):
+            detection = ChatDetection(error="Режим чата недоступен для этой лицензии")
+            return ChatActionResult(False, detection.error, detection)
         self.settings = self.config_manager.load()
         return self.chat_controller.clear_chat_input(self.settings.fishing.chat_hotkey)
 
@@ -3804,6 +3965,8 @@ class MainWindow(QMainWindow):
     def _stream_quality_changed(self, quality: str) -> None:
         if not hasattr(self, "stream_service"):
             return
+        if not self._can_use_feature(FEATURE_STREAM):
+            return
         self.stream_service.set_quality(quality)
         self._refresh_stream_tab()
 
@@ -3811,12 +3974,16 @@ class MainWindow(QMainWindow):
         del args
         if not hasattr(self, "stream_service"):
             return
+        if not self._can_use_feature(FEATURE_STREAM):
+            return
         self.stream_service.set_chat_zoom_enabled(self.stream_chat_zoom_check.isChecked())
         self._refresh_stream_tab()
 
     def _stream_snapshot_mode_changed(self, *args) -> None:
         del args
         if not hasattr(self, "stream_service"):
+            return
+        if not self._can_use_feature(FEATURE_STREAM):
             return
         enabled = self.stream_snapshot_mode_check.isChecked()
         self.settings = self.config_manager.load()
@@ -3983,7 +4150,7 @@ class MainWindow(QMainWindow):
 
 
 class StartupLoader(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, caption_text: str = "Проверяем лицензию и готовим интерфейс") -> None:
         super().__init__()
         self.setObjectName("startupWindow")
         self.setWindowTitle(APP_NAME)
@@ -4014,7 +4181,7 @@ class StartupLoader(QWidget):
         title.setStyleSheet("font-size: 28px; font-weight: 850; color: #0d67e9;")
         logo_row.addWidget(title, 1)
         layout.addLayout(logo_row)
-        caption = QLabel("Проверяем лицензию и готовим интерфейс")
+        caption = QLabel(caption_text)
         caption.setProperty("muted", True)
         layout.addWidget(caption)
         progress = QProgressBar()
@@ -4030,6 +4197,71 @@ class StartupLoader(QWidget):
             return
         area = screen.availableGeometry()
         self.move(area.center().x() - self.width() // 2, area.center().y() - self.height() // 2)
+
+
+class StartupBlockedWindow(QWidget):
+    def __init__(self, download_url: str) -> None:
+        super().__init__()
+        self.download_url = download_url.strip()
+        self.setObjectName("startupWindow")
+        self.setWindowTitle(APP_NAME)
+        self.setFixedSize(520, 265)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAutoFillBackground(False)
+        apply_sonar_style(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 22, 22, 22)
+        card = QFrame()
+        card.setObjectName("startupLoader")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(34)
+        shadow.setOffset(0, 12)
+        shadow.setColor(QColor(35, 70, 120, 52))
+        card.setGraphicsEffect(shadow)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(14)
+        logo_row = QHBoxLayout()
+        logo_path = find_app_logo_path()
+        if logo_path is not None:
+            logo_row.addWidget(IconLabel(logo_path, 44))
+        title = QLabel("Sonar")
+        title.setStyleSheet("font-size: 28px; font-weight: 850; color: #0d67e9;")
+        logo_row.addWidget(title, 1)
+        layout.addLayout(logo_row)
+        message = QLabel(self._message_html())
+        message.setTextFormat(Qt.TextFormat.RichText)
+        message.setOpenExternalLinks(True)
+        message.setWordWrap(True)
+        message.setStyleSheet("font-size: 14px; line-height: 1.35;")
+        layout.addWidget(message)
+        close_button = ActionButton("Закрыть", "primary")
+        close_button.clicked.connect(QApplication.quit)
+        layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignRight)
+        root.addWidget(card)
+        self._center_on_screen()
+
+    def _message_html(self) -> str:
+        prefix = "Возможно у вас взломанная версия программы, обновите до последней версии:"
+        if not self.download_url:
+            return html.escape(prefix, quote=False)
+        escaped_url = html.escape(self.download_url, quote=True)
+        visible_url = html.escape(self.download_url, quote=False)
+        return f'{html.escape(prefix, quote=False)} <a href="{escaped_url}">{visible_url}</a>'
+
+    def _center_on_screen(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        self.move(area.center().x() - self.width() // 2, area.center().y() - self.height() // 2)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        event.accept()
+        QApplication.quit()
 
 
 def _initial_license_status_with_loader(app: QApplication) -> LicenseStatus:
@@ -4069,6 +4301,60 @@ def _initial_license_status_with_loader(app: QApplication) -> LicenseStatus:
     return result.get("status") or LicenseStatus(valid=False, error="Не удалось проверить лицензию")
 
 
+def _startup_block_status_with_loader(app: QApplication, license_status: LicenseStatus) -> StartupBlockStatus:
+    splash = StartupLoader("Проверяем доступность этой версии")
+    splash.show()
+    app.processEvents()
+    result: dict[str, StartupBlockStatus] = {}
+    bridge = StartupBlockBridge()
+    loop = QEventLoop()
+
+    def finish(status: object) -> None:
+        if isinstance(status, StartupBlockStatus):
+            result["status"] = status
+        else:
+            result["status"] = StartupBlockStatus(error="Не удалось проверить доступность версии")
+        QTimer.singleShot(150, loop.quit)
+
+    bridge.result.connect(finish)
+    license_key = _startup_block_license_key(license_status)
+
+    def worker() -> None:
+        try:
+            status = StartupBlockClient().check(license_key=license_key)
+        except Exception as exc:
+            status = StartupBlockStatus(error=str(exc))
+        bridge.result.emit(status)
+
+    threading.Thread(target=worker, name="sonar-startup-block-initial", daemon=True).start()
+    loop.exec()
+    splash.close()
+    splash.deleteLater()
+    app.processEvents()
+    return result.get("status") or StartupBlockStatus(error="Не удалось проверить доступность версии")
+
+
+def _startup_block_license_key(status: LicenseStatus) -> str:
+    if status.license_key.strip():
+        return status.license_key.strip()
+    try:
+        return ConfigManager().load().license.license_key.strip()
+    except Exception:
+        return ""
+
+
+def startup_block_allows_launch(status: StartupBlockStatus) -> bool:
+    return bool(status.checked and not status.blocked and not status.error)
+
+
+def _startup_block_download_url(status: StartupBlockStatus, license_status: LicenseStatus | None = None) -> str:
+    return (
+        status.download_url.strip()
+        or (license_status.download_link.strip() if license_status is not None else "")
+        or STARTUP_BLOCK_FALLBACK_DOWNLOAD_URL
+    )
+
+
 def find_app_icon_path():
     for icon_path in (RESOURCE_DIR / "app.ico", RESOURCE_DIR / "icon.ico", RESOURCE_DIR / "sonar_logo.png"):
         if icon_path.exists():
@@ -4096,6 +4382,13 @@ def run_ui(argv: list[str]) -> int:
     if icon_path is not None:
         app.setWindowIcon(QIcon(str(icon_path)))
     initial_license_status = _initial_license_status_with_loader(app)
+    startup_block_status = _startup_block_status_with_loader(app, initial_license_status)
+    if not startup_block_allows_launch(startup_block_status):
+        blocked_window = StartupBlockedWindow(_startup_block_download_url(startup_block_status, initial_license_status))
+        blocked_window.show()
+        if "--smoke-test" in argv:
+            QTimer.singleShot(1200, blocked_window.close)
+        return app.exec()
     window = MainWindow(
         keep_debug_capture=keep_debug_capture,
         manual_reeling_mode=manual_reeling_mode,

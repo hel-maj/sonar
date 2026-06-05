@@ -4,6 +4,12 @@ from datetime import datetime, timedelta, timezone
 
 from sonar.config.manager import ConfigManager
 from sonar.license.client import KeygenLicenseClient, LicenseStatus, _extract_ip_address, mask_license_key, parse_keygen_status
+from sonar.license.features import (
+    FEATURE_FISHING_BOT,
+    FEATURE_FISHING_TACKLE,
+    FEATURE_OVERVIEW_SESSION_STATS,
+    subscription_label,
+)
 from sonar.license.hwid import machine_fingerprint
 from sonar.license.manager import LicenseManager
 from sonar.license.secrets import decrypt_license_account_id, decrypt_license_server_url
@@ -78,10 +84,52 @@ def test_keygen_status_extracts_group_features_and_overrides():
 
     assert status.group == "basic"
     assert "fishing" in status.features
+    assert FEATURE_FISHING_BOT in status.features
+    assert FEATURE_FISHING_TACKLE in status.features
     assert "telegram" in status.features
     assert "stream" not in status.features
     assert "statistics" not in status.features
     assert status.denied_features == ("statistics",)
+
+
+def test_keygen_status_extracts_intro_tier():
+    status = parse_keygen_status(
+        {
+            "meta": {"valid": True, "code": "VALID"},
+            "data": {
+                "id": "license-id",
+                "attributes": {
+                    "key": "FA5B1-ABCDE-G2K34",
+                    "metadata": {"tier": "Intro"},
+                },
+            },
+        }
+    )
+
+    assert status.group == "intro"
+    assert status.features == ("fishing",)
+    assert subscription_label(status.group) == "Intro"
+
+
+def test_keygen_status_extracts_promo_as_premium_like_tier():
+    status = parse_keygen_status(
+        {
+            "meta": {"valid": True, "code": "VALID"},
+            "data": {
+                "id": "license-id",
+                "attributes": {
+                    "key": "FA5B1-ABCDE-G2K34",
+                    "metadata": {"license_group": "Promo"},
+                },
+            },
+        }
+    )
+
+    assert status.group == "promo"
+    assert "stream" in status.features
+    assert "stream_chat" in status.features
+    assert FEATURE_OVERVIEW_SESSION_STATS in status.features
+    assert subscription_label(status.group) == "Promo"
 
 
 def test_keygen_status_merges_policy_metadata_before_license_overrides():
@@ -116,7 +164,7 @@ def test_keygen_status_merges_policy_metadata_before_license_overrides():
         }
     )
 
-    assert status.group == "streamer"
+    assert status.group == "premium"
     assert "stream" in status.features
     assert "stream_chat" in status.features
     assert status.latest_version == ""

@@ -160,6 +160,46 @@ def test_main_menu_contains_stream_entry(monkeypatch):
     assert any(button["callback_data"] == "action:scan_player_status" for row in keyboard for button in row)
 
 
+def test_main_menu_hides_stream_when_runtime_denies_it(monkeypatch):
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_runtime_enabled_callback=lambda: False,
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._send_menu(1)
+
+    keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
+    assert not any(button.get("callback_data") == "menu:stream" for row in keyboard for button in row)
+
+
+def test_stream_callback_is_blocked_when_runtime_denies_it(monkeypatch):
+    started: list[bool] = []
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        stream_start_callback=lambda: started.append(True) or True,
+        stream_runtime_enabled_callback=lambda: False,
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._toggle_stream(1, message_id=42)
+
+    assert started == []
+    assert "недоступна для этой подписки" in calls[0][1]["json"]["text"]
+
+
 def test_app_lifecycle_notification_sends_started_before_menu():
     messages: list[str] = []
     manager = NotificationManager(settings=TelegramSettings(enabled=False, admin_ids=[1]), sink=messages.append)

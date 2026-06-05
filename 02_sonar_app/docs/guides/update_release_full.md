@@ -4,10 +4,10 @@
 
 ## Что важно помнить
 
-- Готовые архивы лежат на сервере в папке `/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds`.
+- Готовые архивы лежат на сервере в папках вида `/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/<app_version>`.
 - Пользователь открывает `https://m-sonar-addr.ru/download`.
 - `https://m-sonar-addr.ru` - текущий нейтральный публичный домен релиза.
-- Сервер выбирает случайный архив из `builds` и отдает его пользователю.
+- Сервер выбирает latest version folder внутри `builds`, затем случайный архив только из этой папки и отдает его пользователю.
 - Архивы заранее создаются локально во время `build_secure.ps1`.
 - Имя архива всегда такое: `<build_key>-<exe name>.zip`.
 - Внутри архива лежит обычный exe с тем же именем, которое выбрала сборка по картинке из `assets/game_icons`.
@@ -82,15 +82,15 @@ $env:SONAR_UPLOAD_HOST = "m-sonar-addr.ru"
 После каждого билда рядом будут два файла:
 
 ```text
-dist\<имя exe>\<имя exe>.exe
-dist\<имя exe>\<build_key>-<имя exe>.zip
+dist\<app_version>\<имя exe>\<имя exe>.exe
+dist\<app_version>\<имя exe>\<build_key>-<имя exe>.zip
 ```
 
 Пример:
 
 ```text
-dist\Warhammer 40,000 - Darktide\Warhammer 40,000 - Darktide.exe
-dist\Warhammer 40,000 - Darktide\bd68400c3c8ad1380fed102e28afd5d6a02451cf58d9fdddb01c4b098164cd4b-Warhammer 40,000 - Darktide.exe.zip
+dist\1.2.3\Warhammer 40,000 - Darktide\Warhammer 40,000 - Darktide.exe
+dist\1.2.3\Warhammer 40,000 - Darktide\bd68400c3c8ad1380fed102e28afd5d6a02451cf58d9fdddb01c4b098164cd4b-Warhammer 40,000 - Darktide.exe.zip
 ```
 
 `build_secure.ps1` также обновит:
@@ -107,20 +107,20 @@ P:\projects\Majestic\Sonar\config\sonar_build_keys.json
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
-python scripts\extract_build_key_from_exe.py ".\dist\<имя exe>\<имя exe>.exe"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<имя exe>.exe"
 ```
 
 Для архива:
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
-python scripts\extract_build_key_from_exe.py ".\dist\<имя exe>\<build_key>-<имя exe>.zip"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<build_key>-<имя exe>.zip"
 ```
 
 JSON-вывод для копирования или автоматизации:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<имя exe>\<имя exe>.exe" --json
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<имя exe>.exe" --json
 ```
 
 ## 5. Загрузить архивы на сервер
@@ -130,7 +130,7 @@ python scripts\extract_build_key_from_exe.py ".\dist\<имя exe>\<имя exe>.e
 Папка на сервере:
 
 ```text
-/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds
+/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/<app_version>
 ```
 
 Если на ПК настроен SSH key и команда `ssh root@m-sonar-addr.ru` входит без пароля, используйте готовую утилиту:
@@ -140,12 +140,28 @@ cd P:\projects\Majestic\Sonar\02_sonar_app
 python scripts\upload_build_archives.py --host m-sonar-addr.ru
 ```
 
-Вместо постоянного `--host` можно задать переменную окружения `SONAR_UPLOAD_HOST`.
+Скрипт сам читает `APP_VERSION` из `src\sonar\version.py` и загружает архивы в `builds/<APP_VERSION>`. Если внутри `dist` есть папка этой версии, скрипт сканирует только `dist/<APP_VERSION>`, чтобы не залить старые локальные архивы. Вместо постоянного `--host` можно задать переменную окружения `SONAR_UPLOAD_HOST`.
 
 Сначала можно проверить, что будет загружено:
 
 ```powershell
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
+```
+
+Если вы пересобираете ту же версию и хотите заменить набор архивов в ее папке, используйте явный флаг очистки:
+
+```powershell
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version --dry-run
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version
+```
+
+Удаление старых version-папок вынесено в отдельный пошаговый гайд: [delete_old_build_versions.md](delete_old_build_versions.md).
+
+Если SSH key не настроен, но вход по паролю работает, добавьте `--allow-password`. Пароль вводится в prompt `ssh/scp`; в команду его не вставляйте:
+
+```powershell
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password --dry-run
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password
 ```
 
 Если приватный ключ лежит не в стандартном месте:
@@ -163,17 +179,34 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path
 Утилита:
 
 - рекурсивно сканирует `dist`;
-- берет только zip с именем `<64 hex build_key>-<exe name>.exe.zip`;
-- создает удаленную папку `builds`, если ее нет;
+- берет только zip с именем `<11 или 64 hex build_key>-<exe name>.exe.zip`;
+- создает удаленную папку `builds/<APP_VERSION>`, если ее нет;
 - загружает архивы через системные `ssh/scp`;
 - не хранит пароль и не требует его, если SSH key настроен.
 
-Если SSH key не настроен, можно загрузить архивы через WinSCP:
+Ручной вариант без upload-скрипта, если нужно сделать то же самое обычными `ssh/scp` командами:
+
+```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
+$Version = "1.2.3"
+$BuildsDir = "/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/$Version"
+$Archives = Get-ChildItem -Path ".\dist" -Recurse -File -Filter "*.zip" |
+  Where-Object { $_.Name -match '^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$' }
+if (-not $Archives) { throw "No build archives found in .\dist" }
+
+ssh root@m-sonar-addr.ru "mkdir -p '$BuildsDir'"
+foreach ($Archive in $Archives) {
+  scp "$($Archive.FullName)" "root@m-sonar-addr.ru:$BuildsDir/"
+}
+ssh root@m-sonar-addr.ru "find '$BuildsDir' -maxdepth 1 -type f -name '*.zip' | wc -l && ls -lah '$BuildsDir' | tail"
+```
+
+Если удобнее GUI, можно загрузить архивы через WinSCP:
 
 1. Подключитесь к `m-sonar-addr.ru` по SFTP.
-2. Откройте `/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds`.
+2. Откройте `/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/<app_version>`.
 3. Перетащите туда все `*.zip` из локального `dist`.
-4. Не загружайте туда случайные zip с другим именем. Сервис принимает только формат `<64 hex build_key>-<exe name>.exe.zip`.
+4. Не загружайте туда случайные zip с другим именем. Сервис принимает только формат `<11 или 64 hex build_key>-<exe name>.exe.zip`.
 
 ## 6. Обновить глобальную информацию об обновлении
 
@@ -193,9 +226,31 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path
 }
 ```
 
+Команды для обновления этого файла через SSH/SCP:
+
+```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
+$ReleaseJsonPath = Join-Path (Get-Location) "sonar-release.json"
+$ReleaseJson = @'
+{
+  "latest_version": "1.2.3",
+  "update_message": "🚀 Вышла новая версия\nИсправлен запуск трансляции\nСкачивание отдаст случайную защищенную сборку",
+  "download_link": "https://m-sonar-addr.ru/download"
+}
+'@
+$Utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+[System.IO.File]::WriteAllText($ReleaseJsonPath, $ReleaseJson, $Utf8NoBom)
+
+ssh root@m-sonar-addr.ru 'cd /var/lib/docker/volumes/sonar-keygen-caddy-data/_data && if [ -f sonar-release.json ]; then cp sonar-release.json sonar-release.json.bak-$(date +%Y%m%d-%H%M%S); fi'
+scp "$ReleaseJsonPath" "root@m-sonar-addr.ru:/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/sonar-release.json"
+Remove-Item $ReleaseJsonPath
+```
+
 `update_message` поддерживает переносы через `\n` и emoji. В интерфейсе строки будут переноситься.
 
 `download_link` должен вести на `/download`, если вы хотите случайную выдачу из папки `builds`.
+
+`download_link` не должен включать номер версии. Публичный URL остается стабильным, а сервер сам выбирает latest version folder.
 
 Не используйте публичный домен со словами `keygen`, `license`, `admin`, `ui`, а также `nip.io`, потому что он раскрывает IP и назначение сервиса. Нормальный вариант: `updates.<ваш-домен>` или `cdn.<ваш-домен>`.
 
@@ -213,18 +268,30 @@ curl.exe https://m-sonar-addr.ru/sonar-release.json
 curl.exe https://m-sonar-addr.ru/random-build-health
 ```
 
+Проверить файлы и контейнер прямо на сервере через SSH:
+
+```powershell
+ssh root@m-sonar-addr.ru "ls -lah /var/lib/docker/volumes/sonar-keygen-caddy-data/_data/sonar-release.json /var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds"
+ssh root@m-sonar-addr.ru "find /var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V"
+ssh root@m-sonar-addr.ru "docker ps --filter name=sonar-random-build-download && docker logs --tail 50 sonar-random-build-download"
+```
+
 Нормальный ответ выглядит примерно так:
 
 ```json
 {
   "ok": true,
   "builds_dir": "/builds",
+  "latest_version": "1.2.3",
+  "latest_builds_dir": "/builds/1.2.3",
+  "version_count": 2,
   "archive_count": 20,
-  "invalid_archive_count": 0
+  "invalid_archive_count": 0,
+  "total_archive_count": 40
 }
 ```
 
-Если `archive_count` равен `0`, значит в серверной папке `builds` нет валидных архивов с именем `<build_key>-<exe name>.zip`.
+Если `archive_count` равен `0`, значит в latest version folder нет валидных архивов с именем `<build_key>-<exe name>.zip`.
 
 Проверить скачивание:
 
@@ -278,6 +345,26 @@ License metadata используйте только для исключений
 }
 ```
 
+Команды для отката через SSH/SCP:
+
+```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
+$ReleaseJsonPath = Join-Path (Get-Location) "sonar-release.json"
+$ReleaseJson = @'
+{
+  "latest_version": "0.1.0",
+  "update_message": "",
+  "download_link": ""
+}
+'@
+$Utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+[System.IO.File]::WriteAllText($ReleaseJsonPath, $ReleaseJson, $Utf8NoBom)
+
+ssh root@m-sonar-addr.ru 'cd /var/lib/docker/volumes/sonar-keygen-caddy-data/_data && if [ -f sonar-release.json ]; then cp sonar-release.json sonar-release.json.bak-$(date +%Y%m%d-%H%M%S); fi'
+scp "$ReleaseJsonPath" "root@m-sonar-addr.ru:/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/sonar-release.json"
+Remove-Item $ReleaseJsonPath
+```
+
 3. Если metadata была задана в Keygen policy, уберите или измените ее там тоже.
 
 Caddy перезапускать не нужно, если менялся только JSON.
@@ -307,7 +394,3 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 ```
 
 При таком запуске повторяются build key, seed обфускации, encrypted literals, имя exe и иконка.
-
-
-
-
