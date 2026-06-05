@@ -159,6 +159,17 @@ def test_branding_accepts_neutral_license_server_override():
     assert values["startup_block_public_key"] == "a" * 64
 
 
+def test_branding_uses_startup_block_defaults():
+    branding = _load_branding()
+
+    values = branding.runtime_literal_values(
+        SimpleNamespace(license_server_url="", license_account_id="", startup_block_url="", startup_block_public_key="")
+    )
+
+    assert values["startup_block_url"] == "https://m-sonar-addr.ru/api/startup-block"
+    assert values["startup_block_public_key"] == "8fdff2bf7962162273a0e97a1ed1c3375c9fd8d174f531143dc6866f49007874"
+
+
 def test_branding_accepts_license_server_from_dotenv(tmp_path, monkeypatch):
     dotenv = tmp_path / ".env"
     dotenv.write_text(
