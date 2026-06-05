@@ -4,6 +4,8 @@ from __future__ import annotations
 ENCRYPTED_LITERALS = {
     "license_server_url": "AAECAwQFBgcICQoLDA0ODxzOjwwLaOGfdcgziIVOqz46Xvd_3PAi8gVec-8tmoE",
     "license_account_id": "ECEyQ1RldoeYqbq73O3-Dw",
+    "startup_block_url": "AAECAwQFBgcICQoLDA0ODw",
+    "startup_block_public_key": "AQIDBAUGBwgJCgsMDQ4PEA",
     "public_ip_services": "IDFCU2R1hpeoucrL3O3-APaxv24_ZBUBuOrF5E9R0oLQAi9QXfJ5Y7X2d7gJLhU0d_5fQ-OryMEUTFeKvP_MjKHbF7chVEwijV-mqsexrwbhuL9UPPVE_x_v8hy3pApbpJdRLZa4z361j5sQCrT_Ax4f_8PVNYwCjf29AN5QR--RfDIn",
     "telegram_api_base": "MEFSY3SFlqe4ydrb7P0OH447lQG7BBstostEGk6LeFJ0VYHrfzqyJA",
     "ffmpeg_download_url": "QFFic4SVprfI2err_A0eL9TSWcEyyRX4f4lj6eNB4nXAZ3v98Cz5AWcEey6XPdEcozAZJadkYc4UYkswtRtRcSMb7EGgKXfIgXZwlT99Z3E",

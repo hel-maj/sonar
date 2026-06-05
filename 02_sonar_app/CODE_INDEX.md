@@ -273,8 +273,8 @@ Seed-based обфускация приватных identifiers во времен
 Примеры:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<name>\<name>.exe"
-python scripts\extract_build_key_from_exe.py ".\dist\<name>\<build_key>-<name>.zip" --json
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip" --json
 ```
 
 Если рядом есть `config\sonar_build_keys.json`, выводит seed и build metadata.
@@ -283,13 +283,17 @@ python scripts\extract_build_key_from_exe.py ".\dist\<name>\<build_key>-<name>.z
 
 Загружает готовые build archives на сервер через системные `ssh/scp`.
 
-Требование: на ПК должен быть SSH key или agent, чтобы `ssh root@m-sonar-addr.ru` входил без пароля.
+По умолчанию читает `APP_VERSION`, сканирует `dist/<APP_VERSION>`, если папка есть, и загружает в `builds/<APP_VERSION>`.
+
+По умолчанию ожидает SSH key или agent, чтобы `ssh root@m-sonar-addr.ru` входил без пароля. Для входа по паролю используйте `--allow-password`; пароль вводится в prompt `ssh/scp`, а не в команду.
 
 Команды:
 
 ```powershell
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
 python scripts\upload_build_archives.py --host m-sonar-addr.ru
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --key "$env:USERPROFILE\.ssh\id_ed25519"
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path\to\archives"
 ```
@@ -297,7 +301,7 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path
 Берет только файлы с именем:
 
 ```text
-<64 hex build_key>-<exe name>.exe.zip
+<11 or 64 hex build_key>-<exe name>.exe.zip
 ```
 
 ### `scripts/random_build_download_server.py`
@@ -314,7 +318,7 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path
 /random-build-health
 ```
 
-Сервис не билдит и не пакует exe. Он выбирает случайный готовый zip из `/builds` и отдает его как attachment.
+Сервис не билдит и не пакует exe. Если в `/builds` есть version-папки, он выбирает latest version folder и отдает случайный готовый zip только из нее. Flat `/builds/*.zip` остается legacy fallback.
 
 ## Tests
 
@@ -344,6 +348,7 @@ python -m pytest tests\test_build_secure.py tests\test_extract_build_key_from_ex
 
 - `docs/guides/update_release_full.md` - полный выпуск новой версии.
 - `docs/guides/random_build_downloads.md` - случайная выдача готовых zip.
+- `docs/guides/delete_old_build_versions.md` - пошаговое удаление старых version-папок.
 - `docs/guides/keygen_license_features.md` - группы, features, Keygen metadata.
 - `docs/guides/release_build_security.md` - защита сборки и проверки.
 - `docs/guides/offline_wheelhouse_py312.md` - offline dependencies.
@@ -386,9 +391,6 @@ python scripts\run_tests.py
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
-python scripts\extract_build_key_from_exe.py ".\dist\<name>\<build_key>-<name>.zip"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip"
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
 ```
-
-
-

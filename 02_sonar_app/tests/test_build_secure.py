@@ -53,6 +53,7 @@ def test_secure_build_records_reproducible_build_key_map():
     branding = (ROOT / "scripts" / "prepare_build_branding.py").read_text(encoding="utf-8")
 
     assert "sonar_build_keys.json" in script
+    assert "app_version" in script
     assert "archive_name" in script
     assert "archive_path" in script
     assert "APP_BUILD_KEY" in branding
@@ -74,12 +75,18 @@ def test_secure_build_creates_uploadable_zip_archive_next_to_exe():
 
     assert "[int]$Count = 1" in script
     assert "[string]$LicenseServerUrl = \"\"" in script
+    assert "[string]$StartupBlockUrl = \"\"" in script
+    assert "[string]$StartupBlockPublicKey = \"\"" in script
     assert "--license-server-url" in script
+    assert "--startup-block-url" in script
+    assert "--startup-block-public-key" in script
     assert "function New-BuildArchive" in script
     assert "[System.IO.Compression.ZipFile]::Open" in script
     assert "[System.IO.Compression.CompressionLevel]::NoCompression" in script
+    assert "$VersionDistRoot = Join-Path $DistRoot $AppVersion" in script
     assert "\"{0}-{1}.zip\"" in script
     assert "Build archive:" in script
+    assert "Build version:" in script
 
 
 def test_secure_build_obfuscates_release_sources_with_seed():
@@ -141,11 +148,15 @@ def test_branding_accepts_neutral_license_server_override():
         SimpleNamespace(
             license_server_url="https://m-sonar-addr.ru/",
             license_account_id="account-id",
+            startup_block_url="https://checks.example/api/startup-block",
+            startup_block_public_key="a" * 64,
         )
     )
 
     assert values["license_server_url"] == "https://m-sonar-addr.ru"
     assert values["license_account_id"] == "account-id"
+    assert values["startup_block_url"] == "https://checks.example/api/startup-block"
+    assert values["startup_block_public_key"] == "a" * 64
 
 
 def test_branding_accepts_license_server_from_dotenv(tmp_path, monkeypatch):
@@ -155,6 +166,8 @@ def test_branding_accepts_license_server_from_dotenv(tmp_path, monkeypatch):
             [
                 "SONAR_LICENSE_SERVER_URL=https://dotenv.example.test/",
                 "SONAR_LICENSE_ACCOUNT_ID=dotenv-account",
+                "SONAR_STARTUP_BLOCK_URL=https://dotenv-checks.example.test/api/startup-block",
+                "SONAR_STARTUP_BLOCK_PUBLIC_KEY=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 "",
             ]
         ),
@@ -163,12 +176,18 @@ def test_branding_accepts_license_server_from_dotenv(tmp_path, monkeypatch):
     monkeypatch.setenv("SONAR_DOTENV_PATH", str(dotenv))
     monkeypatch.delenv("SONAR_LICENSE_SERVER_URL", raising=False)
     monkeypatch.delenv("SONAR_LICENSE_ACCOUNT_ID", raising=False)
+    monkeypatch.delenv("SONAR_STARTUP_BLOCK_URL", raising=False)
+    monkeypatch.delenv("SONAR_STARTUP_BLOCK_PUBLIC_KEY", raising=False)
     branding = _load_branding()
 
-    values = branding.runtime_literal_values(SimpleNamespace(license_server_url="", license_account_id=""))
+    values = branding.runtime_literal_values(
+        SimpleNamespace(license_server_url="", license_account_id="", startup_block_url="", startup_block_public_key="")
+    )
 
     assert values["license_server_url"] == "https://dotenv.example.test"
     assert values["license_account_id"] == "dotenv-account"
+    assert values["startup_block_url"] == "https://dotenv-checks.example.test/api/startup-block"
+    assert values["startup_block_public_key"] == "b" * 64
 
 
 def test_branding_seed_ignores_icon_history_for_reproducible_rebuild(tmp_path):

@@ -34,6 +34,23 @@ def test_iter_archive_files_only_accepts_build_archives(tmp_path):
     assert server.iter_invalid_archive_files(tmp_path) == [invalid]
 
 
+def test_iter_archive_files_uses_latest_version_folder_only(tmp_path):
+    server = _load_server()
+    old = tmp_path / "0.1.0"
+    latest = tmp_path / "0.2.0"
+    old.mkdir()
+    latest.mkdir()
+    old_archive = old / f"{'a' * 11}-Old.exe.zip"
+    latest_archive = latest / f"{'b' * 11}-Latest.exe.zip"
+    root_archive = tmp_path / f"{'c' * 11}-Root.exe.zip"
+    old_archive.write_bytes(b"old")
+    latest_archive.write_bytes(b"latest")
+    root_archive.write_bytes(b"root")
+
+    assert server.latest_version_dir(tmp_path).version == "0.2.0"
+    assert server.iter_archive_files(tmp_path) == [latest_archive]
+
+
 def test_choose_build_archive_returns_random_valid_archive(tmp_path):
     server = _load_server()
     first = tmp_path / f"{'a' * 64}-A.exe.zip"
@@ -66,3 +83,42 @@ def test_download_page_points_to_random_zip_endpoint():
 
     assert "/api/random-build.zip?token=secret%20value" in html
     assert "Подготовка загрузки" in html
+
+
+def test_startup_blocklist_matches_build_or_license_key(tmp_path):
+    server = _load_server()
+    path = tmp_path / "startup-blocklist.json"
+    path.write_text(
+        """{
+  "build_keys": ["abc123"],
+  "license_keys": ["LICENSE-1"],
+  "download_url": "https://m-sonar-addr.ru/download"
+}""",
+        encoding="utf-8",
+    )
+
+    blocklist = server.load_startup_blocklist(path)
+
+    assert server.is_startup_blocked({"build_key": "ABC123", "license_key": ""}, blocklist) is True
+    assert server.is_startup_blocked({"build_key": "", "license_key": "LICENSE-1"}, blocklist) is True
+    assert server.is_startup_blocked({"build_key": "other", "license_key": "LICENSE-2"}, blocklist) is False
+
+
+def test_startup_block_response_is_signed_for_client_verifier():
+    server = _load_server()
+    from sonar.license.startup_block import parse_signed_startup_block_response
+    from sonar.security.ed25519 import ed25519_public_key_from_seed
+
+    seed = bytes(range(32))
+    body = server.signed_startup_block_response(
+        blocked=True,
+        download_url="https://m-sonar-addr.ru/download",
+        private_key_seed=seed,
+    )
+
+    status = parse_signed_startup_block_response(body, ed25519_public_key_from_seed(seed))
+
+    assert set(body) == {"blocked", "download_url", "signature"}
+    assert status.checked is True
+    assert status.blocked is True
+    assert status.download_url == "https://m-sonar-addr.ru/download"

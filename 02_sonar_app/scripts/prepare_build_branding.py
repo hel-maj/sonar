@@ -80,6 +80,8 @@ DEFAULT_LICENSE_SERVER_URL = "https://updates.example.invalid"
 RUNTIME_LITERAL_VALUES = {
     "license_server_url": DEFAULT_LICENSE_SERVER_URL,
     "license_account_id": "",
+    "startup_block_url": "",
+    "startup_block_public_key": "",
     "public_ip_services": [
         "https://api.ipify.org",
         "https://ifconfig.me/ip",
@@ -272,10 +274,18 @@ def runtime_literal_values(args: argparse.Namespace) -> dict[str, Any]:
     values = dict(RUNTIME_LITERAL_VALUES)
     license_server_url = (getattr(args, "license_server_url", "") or os.environ.get("SONAR_LICENSE_SERVER_URL") or "").strip()
     license_account_id = (getattr(args, "license_account_id", "") or os.environ.get("SONAR_LICENSE_ACCOUNT_ID") or "").strip()
+    startup_block_url = (getattr(args, "startup_block_url", "") or os.environ.get("SONAR_STARTUP_BLOCK_URL") or "").strip()
+    startup_block_public_key = (
+        getattr(args, "startup_block_public_key", "") or os.environ.get("SONAR_STARTUP_BLOCK_PUBLIC_KEY") or ""
+    ).strip()
     if license_server_url:
         values["license_server_url"] = license_server_url.rstrip("/")
     if license_account_id:
         values["license_account_id"] = license_account_id
+    if startup_block_url:
+        values["startup_block_url"] = startup_block_url
+    if startup_block_public_key:
+        values["startup_block_public_key"] = startup_block_public_key
     return values
 
 
@@ -388,6 +398,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--build-key", default="", help="Existing build key for a reproducible rebuild.")
     parser.add_argument("--license-server-url", default="", help="Public neutral license/update base URL for this build.")
     parser.add_argument("--license-account-id", default="", help="Optional Keygen account id override for this build.")
+    parser.add_argument("--startup-block-url", default="", help="Independent signed startup block check URL for this build.")
+    parser.add_argument("--startup-block-public-key", default="", help="Ed25519 public key for signed startup block responses.")
     return parser
 
 

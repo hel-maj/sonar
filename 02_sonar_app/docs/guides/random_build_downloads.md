@@ -3,7 +3,7 @@
 Эта схема используется для скачивания обновления:
 
 ```text
-пользователь открывает /download -> сервер выбирает случайный zip из builds -> браузер скачивает выбранный zip
+пользователь открывает /download -> сервер выбирает latest version folder в builds -> выбирает случайный zip только из этой версии -> браузер скачивает выбранный zip
 ```
 
 На сервере не запускается сборка и не создается zip на лету. Все архивы должны быть подготовлены заранее локальной сборкой.
@@ -11,10 +11,20 @@
 ## Где лежат архивы на сервере
 
 ```text
-/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds
+/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/<app_version>
 ```
 
-В эту папку кладутся только готовые build archives:
+В `builds` для каждой версии должна быть отдельная папка:
+
+```text
+builds/
+  0.1.0/
+    <build_key>-<exe name>.zip
+  0.2.0/
+    <build_key>-<exe name>.zip
+```
+
+Внутрь version-папки кладутся только готовые build archives:
 
 ```text
 <build_key>-<exe name>.zip
@@ -48,7 +58,7 @@ cd P:\projects\Majestic\Sonar\02_sonar_app
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall --count 20
 ```
 
-После сборки в каждой папке `dist\<имя>` будет:
+После сборки в каждой папке `dist\<app_version>\<имя>` будет:
 
 ```text
 <имя>.exe
@@ -57,17 +67,23 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 
 Загружать на сервер надо zip-файлы.
 
-## Как сервер выбирает файл
+## Как сервер выбирает версию и файл
 
-Сервис смотрит папку `builds` рекурсивно и берет только zip, имя которых подходит под шаблон:
+Сервис сначала ищет в `builds` папки с numeric version name, например `0.1.0` или `1.2.3`.
+
+Если version-папки есть, он выбирает самую новую версию по числам в имени папки и сканирует только ее. Старые папки остаются на диске, но публичные URL их не отдают.
+
+Если version-папок нет, включается legacy fallback: сервис сканирует корень `builds`, чтобы старый сервер не сломался до миграции файлов.
+
+В выбранной version-папке сервис берет только zip, имя которых подходит под шаблон:
 
 ```text
-64-hex-build-key + "-" + имя exe + ".zip"
+11 или 64 hex build key + "-" + имя exe + ".zip"
 ```
 
 Файлы вроде `test.zip`, `Sonar.zip`, `old-build.zip` игнорируются.
 
-Если валидных архивов нет, `/api/random-build.zip` вернет ошибку `No build .zip archives found`.
+Если в latest version folder валидных архивов нет, `/api/random-build.zip` вернет ошибку `No build .zip archives found`.
 
 ## Публичные URL
 
@@ -77,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 https://m-sonar-addr.ru/download
 ```
 
-Прямая ссылка на случайный архив:
+Прямая ссылка на случайный архив из latest version folder:
 
 ```text
 https://m-sonar-addr.ru/api/random-build.zip
@@ -91,6 +107,8 @@ https://m-sonar-addr.ru/random-build-health
 
 `m-sonar-addr.ru` - текущий домен релиза. Для будущих доменов используйте нейтральное имя без слов `keygen`, `license`, `admin`, `ui` и без `nip.io`.
 
+Эти URL не включают версию в path. Это сделано специально: пользователь всегда получает latest version folder, а `sonar-release.json` хранит только текущий `latest_version` и стабильный `download_link`.
+
 Полный список доступных URL лежит отдельно:
 
 ```text
@@ -102,9 +120,9 @@ Caddy проксирует `/download`, `/api/random-build.zip` и `/random-buil
 
 Проверить контейнер на сервере:
 
-```bash
-docker ps --filter name=sonar-random-build-download
-docker logs --tail 50 sonar-random-build-download
+```powershell
+ssh root@m-sonar-addr.ru "docker ps --filter name=sonar-random-build-download"
+ssh root@m-sonar-addr.ru "docker logs --tail 50 sonar-random-build-download"
 ```
 
 ## Что писать в download_link
@@ -119,6 +137,17 @@ docker logs --tail 50 sonar-random-build-download
 
 Так пользователь увидит loader, а потом браузер начнет скачивание.
 
+## Проверка папки builds через SSH
+
+Проверить, что папка существует и в ней есть валидные zip:
+
+```powershell
+$BuildsDir = "/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds"
+ssh root@m-sonar-addr.ru "mkdir -p '$BuildsDir'"
+ssh root@m-sonar-addr.ru "find '$BuildsDir' -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V"
+ssh root@m-sonar-addr.ru "curl -sS https://m-sonar-addr.ru/random-build-health"
+```
+
 ## Загрузка архивов через SSH key
 
 Если `ssh root@m-sonar-addr.ru` входит без пароля, загрузить все архивы из `dist` можно так:
@@ -128,12 +157,28 @@ cd P:\projects\Majestic\Sonar\02_sonar_app
 python scripts\upload_build_archives.py --host m-sonar-addr.ru
 ```
 
-Вместо постоянного `--host` можно задать переменную окружения `SONAR_UPLOAD_HOST`.
+Скрипт сам читает `APP_VERSION` из `src\sonar\version.py` и загружает архивы в `builds/<APP_VERSION>`. Если внутри `dist` есть папка этой версии, скрипт сканирует только `dist/<APP_VERSION>`, чтобы не залить старые локальные архивы. Вместо постоянного `--host` можно задать переменную окружения `SONAR_UPLOAD_HOST`.
 
 Проверить без загрузки:
 
 ```powershell
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
+```
+
+Если надо заменить набор архивов внутри этой же версии, явно очистите version-папку перед загрузкой:
+
+```powershell
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version --dry-run
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version
+```
+
+Удаление старых version-папок описано отдельно: [delete_old_build_versions.md](delete_old_build_versions.md).
+
+Если вход по паролю, а не по SSH key, разрешите prompt пароля:
+
+```powershell
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password --dry-run
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password
 ```
 
 Если ключ лежит не в стандартном месте:
@@ -150,7 +195,24 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path
 
 Утилита использует системные `ssh/scp`, поэтому работает с обычными ключами из `.ssh`, `ssh-agent` и настройками OpenSSH.
 
-Если SSH key не настроен, используйте WinSCP и загрузите архивы вручную.
+Ручная загрузка без upload-скрипта:
+
+```powershell
+cd P:\projects\Majestic\Sonar\02_sonar_app
+$Version = "0.1.0"
+$BuildsDir = "/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/$Version"
+$Archives = Get-ChildItem -Path ".\dist" -Recurse -File -Filter "*.zip" |
+  Where-Object { $_.Name -match '^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$' }
+if (-not $Archives) { throw "No build archives found in .\dist" }
+
+ssh root@m-sonar-addr.ru "mkdir -p '$BuildsDir'"
+foreach ($Archive in $Archives) {
+  scp "$($Archive.FullName)" "root@m-sonar-addr.ru:$BuildsDir/"
+}
+ssh root@m-sonar-addr.ru "find '$BuildsDir' -maxdepth 1 -type f -name '*.zip' | wc -l"
+```
+
+Если нужен GUI, используйте WinSCP и загрузите архивы вручную.
 
 ## Проверка скачанного архива
 
@@ -172,7 +234,3 @@ python scripts\extract_build_key_from_exe.py "C:\path\to\<build_key>-<exe name>.
 ```text
 P:\projects\Majestic\Sonar\config\sonar_build_keys.json
 ```
-
-
-
-

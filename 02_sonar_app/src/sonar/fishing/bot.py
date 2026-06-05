@@ -152,6 +152,10 @@ class FishingBot:
     telegram_runtime_enabled_callback: Callable[[], bool] | None = None
     telegram_settings_changed_callback: Callable[[TelegramSettings], None] | None = None
     player_status_callback: Callable[[PlayerStatus | None], None] | None = None
+    fishing_runtime_enabled_callback: Callable[[], bool] | None = None
+    stats_runtime_enabled_callback: Callable[[], bool] | None = None
+    tackle_runtime_enabled_callback: Callable[[], bool] | None = None
+    stream_runtime_enabled_callback: Callable[[], bool] | None = None
     stream_status_callback: Callable[[], object] | None = None
     stream_start_callback: Callable[[], bool] | None = None
     stream_stop_callback: Callable[[], None] | None = None
@@ -289,6 +293,10 @@ class FishingBot:
             stream_set_quality_callback=self.stream_set_quality_callback,
             stream_set_chat_zoom_callback=self.stream_set_chat_zoom_callback,
             stream_set_snapshot_mode_callback=self.stream_set_snapshot_mode_callback,
+            fishing_runtime_enabled_callback=self.fishing_runtime_enabled_callback,
+            stats_runtime_enabled_callback=self.stats_runtime_enabled_callback,
+            tackle_runtime_enabled_callback=self.tackle_runtime_enabled_callback,
+            stream_runtime_enabled_callback=self.stream_runtime_enabled_callback,
             player_status_callback=self.estimated_player_status,
             player_status_scan_callback=self.request_player_status_scan,
         )
@@ -302,6 +310,7 @@ class FishingBot:
         set_quality_callback: Callable[[str], bool] | None = None,
         set_chat_zoom_callback: Callable[[bool], bool] | None = None,
         set_snapshot_mode_callback: Callable[[bool], bool] | None = None,
+        stream_runtime_enabled_callback: Callable[[], bool] | None = None,
     ) -> None:
         self.stream_status_callback = status_callback
         self.stream_start_callback = start_callback
@@ -309,6 +318,7 @@ class FishingBot:
         self.stream_set_quality_callback = set_quality_callback
         self.stream_set_chat_zoom_callback = set_chat_zoom_callback
         self.stream_set_snapshot_mode_callback = set_snapshot_mode_callback
+        self.stream_runtime_enabled_callback = stream_runtime_enabled_callback
         self._configure_notifications()
 
     def _save_telegram_settings(self, telegram_settings) -> None:

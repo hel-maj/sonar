@@ -96,7 +96,7 @@ P:\projects\Majestic\Sonar\config\sonar_build_keys.json
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
-python scripts\audit_release_secrets.py --target ".\dist\<имя exe>"
+python scripts\audit_release_secrets.py --target ".\dist\<app_version>\<имя exe>"
 ```
 
 ## Как проверить build key
@@ -104,13 +104,13 @@ python scripts\audit_release_secrets.py --target ".\dist\<имя exe>"
 Из exe:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<имя exe>\<имя exe>.exe"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<имя exe>.exe"
 ```
 
 Из zip:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<имя exe>\<build_key>-<имя exe>.zip"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<build_key>-<имя exe>.zip"
 ```
 
 Если рядом есть `config\sonar_build_keys.json`, утилита также покажет seed, app name и exe name.

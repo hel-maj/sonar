@@ -14,7 +14,7 @@
 {
   "license_group": "basic",
   "allow_features": ["telegram"],
-  "deny_features": ["streaming"],
+  "deny_features": ["stream"],
   "latest_version": "1.2.3",
   "update_message": "🚀 Новая версия\nИсправлены ошибки",
   "download_link": "https://m-sonar-addr.ru/download"
@@ -34,13 +34,14 @@
 
 Группы задаются в коде в `src\sonar\license\features.py`.
 
-Базовая схема:
+Текущая схема:
 
-- `basic` - базовые экраны и настройки.
-- `fishing` - рыбалка и связанные действия.
-- `streamer` - рыбалка плюс streaming и stream chat.
-- `pro` - все основные фичи.
-- `admin` - полный доступ.
+- `intro` - только вкладка Рыбалка, без запуска бота.
+- `basic` - Рыбалка с запуском бота, Обзор и Telegram без стрима и расширенной статистики.
+- `premium` - полный функционал.
+- `dev` - сейчас копирует `premium`.
+- `promo` - сейчас копирует `premium`.
+- `admin` и `owner` - полный доступ.
 
 Если группы надо поменять, править надо `GROUP_FEATURES` в `features.py`.
 
@@ -50,12 +51,15 @@
 
 ```text
 overview
+overview_session_stats
 fishing
-settings
+fishing_bot
+fishing_tackle
 statistics
 telegram
-streaming
+stream
 stream_chat
+settings
 ```
 
 Их можно использовать в `allow_features` и `deny_features`.
@@ -72,36 +76,57 @@ stream_chat
 4. Вставьте JSON.
 5. Сохраните.
 
-Пример для базовой группы:
+Пример для Intro:
+
+```json
+{
+  "license_group": "intro",
+  "latest_version": "1.2.3",
+  "update_message": "Обновление Sonar Intro\nДоступны общие исправления",
+  "download_link": "https://m-sonar-addr.ru/download"
+}
+```
+
+Пример для Basic:
 
 ```json
 {
   "license_group": "basic",
   "latest_version": "1.2.3",
-  "update_message": "✅ Базовое обновление\nДоступны общие исправления\nСсылка ведет на случайную сборку",
+  "update_message": "Обновление Sonar Basic\nДоступны общие исправления",
   "download_link": "https://m-sonar-addr.ru/download"
 }
 ```
 
-Пример для стримеров:
+Пример для Premium:
 
 ```json
 {
-  "license_group": "streamer",
-  "allow_features": ["streaming", "stream_chat", "telegram"],
+  "license_group": "premium",
   "latest_version": "1.2.3",
-  "update_message": "📺 Версия для стримеров\nОбновлена трансляция\nДобавлены правки stream chat",
+  "update_message": "Обновление Sonar Premium\nИсправлена рыбалка и стрим",
   "download_link": "https://m-sonar-addr.ru/download"
 }
 ```
 
-Пример для pro:
+Пример для Dev:
 
 ```json
 {
-  "license_group": "pro",
+  "license_group": "dev",
   "latest_version": "1.2.3",
-  "update_message": "🚀 Pro обновление\nИсправлена рыбалка\nУлучшены проверки статуса",
+  "update_message": "Обновление Sonar Dev\nПолный доступ для разработки",
+  "download_link": "https://m-sonar-addr.ru/download"
+}
+```
+
+Пример для Promo:
+
+```json
+{
+  "license_group": "promo",
+  "latest_version": "1.2.3",
+  "update_message": "Обновление Sonar Promo\nПолный доступ для промо-ключей",
   "download_link": "https://m-sonar-addr.ru/download"
 }
 ```
@@ -110,8 +135,8 @@ stream_chat
 
 ```json
 {
-  "license_group": "pro",
-  "deny_features": ["streaming"],
+  "license_group": "premium",
+  "deny_features": ["stream"],
   "update_message": "⚠️ Streaming временно отключен\nОстальные функции работают"
 }
 ```
@@ -132,7 +157,7 @@ stream_chat
 
 ```json
 {
-  "deny_features": ["streaming"]
+  "deny_features": ["stream"]
 }
 ```
 
@@ -187,3 +212,4 @@ sonar-release.json < policy metadata < license metadata
 
 на главном экране появится хорошо вписанная ссылка скачивания.
 
+Для random build downloads указывайте стабильный URL `https://m-sonar-addr.ru/download`, без номера версии в path. Сервер сам выберет latest version folder внутри `builds`.

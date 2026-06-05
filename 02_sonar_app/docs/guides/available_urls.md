@@ -12,15 +12,15 @@ HTTP-версии этих адресов Caddy перенаправляет н�
 
 | URL | Что делает |
 | --- | --- |
-| `https://m-sonar-addr.ru/download` | Страница загрузки. Автоматически переводит браузер на случайный zip из пула сборок. |
-| `https://m-sonar-addr.ru/api/random-build.zip` | Прямая ссылка на случайный готовый zip. Отдает файл как attachment. |
+| `https://m-sonar-addr.ru/download` | Страница загрузки. Автоматически переводит браузер на случайный zip из latest version folder в `builds`. |
+| `https://m-sonar-addr.ru/api/random-build.zip` | Прямая ссылка на случайный готовый zip из latest version folder. Отдает файл как attachment. |
 | `https://m-sonar-addr.ru/sonar-release.json` | Глобальная release metadata для приложения: версия, сообщение обновления, `download_link`. |
 
 ## Для проверки сервера
 
 | URL | Что делает |
 | --- | --- |
-| `https://m-sonar-addr.ru/random-build-health` | Health check сервиса случайной выдачи zip. Показывает `archive_count` и `invalid_archive_count`. |
+| `https://m-sonar-addr.ru/random-build-health` | Health check сервиса случайной выдачи zip. Показывает `latest_version`, `latest_builds_dir`, `archive_count`, `invalid_archive_count` и `total_archive_count`. |
 | `https://m-sonar-addr.ru/` | Корень Keygen API. В браузере может вернуть `404`, это нормально: это не лендинг и не страница скачивания. |
 
 ## License API
@@ -59,4 +59,3 @@ https://m-sonar-addr.ru/v1/accounts/<account_id>/machines/<fingerprint>
 ## DNS, но не web URL приложения
 
 `mail.m-sonar-addr.ru` указывает на сервер как DNS A/MX host, но приложение Sonar его не использует. В Caddy для него отдельный web-сайт не настроен.
-

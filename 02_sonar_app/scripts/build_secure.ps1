@@ -5,6 +5,8 @@ param(
     [string]$ObfuscationSeed = "",
     [string]$LicenseServerUrl = "",
     [string]$LicenseAccountId = "",
+    [string]$StartupBlockUrl = "",
+    [string]$StartupBlockPublicKey = "",
     [switch]$NoLto
 )
 
@@ -83,6 +85,7 @@ function Invoke-Python {
 function Update-BuildKeyMap {
     param(
         [object]$Branding,
+        [string]$AppVersion,
         [string]$ExeName,
         [string]$DistPath,
         [string]$ArchiveName,
@@ -111,6 +114,7 @@ function Update-BuildKeyMap {
         obfuscation_seed = [string]$Branding.obfuscation_seed
         build_hash = [string]$Branding.build_hash
         app_name = [string]$Branding.app_name
+        app_version = $AppVersion
         exe_name = $ExeName
         dist_path = $DistPath
         archive_name = $ArchiveName
@@ -200,6 +204,12 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     if ($LicenseAccountId) {
         $BrandingArgs += @("--license-account-id", "$LicenseAccountId")
     }
+    if ($StartupBlockUrl) {
+        $BrandingArgs += @("--startup-block-url", "$StartupBlockUrl")
+    }
+    if ($StartupBlockPublicKey) {
+        $BrandingArgs += @("--startup-block-public-key", "$StartupBlockPublicKey")
+    }
     Invoke-Python $BrandingArgs
     if ($LASTEXITCODE -ne 0) { throw "Build branding failed" }
 
@@ -219,17 +229,6 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     )
     if ($LASTEXITCODE -ne 0) { throw "Release source obfuscation failed" }
 
-    $AppName = [string]$Branding.app_name
-    $OutputExeName = [string]$Branding.exe_name
-    $OutputStem = [System.IO.Path]::GetFileNameWithoutExtension($OutputExeName)
-    $AppDist = Join-Path $DistRoot $OutputStem
-    if (Test-Path $AppDist) {
-        $OutputStem = "{0}_{1}" -f $OutputStem, ([string]$Branding.build_hash).Substring(0, 8)
-        $OutputExeName = "{0}.exe" -f $OutputStem
-        $AppDist = Join-Path $DistRoot $OutputStem
-    }
-    New-Item -ItemType Directory -Path $AppDist -Force | Out-Null
-
     $VersionContent = Get-Content -LiteralPath (Join-Path $SecureSrc "sonar\version.py") -Raw
     if ($VersionContent -match 'APP_VERSION\s*=\s*"([0-9]+(?:\.[0-9]+){0,3})"') {
         $AppVersion = $Matches[1]
@@ -241,6 +240,18 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
         $VersionParts += "0"
     }
     $WindowsVersion = ($VersionParts[0..3] -join ".")
+    $VersionDistRoot = Join-Path $DistRoot $AppVersion
+
+    $AppName = [string]$Branding.app_name
+    $OutputExeName = [string]$Branding.exe_name
+    $OutputStem = [System.IO.Path]::GetFileNameWithoutExtension($OutputExeName)
+    $AppDist = Join-Path $VersionDistRoot $OutputStem
+    if (Test-Path $AppDist) {
+        $OutputStem = "{0}_{1}" -f $OutputStem, ([string]$Branding.build_hash).Substring(0, 8)
+        $OutputExeName = "{0}.exe" -f $OutputStem
+        $AppDist = Join-Path $VersionDistRoot $OutputStem
+    }
+    New-Item -ItemType Directory -Path $AppDist -Force | Out-Null
 
     $env:PYTHONPATH = $SecureSrc
     $IconPath = Join-Path $SecureSrc "sonar\resources\app.ico"
@@ -285,9 +296,10 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     if ($LASTEXITCODE -ne 0) { throw "Release secret audit failed" }
     $ExePath = Join-Path $AppDist $OutputExeName
     $Archive = New-BuildArchive -Branding $Branding -ExePath $ExePath -ExeName $OutputExeName -OutputDir $AppDist
-    Update-BuildKeyMap -Branding $Branding -ExeName $OutputExeName -DistPath $ExePath -ArchiveName $Archive.Name -ArchivePath $Archive.Path
+    Update-BuildKeyMap -Branding $Branding -AppVersion $AppVersion -ExeName $OutputExeName -DistPath $ExePath -ArchiveName $Archive.Name -ArchivePath $Archive.Path
     Write-Host "Build complete: $ExePath"
     Write-Host "Build archive: $($Archive.Path)"
+    Write-Host "Build version: $AppVersion"
     Write-Host "Build hash: $($Branding.build_hash)"
     Write-Host "Build key: $($Branding.build_key)"
     Write-Host "Obfuscation seed: $($Branding.obfuscation_seed)"

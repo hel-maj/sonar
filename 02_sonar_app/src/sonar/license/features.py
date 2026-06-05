@@ -5,17 +5,35 @@ from typing import Any, Iterable
 
 
 FEATURE_OVERVIEW = "overview"
+FEATURE_OVERVIEW_SESSION_STATS = "overview_session_stats"
 FEATURE_FISHING = "fishing"
+FEATURE_FISHING_BOT = "fishing_bot"
+FEATURE_FISHING_TACKLE = "fishing_tackle"
 FEATURE_SETTINGS = "settings"
 FEATURE_STATISTICS = "statistics"
 FEATURE_STREAM = "stream"
 FEATURE_STREAM_CHAT = "stream_chat"
 FEATURE_TELEGRAM = "telegram"
 
-ALL_FEATURES = frozenset(
+INTRO_FEATURES = frozenset({FEATURE_FISHING})
+
+BASIC_FEATURES = frozenset(
     {
         FEATURE_OVERVIEW,
         FEATURE_FISHING,
+        FEATURE_FISHING_BOT,
+        FEATURE_FISHING_TACKLE,
+        FEATURE_TELEGRAM,
+    }
+)
+
+PREMIUM_FEATURES = frozenset(
+    {
+        FEATURE_OVERVIEW,
+        FEATURE_OVERVIEW_SESSION_STATS,
+        FEATURE_FISHING,
+        FEATURE_FISHING_BOT,
+        FEATURE_FISHING_TACKLE,
         FEATURE_SETTINGS,
         FEATURE_STATISTICS,
         FEATURE_STREAM,
@@ -24,10 +42,15 @@ ALL_FEATURES = frozenset(
     }
 )
 
+ALL_FEATURES = PREMIUM_FEATURES
+
 STABLE_FEATURES = frozenset(
     {
         FEATURE_OVERVIEW,
+        FEATURE_OVERVIEW_SESSION_STATS,
         FEATURE_FISHING,
+        FEATURE_FISHING_BOT,
+        FEATURE_FISHING_TACKLE,
         FEATURE_SETTINGS,
         FEATURE_STATISTICS,
         FEATURE_STREAM,
@@ -35,12 +58,51 @@ STABLE_FEATURES = frozenset(
     }
 )
 
+SUBSCRIPTION_LEVELS = ("intro", "basic", "premium", "dev", "promo")
+PREMIUM_LIKE_GROUPS = frozenset({"premium", "dev", "promo", "legacy", "admin", "owner"})
+SUBSCRIPTION_LABELS = {
+    "intro": "Intro",
+    "basic": "Basic",
+    "premium": "Premium",
+    "dev": "Dev",
+    "promo": "Promo",
+    "legacy": "Premium",
+    "admin": "Dev",
+    "owner": "Dev",
+}
+
+GROUP_ALIASES = {
+    "starter": "intro",
+    "free": "intro",
+    "standard": "basic",
+    "streamer": "premium",
+    "pro": "premium",
+    "developer": "dev",
+    "development": "dev",
+    "promotion": "promo",
+}
+
+FEATURE_ALIASES = {
+    "bot": FEATURE_FISHING_BOT,
+    "fishing_automation": FEATURE_FISHING_BOT,
+    "automation": FEATURE_FISHING_BOT,
+    "tackle": FEATURE_FISHING_TACKLE,
+    "equipment": FEATURE_FISHING_TACKLE,
+    "overview_stats": FEATURE_OVERVIEW_SESSION_STATS,
+    "overview_statistics": FEATURE_OVERVIEW_SESSION_STATS,
+    "session_stats": FEATURE_OVERVIEW_SESSION_STATS,
+    "streaming": FEATURE_STREAM,
+    "stream_chat_zoom": FEATURE_STREAM_CHAT,
+}
+
 GROUP_FEATURES: dict[str, frozenset[str]] = {
-    "basic": frozenset({FEATURE_OVERVIEW, FEATURE_FISHING, FEATURE_SETTINGS, FEATURE_STATISTICS}),
-    "standard": frozenset({FEATURE_OVERVIEW, FEATURE_FISHING, FEATURE_SETTINGS, FEATURE_STATISTICS, FEATURE_TELEGRAM}),
+    "intro": INTRO_FEATURES,
+    "basic": BASIC_FEATURES,
     "streamer": STABLE_FEATURES,
-    "premium": STABLE_FEATURES,
-    "legacy": STABLE_FEATURES,
+    "premium": PREMIUM_FEATURES,
+    "dev": PREMIUM_FEATURES,
+    "promo": PREMIUM_FEATURES,
+    "legacy": PREMIUM_FEATURES,
     "admin": ALL_FEATURES,
     "owner": ALL_FEATURES,
 }
@@ -71,6 +133,10 @@ class LicenseEntitlements:
     def to_config(self) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
         return self.group, tuple(sorted(self.allowed)), tuple(sorted(self.denied))
 
+    @property
+    def subscription_label(self) -> str:
+        return subscription_label(self.group)
+
 
 def entitlements_from_metadata(metadata: dict[str, Any], *, role: str = "user") -> LicenseEntitlements:
     normalized_role = _normalize_name(role) or "user"
@@ -81,9 +147,9 @@ def entitlements_from_metadata(metadata: dict[str, Any], *, role: str = "user") 
 
     allowed = set(ROLE_FEATURES.get(normalized_role, GROUP_FEATURES.get(group, frozenset())))
     if not allowed:
-        allowed = set(GROUP_FEATURES["basic"])
+        allowed = set(GROUP_FEATURES["intro"])
     if not explicit_policy and group == "legacy":
-        allowed = set(STABLE_FEATURES)
+        allowed = set(PREMIUM_FEATURES)
 
     denied: set[str] = set()
     for key in ALLOW_KEYS:
@@ -126,7 +192,7 @@ def entitlements_from_cached_fields(
     normalized_features = frozenset(key for key in (normalize_feature_key(item) for item in features) if key in ALL_FEATURES)
     normalized_denied = frozenset(key for key in (normalize_feature_key(item) for item in denied_features) if key in ALL_FEATURES)
     normalized_role = _normalize_name(role) or "user"
-    normalized_group = _normalize_name(group) or ("admin" if normalized_role in ROLE_FEATURES else "legacy")
+    normalized_group = normalize_subscription_group(group) or ("admin" if normalized_role in ROLE_FEATURES else "legacy")
     if normalized_features:
         return LicenseEntitlements(
             role=normalized_role,
@@ -143,14 +209,40 @@ def entitlements_from_cached_fields(
 
 
 def normalize_feature_key(value: str) -> str:
-    return str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    return FEATURE_ALIASES.get(normalized, normalized)
+
+
+def normalize_subscription_group(value: Any) -> str:
+    normalized = _normalize_name(value)
+    return GROUP_ALIASES.get(normalized, normalized)
+
+
+def subscription_label(value: Any) -> str:
+    normalized = normalize_subscription_group(value)
+    return SUBSCRIPTION_LABELS.get(normalized, str(value or "").strip() or "Unknown")
+
+
+def subscription_product_name(value: Any) -> str:
+    return f"Sonar - {subscription_label(value)}"
+
+
+def subscription_description(value: Any, *, active: bool = True) -> str:
+    if not active:
+        return "Активируйте ключ, чтобы открыть доступные функции Sonar."
+    normalized = normalize_subscription_group(value)
+    if normalized == "intro":
+        return "Режим просмотра рыбалки без запуска бота и дополнительных модулей."
+    if normalized == "basic":
+        return "Рыбалка, Обзор и Telegram уведомления без стрима и расширенной статистики."
+    return "Полный доступ к рыбалке, статистике, Telegram и стриму."
 
 
 def _metadata_group(metadata: dict[str, Any]) -> str:
     for key in GROUP_KEYS:
         value = metadata.get(key)
         if value:
-            return _normalize_name(value)
+            return normalize_subscription_group(value)
     return ""
 
 

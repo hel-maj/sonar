@@ -106,6 +106,10 @@ class NotificationManager:
     stream_set_quality_callback: Callable[[str], bool] | None = None
     stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None
     stream_set_snapshot_mode_callback: Callable[[bool], bool] | None = None
+    fishing_runtime_enabled_callback: Callable[[], bool] | None = None
+    stats_runtime_enabled_callback: Callable[[], bool] | None = None
+    tackle_runtime_enabled_callback: Callable[[], bool] | None = None
+    stream_runtime_enabled_callback: Callable[[], bool] | None = None
     player_status_scan_callback: Callable[[], tuple[bool, str]] | None = None
     runtime_enabled: bool = True
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
@@ -155,6 +159,10 @@ class NotificationManager:
         stream_set_quality_callback: Callable[[str], bool] | None = None,
         stream_set_chat_zoom_callback: Callable[[bool], bool] | None = None,
         stream_set_snapshot_mode_callback: Callable[[bool], bool] | None = None,
+        fishing_runtime_enabled_callback: Callable[[], bool] | None = None,
+        stats_runtime_enabled_callback: Callable[[], bool] | None = None,
+        tackle_runtime_enabled_callback: Callable[[], bool] | None = None,
+        stream_runtime_enabled_callback: Callable[[], bool] | None = None,
         player_status_scan_callback: Callable[[], tuple[bool, str]] | None = None,
     ) -> None:
         self.settings = settings
@@ -181,6 +189,10 @@ class NotificationManager:
         self.stream_set_quality_callback = stream_set_quality_callback
         self.stream_set_chat_zoom_callback = stream_set_chat_zoom_callback
         self.stream_set_snapshot_mode_callback = stream_set_snapshot_mode_callback
+        self.fishing_runtime_enabled_callback = fishing_runtime_enabled_callback
+        self.stats_runtime_enabled_callback = stats_runtime_enabled_callback
+        self.tackle_runtime_enabled_callback = tackle_runtime_enabled_callback
+        self.stream_runtime_enabled_callback = stream_runtime_enabled_callback
         self.player_status_scan_callback = player_status_scan_callback
         self._sync_polling()
 
@@ -193,6 +205,35 @@ class NotificationManager:
             self.start_polling()
         else:
             self.stop_polling()
+
+    @staticmethod
+    def _callback_enabled(callback: Callable[[], bool] | None) -> bool:
+        if callback is None:
+            return True
+        try:
+            return bool(callback())
+        except Exception:
+            return False
+
+    def _fishing_runtime_enabled(self) -> bool:
+        return self._callback_enabled(self.fishing_runtime_enabled_callback)
+
+    def _stats_runtime_enabled(self) -> bool:
+        return self._callback_enabled(self.stats_runtime_enabled_callback)
+
+    def _tackle_runtime_enabled(self) -> bool:
+        return self._callback_enabled(self.tackle_runtime_enabled_callback)
+
+    def _stream_runtime_enabled(self) -> bool:
+        return self._callback_enabled(self.stream_runtime_enabled_callback)
+
+    def _send_unavailable(self, chat_id: int, feature: str, *, message_id: int | None = None) -> None:
+        self._send_or_edit_message(
+            f"Функция «{feature}» недоступна для этой подписки.",
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup={"inline_keyboard": [[{"text": "⬅️ Меню", "callback_data": "menu:main"}]]},
+        )
 
     def start_polling(self) -> None:
         if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
@@ -490,35 +531,34 @@ class NotificationManager:
         keyboard = [
             [
                 {"text": "🔔 Уведомления", "callback_data": "menu:notifications"},
-                {"text": "📊 Статистика", "callback_data": "action:stats"},
             ],
-            [
-                {"text": "📺 Стрим", "callback_data": "menu:stream"},
-            ],
-            [
-                {"text": "🎒 Снаряжение", "callback_data": "action:tackle"},
-                {"text": "📊 Показатели", "callback_data": "action:player_status"},
-            ],
-            [
-                {"text": "🔎 Просканировать показатели", "callback_data": "action:scan_player_status"},
-            ],
-            [
-                {"text": start_stop_text, "callback_data": "action:start_stop"},
-            ],
-            [
-                {"text": "🎮 Вернуть фокус игре", "callback_data": "action:focus_game"},
-            ],
-            [
-                {"text": "📸 Скриншот игры", "callback_data": "action:screen"},
-            ],
+        ]
+        if self._stats_runtime_enabled():
+            keyboard[0].append({"text": "📊 Статистика", "callback_data": "action:stats"})
+        if self._stream_runtime_enabled():
+            keyboard.append([{"text": "📺 Стрим", "callback_data": "menu:stream"}])
+        fishing_tools = []
+        if self._tackle_runtime_enabled():
+            fishing_tools.append({"text": "🎒 Снаряжение", "callback_data": "action:tackle"})
+        fishing_tools.append({"text": "📊 Показатели", "callback_data": "action:player_status"})
+        keyboard.append(fishing_tools)
+        keyboard.append([{"text": "🔎 Просканировать показатели", "callback_data": "action:scan_player_status"}])
+        if self._fishing_runtime_enabled():
+            keyboard.append([{"text": start_stop_text, "callback_data": "action:start_stop"}])
+        keyboard.append([{"text": "🎮 Вернуть фокус игре", "callback_data": "action:focus_game"}])
+        keyboard.append([{"text": "📸 Скриншот игры", "callback_data": "action:screen"}])
+        keyboard.append(
             [
                 {"text": "🖥 Выключить ПК", "callback_data": "action:shutdown_pc"},
                 {"text": "🎮 Выключить игру", "callback_data": "action:shutdown_game"},
-            ],
-        ]
+            ]
+        )
         self._send_or_edit_message("🎣 Меню рыболовного бота", chat_id=chat_id, message_id=message_id, reply_markup={"inline_keyboard": keyboard})
 
     def _send_stream_menu(self, chat_id: int, *, message_id: int | None = None) -> None:
+        if not self._stream_runtime_enabled():
+            self._send_unavailable(chat_id, "Стрим", message_id=message_id)
+            return
         snapshot = self._stream_snapshot()
         active = bool(getattr(snapshot, "active", False))
         starting = snapshot is not None and getattr(snapshot, "status", "") == "starting"
@@ -578,6 +618,9 @@ class NotificationManager:
         self._send_or_edit_message(text, chat_id=chat_id, message_id=message_id, reply_markup={"inline_keyboard": keyboard})
 
     def _send_stream_quality(self, chat_id: int, *, message_id: int | None = None) -> None:
+        if not self._stream_runtime_enabled():
+            self._send_unavailable(chat_id, "Стрим", message_id=message_id)
+            return
         snapshot = self._stream_snapshot()
         current = str(getattr(snapshot, "quality", "720p") or "720p")
         keyboard = [
@@ -617,6 +660,9 @@ class NotificationManager:
         self._send_or_edit_message("🔔 Уведомления", chat_id=chat_id, message_id=message_id, reply_markup={"inline_keyboard": keyboard})
 
     def _send_stats(self, chat_id: int) -> None:
+        if not self._stats_runtime_enabled():
+            self.send_message("📊 Статистика недоступна для этой подписки", chat_id=chat_id)
+            return
         if self.stats_callback is None:
             self.send_message("📊 Статистика недоступна", chat_id=chat_id)
             return
@@ -659,6 +705,9 @@ class NotificationManager:
         self.send_message(f"{prefix} {message}", chat_id=chat_id)
 
     def _send_tackle(self, chat_id: int) -> None:
+        if not self._tackle_runtime_enabled():
+            self.send_message("🎒 Снаряжение недоступно для этой подписки", chat_id=chat_id)
+            return
         items = self.tackle_callback() if self.tackle_callback else ()
         if not items:
             self.send_message("🎒 Снаряжение\n\nПоследнего сканирования ещё нет.", chat_id=chat_id)
@@ -687,6 +736,9 @@ class NotificationManager:
             self.settings_changed_callback(self.settings)
 
     def _toggle_fishing(self, chat_id: int) -> None:
+        if not self._fishing_runtime_enabled():
+            self.send_message("🚤 Запуск рыбалки недоступен для этой подписки", chat_id=chat_id)
+            return
         if self._is_running():
             if self.stop_callback:
                 self.stop_callback()
@@ -696,6 +748,9 @@ class NotificationManager:
             self.send_message("🚤 Рыбалка запущена" if ok else "⚠️ Не удалось запустить рыбалку", chat_id=chat_id)
 
     def _toggle_stream(self, chat_id: int, *, message_id: int | None = None) -> None:
+        if not self._stream_runtime_enabled():
+            self._send_unavailable(chat_id, "Стрим", message_id=message_id)
+            return
         snapshot = self._stream_snapshot()
         if bool(getattr(snapshot, "active", False)) or getattr(snapshot, "status", "") == "starting":
             self._cancel_stream_link_delivery()
@@ -712,15 +767,24 @@ class NotificationManager:
             self._schedule_stream_menu_refresh(chat_id, message_id)
 
     def _send_stream_link(self, chat_id: int) -> None:
+        if not self._stream_runtime_enabled():
+            self.send_message("📺 Стрим недоступен для этой подписки", chat_id=chat_id)
+            return
         self._send_stream_menu(chat_id)
 
     def _set_stream_quality(self, quality: str, chat_id: int, *, message_id: int | None = None) -> None:
+        if not self._stream_runtime_enabled():
+            self._send_unavailable(chat_id, "Стрим", message_id=message_id)
+            return
         ok = self.stream_set_quality_callback(quality) if self.stream_set_quality_callback is not None else False
         if not ok:
             self.send_message("⚠️ Не удалось изменить качество стрима.", chat_id=chat_id)
         self._send_stream_menu(chat_id, message_id=message_id)
 
     def _switch_stream_area(self, chat_id: int, *, message_id: int | None = None) -> None:
+        if not self._stream_runtime_enabled():
+            self._send_unavailable(chat_id, "Стрим", message_id=message_id)
+            return
         snapshot = self._stream_snapshot()
         next_chat_zoom = getattr(snapshot, "area", "full") != "chat"
         ok = self.stream_set_chat_zoom_callback(next_chat_zoom) if self.stream_set_chat_zoom_callback is not None else False
@@ -729,6 +793,9 @@ class NotificationManager:
         self._send_stream_menu(chat_id, message_id=message_id)
 
     def _switch_stream_mode(self, chat_id: int, *, message_id: int | None = None) -> None:
+        if not self._stream_runtime_enabled():
+            self._send_unavailable(chat_id, "Стрим", message_id=message_id)
+            return
         snapshot = self._stream_snapshot()
         next_snapshot_mode = not bool(getattr(snapshot, "snapshot_mode_enabled", False))
         ok = (

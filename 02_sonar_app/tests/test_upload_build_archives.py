@@ -77,6 +77,23 @@ def test_scp_command_uploads_to_remote_builds_dir():
     ]
 
 
+def test_scp_command_can_upload_to_version_dir():
+    uploads = _load_uploads()
+    archive = Path("dist") / "0.1.0" / "Game" / f"{'b' * 64}-Game.exe.zip"
+    args = SimpleNamespace(
+        port=22,
+        key=None,
+        allow_password=False,
+        user="root",
+        host="m-sonar-addr.ru",
+        remote_dir="/remote/builds",
+    )
+
+    command = uploads.scp_command_to_dir(args, archive, uploads.remote_version_dir(args.remote_dir, "0.1.0"))
+
+    assert command[-1] == "root@m-sonar-addr.ru:/remote/builds/0.1.0/"
+
+
 def test_default_upload_host_is_production_domain(tmp_path, monkeypatch):
     monkeypatch.setenv("SONAR_DOTENV_PATH", str(tmp_path / "missing.env"))
     monkeypatch.delenv("SONAR_UPLOAD_HOST", raising=False)
@@ -109,6 +126,8 @@ def test_upload_archives_dry_run_does_not_report_uploaded(tmp_path, capsys):
         user="root",
         host="m-sonar-addr.ru",
         remote_dir="/remote/builds",
+        version="0.1.0",
+        replace_version=False,
         dry_run=True,
     )
 
@@ -117,6 +136,60 @@ def test_upload_archives_dry_run_does_not_report_uploaded(tmp_path, capsys):
 
     assert "Dry run complete" in output
     assert "would be uploaded" in output
+    assert "/remote/builds/0.1.0" in output
+
+
+def test_upload_archives_can_replace_version_folder(tmp_path, capsys):
+    uploads = _load_uploads()
+    key = "c" * 64
+    archive = tmp_path / f"{key}-Game.exe.zip"
+    archive.write_bytes(b"zip")
+    args = SimpleNamespace(
+        source=tmp_path,
+        port=22,
+        key=None,
+        allow_password=False,
+        user="root",
+        host="m-sonar-addr.ru",
+        remote_dir="/remote/builds",
+        version="0.1.0",
+        replace_version=True,
+        dry_run=True,
+    )
+
+    assert uploads.upload_archives(args) == 0
+    output = capsys.readouterr().out
+
+    assert "rm -rf -- /remote/builds/0.1.0" in output
+
+
+def test_upload_archives_scans_matching_version_subfolder(tmp_path, capsys):
+    uploads = _load_uploads()
+    old_dir = tmp_path / "0.1.0"
+    version_dir = tmp_path / "0.2.0"
+    old_dir.mkdir()
+    version_dir.mkdir()
+    (old_dir / f"{'a' * 64}-Old.exe.zip").write_bytes(b"old")
+    (version_dir / f"{'b' * 64}-New.exe.zip").write_bytes(b"new")
+    args = SimpleNamespace(
+        source=tmp_path,
+        port=22,
+        key=None,
+        allow_password=False,
+        user="root",
+        host="m-sonar-addr.ru",
+        remote_dir="/remote/builds",
+        version="0.2.0",
+        replace_version=False,
+        dry_run=True,
+    )
+
+    assert uploads.upload_archives(args) == 0
+    output = capsys.readouterr().out
+
+    assert "Found 1 build archive(s)" in output
+    assert str(version_dir) in output
+    assert "Old.exe.zip" not in output
 
 
 def test_upload_archives_requires_host(tmp_path, capsys):
@@ -132,6 +205,8 @@ def test_upload_archives_requires_host(tmp_path, capsys):
         user="root",
         host="",
         remote_dir="/remote/builds",
+        version="0.1.0",
+        replace_version=False,
         dry_run=True,
     )
 

@@ -4,9 +4,10 @@ from types import SimpleNamespace
 
 from sonar.license.client import LicenseStatus
 from sonar.license.context import LicenseContext
-from sonar.license.features import FEATURE_STREAM_CHAT, FEATURE_TELEGRAM
+from sonar.license.features import FEATURE_FISHING, FEATURE_FISHING_BOT, FEATURE_STREAM_CHAT, FEATURE_TELEGRAM
 from sonar.streaming.chat import ChatActionResult, ChatDetection
-from sonar.ui.main_window import MainWindow
+from sonar.license.startup_block import StartupBlockStatus
+from sonar.ui.main_window import MainWindow, startup_block_allows_launch
 
 
 class DummyStack:
@@ -131,3 +132,21 @@ def test_stop_button_cancels_pending_start_and_requests_async_cleanup():
 
     assert window._pending_bot_start_after_license is False
     assert events == ["stop_async", "refresh"]
+
+
+def test_intro_license_allows_fishing_page_but_not_bot_start():
+    window = SimpleNamespace(
+        license_status=LicenseStatus(valid=True, group="intro"),
+    )
+    window._license_context = lambda: LicenseContext.from_status(window.license_status)
+    window._can_use_feature = lambda feature_key: window._license_context().can(feature_key)
+
+    assert window._can_use_feature(FEATURE_FISHING) is True
+    assert MainWindow._can_start_fishing(window) is False
+    assert window._can_use_feature(FEATURE_FISHING_BOT) is False
+
+
+def test_startup_block_check_is_required_for_launch():
+    assert startup_block_allows_launch(StartupBlockStatus(checked=True, blocked=False)) is True
+    assert startup_block_allows_launch(StartupBlockStatus(checked=False, blocked=False, error="request failed")) is False
+    assert startup_block_allows_launch(StartupBlockStatus(checked=True, blocked=True, download_url="https://example.test")) is False

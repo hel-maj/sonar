@@ -61,6 +61,20 @@ DEFAULT_HOST = os.environ.get("SONAR_UPLOAD_HOST", "m-sonar-addr.ru")
 DEFAULT_USER = "root"
 DEFAULT_REMOTE_DIR = "/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds"
 ARCHIVE_NAME_RE = re.compile(r"^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$", re.IGNORECASE)
+APP_VERSION_RE = re.compile(r'APP_VERSION\s*=\s*"([0-9]+(?:\.[0-9]+){0,3})"')
+VERSION_RE = re.compile(r"^v?([0-9]+(?:\.[0-9]+){0,3})$")
+
+
+def read_app_version(version_file: Path = ROOT / "src" / "sonar" / "version.py") -> str:
+    try:
+        text = version_file.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    match = APP_VERSION_RE.search(text)
+    return match.group(1) if match else ""
+
+
+DEFAULT_VERSION = os.environ.get("SONAR_UPLOAD_VERSION", "").strip() or read_app_version()
 
 
 def is_build_archive(path: Path) -> bool:
@@ -93,12 +107,16 @@ def ssh_command(args: argparse.Namespace, remote_command: str) -> list[str]:
 
 
 def scp_command(args: argparse.Namespace, archive: Path) -> list[str]:
+    return scp_command_to_dir(args, archive, args.remote_dir)
+
+
+def scp_command_to_dir(args: argparse.Namespace, archive: Path, remote_dir: str) -> list[str]:
     command = ["scp", "-P", str(args.port)]
     if args.key:
         command.extend(["-i", str(args.key)])
     if not args.allow_password:
         command.extend(["-o", "BatchMode=yes"])
-    command.extend([str(archive), f"{ssh_target(args.user, args.host)}:{args.remote_dir.rstrip('/')}/"])
+    command.extend([str(archive), f"{ssh_target(args.user, args.host)}:{remote_dir.rstrip('/')}/"])
     return command
 
 
@@ -114,30 +132,68 @@ def run_command(command: list[str], *, dry_run: bool) -> int:
     return completed.returncode
 
 
+def normalize_version(value: str) -> str:
+    version = value.strip()
+    if not version:
+        return ""
+    match = VERSION_RE.match(version)
+    if not match:
+        raise ValueError(f"Invalid version {value!r}. Expected numeric version like 1.2.3.")
+    return match.group(1)
+
+
+def remote_version_dir(remote_dir: str, version: str) -> str:
+    base = remote_dir.rstrip("/")
+    return f"{base}/{version}" if version else base
+
+
+def source_version_dir(source: Path, version: str) -> Path:
+    if not version or not source.is_dir():
+        return source
+    version_dir = source / version
+    return version_dir if version_dir.is_dir() else source
+
+
 def upload_archives(args: argparse.Namespace) -> int:
     if not args.host.strip():
         print("SSH host is required. Pass --host <ssh-host> or set SONAR_UPLOAD_HOST.")
         return 2
-    archives = iter_build_archives(args.source)
+    try:
+        version = normalize_version(getattr(args, "version", DEFAULT_VERSION))
+    except ValueError as exc:
+        print(str(exc))
+        return 2
+    if getattr(args, "replace_version", False) and not version:
+        print("--replace-version requires a version. Pass --version <app-version>.")
+        return 2
+    source = source_version_dir(args.source, version)
+    archives = iter_build_archives(source)
     if not archives:
-        print(f"No build archives found in {args.source}")
+        print(f"No build archives found in {source}")
         return 1
 
+    target_dir = remote_version_dir(args.remote_dir, version)
     print(f"Found {len(archives)} build archive(s)")
-    mkdir = f"mkdir -p -- {shlex.quote(args.remote_dir)}"
-    code = run_command(ssh_command(args, mkdir), dry_run=args.dry_run)
+    print(f"Upload source: {source}")
+    if version:
+        print(f"Upload version: {version}")
+    if getattr(args, "replace_version", False):
+        setup = f"rm -rf -- {shlex.quote(target_dir)} && mkdir -p -- {shlex.quote(target_dir)}"
+    else:
+        setup = f"mkdir -p -- {shlex.quote(target_dir)}"
+    code = run_command(ssh_command(args, setup), dry_run=args.dry_run)
     if code != 0:
         return code
 
     for archive in archives:
-        code = run_command(scp_command(args, archive), dry_run=args.dry_run)
+        code = run_command(scp_command_to_dir(args, archive, target_dir), dry_run=args.dry_run)
         if code != 0:
             return code
 
     if args.dry_run:
-        print(f"Dry run complete: {len(archives)} archive(s) would be uploaded to {ssh_target(args.user, args.host)}:{args.remote_dir}")
+        print(f"Dry run complete: {len(archives)} archive(s) would be uploaded to {ssh_target(args.user, args.host)}:{target_dir}")
     else:
-        print(f"Uploaded {len(archives)} archive(s) to {ssh_target(args.user, args.host)}:{args.remote_dir}")
+        print(f"Uploaded {len(archives)} archive(s) to {ssh_target(args.user, args.host)}:{target_dir}")
     return 0
 
 
@@ -149,6 +205,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=22, help="SSH port")
     parser.add_argument("--key", type=Path, default=None, help="Optional private SSH key path")
     parser.add_argument("--remote-dir", default=DEFAULT_REMOTE_DIR, help="Remote builds folder")
+    parser.add_argument("--version", default=DEFAULT_VERSION, help="Release version folder under the remote builds folder. Defaults to APP_VERSION or SONAR_UPLOAD_VERSION.")
+    parser.add_argument("--replace-version", action="store_true", help="Delete and recreate the remote folder for this version before uploading.")
     parser.add_argument("--allow-password", action="store_true", help="Allow ssh/scp to prompt for a password")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without uploading")
     return parser.parse_args()

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
 import html
 import json
 import os
 import random
 import re
 import shutil
+import sys
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,11 +16,22 @@ from urllib.parse import parse_qs, quote, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from sonar.security.ed25519 import ed25519_sign  # noqa: E402
+
 HOST = os.environ.get("SONAR_RANDOM_BUILD_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SONAR_RANDOM_BUILD_PORT", "8766"))
 BUILDS_DIR = Path(os.environ.get("SONAR_RANDOM_BUILD_DIR", str(ROOT / "builds"))).resolve()
 ACCESS_TOKEN = os.environ.get("SONAR_RANDOM_BUILD_TOKEN", "").strip()
+STARTUP_BLOCKLIST_PATH = Path(os.environ.get("SONAR_STARTUP_BLOCKLIST_PATH", str(ROOT / "startup-blocklist.json"))).resolve()
+STARTUP_BLOCK_DOWNLOAD_URL = os.environ.get("SONAR_STARTUP_BLOCK_DOWNLOAD_URL", "https://m-sonar-addr.ru/download").strip()
+STARTUP_BLOCK_PRIVATE_KEY = os.environ.get("SONAR_STARTUP_BLOCK_PRIVATE_KEY", "").strip()
 ARCHIVE_NAME_RE = re.compile(r"^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$", re.IGNORECASE)
+VERSION_DIR_RE = re.compile(r"^v?([0-9]+(?:\.[0-9]+){0,3})$")
+MAX_STARTUP_BLOCK_REQUEST_BYTES = 16 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,16 +43,70 @@ class BuildArchive:
         return self.path.name
 
 
-def iter_archive_files(builds_dir: Path = BUILDS_DIR) -> list[Path]:
+@dataclass(frozen=True, slots=True)
+class BuildVersion:
+    version: str
+    path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class StartupBlockList:
+    build_keys: frozenset[str]
+    license_keys: frozenset[str]
+    download_url: str
+
+
+def normalize_version_name(value: str) -> str:
+    match = VERSION_DIR_RE.match(value.strip())
+    return match.group(1) if match else ""
+
+
+def version_sort_key(value: str) -> tuple[int, int, int, int]:
+    parts = [int(part) for part in normalize_version_name(value).split(".") if part != ""]
+    while len(parts) < 4:
+        parts.append(0)
+    return tuple(parts[:4])
+
+
+def iter_version_dirs(builds_dir: Path = BUILDS_DIR) -> list[BuildVersion]:
     if not builds_dir.exists():
         return []
-    return sorted(path for path in builds_dir.rglob("*.zip") if path.is_file() and is_build_archive(path))
+    versions: list[BuildVersion] = []
+    for path in builds_dir.iterdir():
+        version = normalize_version_name(path.name)
+        if path.is_dir() and version:
+            versions.append(BuildVersion(version=version, path=path))
+    return sorted(versions, key=lambda item: version_sort_key(item.version))
+
+
+def latest_version_dir(builds_dir: Path = BUILDS_DIR) -> BuildVersion | None:
+    versions = iter_version_dirs(builds_dir)
+    return versions[-1] if versions else None
+
+
+def selected_builds_dir(builds_dir: Path = BUILDS_DIR) -> Path:
+    latest = latest_version_dir(builds_dir)
+    return latest.path if latest else builds_dir
+
+
+def iter_archive_files(builds_dir: Path = BUILDS_DIR) -> list[Path]:
+    active_dir = selected_builds_dir(builds_dir)
+    if not active_dir.exists():
+        return []
+    return sorted(path for path in active_dir.rglob("*.zip") if path.is_file() and is_build_archive(path))
 
 
 def iter_invalid_archive_files(builds_dir: Path = BUILDS_DIR) -> list[Path]:
+    active_dir = selected_builds_dir(builds_dir)
+    if not active_dir.exists():
+        return []
+    return sorted(path for path in active_dir.rglob("*.zip") if path.is_file() and not is_build_archive(path))
+
+
+def iter_all_archive_files(builds_dir: Path = BUILDS_DIR) -> list[Path]:
     if not builds_dir.exists():
         return []
-    return sorted(path for path in builds_dir.rglob("*.zip") if path.is_file() and not is_build_archive(path))
+    return sorted(path for path in builds_dir.rglob("*.zip") if path.is_file() and is_build_archive(path))
 
 
 def is_build_archive(path: Path) -> bool:
@@ -49,9 +116,79 @@ def is_build_archive(path: Path) -> bool:
 def choose_build_archive(builds_dir: Path = BUILDS_DIR, rng: random.Random | None = None) -> BuildArchive:
     candidates = iter_archive_files(builds_dir)
     if not candidates:
-        raise FileNotFoundError(f"No build .zip archives found in {builds_dir}")
+        raise FileNotFoundError(f"No build .zip archives found in {selected_builds_dir(builds_dir)}")
     selected = (rng or random.SystemRandom()).choice(candidates)
     return BuildArchive(path=selected)
+
+
+def load_startup_blocklist(path: Path = STARTUP_BLOCKLIST_PATH) -> StartupBlockList:
+    if not path.exists():
+        return StartupBlockList(frozenset(), frozenset(), STARTUP_BLOCK_DOWNLOAD_URL)
+    body = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(body, dict):
+        raise ValueError("Startup blocklist must be a JSON object")
+    build_keys = frozenset(
+        key.lower()
+        for key in _string_values(body.get("build_keys") or body.get("blocked_build_keys"))
+        if key
+    )
+    license_keys = frozenset(
+        key
+        for key in _string_values(body.get("license_keys") or body.get("blocked_license_keys"))
+        if key
+    )
+    download_url = str(body.get("download_url") or body.get("download_link") or STARTUP_BLOCK_DOWNLOAD_URL).strip()
+    return StartupBlockList(build_keys=build_keys, license_keys=license_keys, download_url=download_url)
+
+
+def is_startup_blocked(request_payload: dict[str, object], blocklist: StartupBlockList) -> bool:
+    build_key = str(request_payload.get("build_key") or "").strip().lower()
+    license_key = str(request_payload.get("license_key") or "").strip()
+    return bool((build_key and build_key in blocklist.build_keys) or (license_key and license_key in blocklist.license_keys))
+
+
+def signed_startup_block_response(*, blocked: bool, download_url: str, private_key_seed: bytes) -> dict[str, object]:
+    payload = {"blocked": bool(blocked), "download_url": download_url.strip() if blocked else ""}
+    signature = ed25519_sign(private_key_seed, canonical_startup_block_payload(payload))
+    return {**payload, "signature": encode_base64url(signature)}
+
+
+def canonical_startup_block_payload(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+
+def decode_private_key_seed(value: str) -> bytes:
+    text = value.strip()
+    if not text:
+        raise ValueError("Startup block private key is not configured")
+    if len(text) in {64, 128} and all(character in "0123456789abcdefABCDEF" for character in text):
+        data = bytes.fromhex(text)
+    else:
+        data = decode_base64url(text)
+    if len(data) == 64:
+        data = data[:32]
+    if len(data) != 32:
+        raise ValueError("Startup block private key seed must be 32 bytes")
+    return data
+
+
+def decode_base64url(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def encode_base64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _string_values(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.replace(";", ",").split(",") if item.strip()]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
 
 
 class RandomBuildHandler(BaseHTTPRequestHandler):
@@ -59,16 +196,25 @@ class RandomBuildHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/startup-block":
+            self._send_json({"error": "method not allowed"}, HTTPStatus.METHOD_NOT_ALLOWED)
+            return
         if parsed.path in {"/", "/download"}:
             self._send_html(download_page(token=self._token_from_query(parsed.query)))
             return
         if parsed.path in {"/health", "/random-build-health"}:
+            latest = latest_version_dir()
+            active_dir = selected_builds_dir()
             self._send_json(
                 {
                     "ok": True,
                     "builds_dir": str(BUILDS_DIR),
+                    "latest_version": latest.version if latest else "",
+                    "latest_builds_dir": str(active_dir),
+                    "version_count": len(iter_version_dirs()),
                     "archive_count": len(iter_archive_files()),
                     "invalid_archive_count": len(iter_invalid_archive_files()),
+                    "total_archive_count": len(iter_all_archive_files()),
                 }
             )
             return
@@ -79,6 +225,13 @@ class RandomBuildHandler(BaseHTTPRequestHandler):
             self._send_random_archive()
             return
         self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/startup-block":
+            self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+        self._send_startup_block_response()
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"{self.address_string()} - {format % args}")
@@ -101,6 +254,50 @@ class RandomBuildHandler(BaseHTTPRequestHandler):
                 shutil.copyfileobj(file, self.wfile, length=1024 * 1024)
         except FileNotFoundError as exc:
             self._send_json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
+
+    def _send_startup_block_response(self) -> None:
+        try:
+            private_key_seed = decode_private_key_seed(STARTUP_BLOCK_PRIVATE_KEY)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        try:
+            request_payload = self._read_json_body()
+            blocklist = load_startup_blocklist()
+            blocked = is_startup_blocked(request_payload, blocklist)
+            download_url = blocklist.download_url if blocked else ""
+            if blocked and not download_url:
+                self._send_json({"error": "download URL is not configured"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            self._send_json(
+                signed_startup_block_response(
+                    blocked=blocked,
+                    download_url=download_url,
+                    private_key_seed=private_key_seed,
+                )
+            )
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except OSError as exc:
+            self._send_json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
+
+    def _read_json_body(self) -> dict[str, object]:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise ValueError("Invalid Content-Length") from exc
+        if length <= 0:
+            raise ValueError("Request body is required")
+        if length > MAX_STARTUP_BLOCK_REQUEST_BYTES:
+            raise ValueError("Request body is too large")
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Request body must be valid JSON") from exc
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object")
+        return body
 
     def _authorized(self, query: str) -> bool:
         if not ACCESS_TOKEN:

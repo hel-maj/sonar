@@ -57,8 +57,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 После сборки создаются:
 
 ```text
-dist\<exe name>\<exe name>.exe
-dist\<exe name>\<build_key>-<exe name>.zip
+dist\<app_version>\<exe name>\<exe name>.exe
+dist\<app_version>\<exe name>\<build_key>-<exe name>.zip
 ```
 
 Локальная карта воспроизводимости:
@@ -71,7 +71,7 @@ P:\projects\Majestic\Sonar\config\sonar_build_keys.json
 
 ## Загрузка build archives на сервер
 
-Если на ПК настроен SSH key и команда `ssh root@m-sonar-addr.ru` входит без пароля, можно загрузить все готовые zip из `dist`:
+Если на ПК настроен SSH key и команда `ssh root@m-sonar-addr.ru` входит без пароля, можно загрузить готовые zip из `dist/<APP_VERSION>` в `builds/<APP_VERSION>`:
 
 ```powershell
 cd P:\projects\Majestic\Sonar\02_sonar_app
@@ -86,6 +86,18 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
 ```
 
+Если пересобираете ту же версию и хотите заменить ее набор архивов:
+
+```powershell
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version
+```
+
+Если вход по паролю, а не по SSH key:
+
+```powershell
+python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password
+```
+
 Если ключ лежит не в стандартном месте:
 
 ```powershell
@@ -98,10 +110,10 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru --key "$env:USERP
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path\to\archives"
 ```
 
-Папка на сервере:
+Папка на сервере для конкретной версии:
 
 ```text
-/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds
+/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/<app_version>
 ```
 
 Публичная ссылка для пользователей:
@@ -116,6 +128,8 @@ https://m-sonar-addr.ru/download
 https://m-sonar-addr.ru/api/random-build.zip
 ```
 
+Сервер выбирает случайный zip только из latest version folder внутри `builds`. Старые version-папки не отдаются через публичные URL.
+
 Статус пула архивов:
 
 ```text
@@ -127,19 +141,19 @@ https://m-sonar-addr.ru/random-build-health
 Из exe:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<name>\<name>.exe"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe"
 ```
 
 Из zip:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<name>\<build_key>-<name>.zip"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip"
 ```
 
 JSON-вывод:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<name>\<name>.exe" --json
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe" --json
 ```
 
 ## Лицензии и обновления
@@ -160,9 +174,9 @@ sonar-release.json < Keygen policy metadata < Keygen license metadata
 
 ```json
 {
-  "license_group": "pro",
+  "license_group": "premium",
   "allow_features": ["telegram"],
-  "deny_features": ["streaming"],
+  "deny_features": ["stream"],
   "latest_version": "1.2.3",
   "update_message": "🚀 Новая версия\nИсправлены ошибки",
   "download_link": "https://m-sonar-addr.ru/download"
@@ -183,6 +197,7 @@ docs/guides/update_release_full.md
 
 - [docs/guides/update_release_full.md](docs/guides/update_release_full.md)
 - [docs/guides/random_build_downloads.md](docs/guides/random_build_downloads.md)
+- [docs/guides/delete_old_build_versions.md](docs/guides/delete_old_build_versions.md)
 - [docs/guides/keygen_license_features.md](docs/guides/keygen_license_features.md)
 - [docs/guides/release_build_security.md](docs/guides/release_build_security.md)
 - [CODE_INDEX.md](CODE_INDEX.md)
@@ -192,7 +207,7 @@ docs/guides/update_release_full.md
 
 - `scripts/run_tests.py` - полный тестовый прогон.
 - `scripts/build_secure.ps1` - защищенная Nuitka-сборка exe и zip archive.
-- `scripts/upload_build_archives.py` - загрузка готовых zip на сервер через SSH key.
+- `scripts/upload_build_archives.py` - загрузка готовых zip на сервер через `ssh/scp`.
 - `scripts/extract_build_key_from_exe.py` - извлечение build key из exe или zip.
 - `scripts/random_build_download_server.py` - сервер случайной выдачи готовых zip из `builds`.
 - `scripts/audit_release_secrets.py` - проверка release artifact на plaintext markers.
@@ -204,7 +219,7 @@ docs/guides/update_release_full.md
 cd P:\projects\Majestic\Sonar\02_sonar_app
 python scripts\run_tests.py
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
-python scripts\extract_build_key_from_exe.py ".\dist\<name>\<build_key>-<name>.zip"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip"
 python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
 ```
 
