@@ -220,6 +220,7 @@ class FishingBot:
         self._last_published_estimated_status: PlayerStatus | None = None
         self._initial_status_scan_pending = False
         self._last_confirmed_storage = ""
+        self._player_storage_fallback_active = False
         self._inventory_space_low_notified = False
         self._player_status_scan_requested = False
         self._active_tackle_scanned_stages: set[str] = set()
@@ -361,6 +362,7 @@ class FishingBot:
         self._player_status_estimate = PlayerStatusEstimate()
         self._last_published_estimated_status = None
         self._last_confirmed_storage = ""
+        self._player_storage_fallback_active = False
         self._inventory_space_low_notified = False
         self._player_status_scan_requested = False
         self._active_tackle_scanned_stages = set()
@@ -463,6 +465,7 @@ class FishingBot:
         self.state.phase = BotPhase.IDLE
         self.state.detected_stage = "Свободно"
         self.inventory_full = False
+        self._player_storage_fallback_active = False
         self._last_catch_result = None
         self._no_stage_since = None
         self._start_attempt_since = None
@@ -2318,20 +2321,57 @@ class FishingBot:
             frame = self.capture.capture()
             detections = self.trigger_monitor.find_detections(frame)
             if "pereves" in detections:
-                if not self.inventory_full:
-                    self.notification_manager.notify_inventory_full()
-                self.inventory_full = True
-                self._log("Перевес: места в инвентаре нет")
+                self._log("Перевес: триггер найден после сохранения рыбы")
                 return True
             self._sleep(PREPARE_START_POLL_SECONDS)
         return False
 
     def _handle_overweight_trigger(self) -> None:
+        self._handle_overweight_event(previous_result=self._last_catch_result)
+
+    def _handle_overweight_event(self, previous_result: CatchScreenResult | None) -> None:
+        if self._should_switch_trunk_to_player_storage():
+            self._switch_from_trunk_to_player_storage()
+            return
         if not self.inventory_full:
             self._log("Перевес: триггер найден, инвентарь помечен как полный")
             self.notification_manager.notify_inventory_full()
         self.inventory_full = True
-        self._handle_overweight_action(previous_result=self._last_catch_result)
+        self._handle_overweight_action(previous_result=previous_result)
+
+    def _should_switch_trunk_to_player_storage(self) -> bool:
+        if not self.settings.store_in_trunk:
+            return False
+        if getattr(self, "_player_storage_fallback_active", False):
+            return False
+        return getattr(self, "_last_confirmed_storage", "") != "human"
+
+    def _switch_from_trunk_to_player_storage(self) -> None:
+        self._player_storage_fallback_active = True
+        self.inventory_full = False
+        self._last_confirmed_storage = ""
+        self._inventory_retry_after = 0.0
+        self.state.phase = BotPhase.RECOVERY
+        self._log("Перевес: багажник заполнен, переключаю хранилище на инвентарь игрока")
+        self._focus_game()
+        self.input_controller.press_key("esc")
+        self._sleep(0.3)
+        deadline = time.time() + 5.0
+        next_esc_at = 0.0
+        while time.time() < deadline and not self._stop_event.is_set():
+            self._refresh_triggers()
+            if not self._is_fishing_stage_active(self._last_triggers):
+                break
+            if time.time() >= next_esc_at:
+                self.input_controller.press_key("esc")
+                next_esc_at = time.time() + 0.3
+            self._sleep(0.1)
+        if self._stop_event.is_set():
+            return
+        if self._press_fishing_entry("Перевес: переключение хранилища"):
+            self._log("Перевес: открыт выбор снастей для хранилища игрока")
+        self._kickstart_requested = True
+        self._sleep(0.3)
 
     def _check_inventory_space_notification(self, status: PlayerStatus | None = None) -> None:
         telegram = self.config_manager.load().telegram
@@ -2366,8 +2406,7 @@ class FishingBot:
             self._check_inventory_space_notification(status)
 
     def _handle_overweight_after_keep(self, previous_result: CatchScreenResult | None) -> None:
-        self.inventory_full = True
-        self._handle_overweight_action(previous_result=previous_result)
+        self._handle_overweight_event(previous_result=previous_result)
 
     def _handle_overweight_action(self, previous_result: CatchScreenResult | None) -> None:
         action = self.settings.overweight_action
@@ -2698,7 +2737,7 @@ class FishingBot:
             if warn:
                 self._log("Fish storage skipped: fishing start stage is not confirmed")
             return "missing", anchor
-        target = "boat" if self.settings.store_in_trunk else "human"
+        target = self._preferred_storage_target()
         other = "human" if target == "boat" else "boat"
         target_match = matches.get(target)
         other_match = matches.get(other)
@@ -2730,9 +2769,37 @@ class FishingBot:
             self._log(f"Fish storage switch clicked: {current or 'unknown'} -> {target}")
             self._sleep_random(STORAGE_SELECTION_CLICK_PAUSE_SECONDS, RANDOM_DELAY_JITTER_SECONDS)
             return "progress", anchor
+        if target == "boat" and self._select_human_storage_when_boat_missing(other_match, anchor):
+            return "progress", anchor
         if current and warn:
             self._log(f"Fish storage is {current}; switch button was not found")
         return "missing", anchor
+
+    def _preferred_storage_target(self) -> str:
+        if self.settings.store_in_trunk and not getattr(self, "_player_storage_fallback_active", False):
+            return "boat"
+        return "human"
+
+    def _select_human_storage_when_boat_missing(
+        self,
+        human_match: TemplateMatch | None,
+        anchor: TemplateMatch | None,
+    ) -> bool:
+        if human_match is None and anchor is None:
+            return False
+        if human_match is not None:
+            self._click_match(human_match)
+            self._player_storage_fallback_active = True
+            self._last_confirmed_storage = "human"
+            self._log("Fish storage boat option not found; selected human fallback")
+            self._sleep_random(STORAGE_SELECTION_CLICK_PAUSE_SECONDS, RANDOM_DELAY_JITTER_SECONDS)
+            return True
+        if anchor and self._click_storage_option_from_screenshot("human", anchor):
+            self._player_storage_fallback_active = True
+            self._last_confirmed_storage = "human"
+            self._log("Fish storage boat option not found; selected human fallback from screenshot")
+            return True
+        return False
 
     def _click_storage_option_from_screenshot(self, target: str, anchor: TemplateMatch) -> bool:
         frame = self.capture.capture()

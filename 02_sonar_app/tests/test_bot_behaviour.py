@@ -260,6 +260,7 @@ def test_prepare_start_falls_through_when_storage_is_not_selected(monkeypatch):
 def test_storage_selection_opens_selector_from_wrong_current_storage():
     bot = FishingBot.__new__(FishingBot)
     bot.settings = FishingSettings(store_in_trunk=True)
+    bot._player_storage_fallback_active = False
     bot._sleep_random = lambda minimum, extra: None
     bot._log = lambda message: None
     clicks: list[str] = []
@@ -283,6 +284,35 @@ def test_storage_selection_opens_selector_from_wrong_current_storage():
     assert result == "opened"
     assert anchor_match is human
     assert clicks == ["human"]
+
+
+def test_storage_selection_falls_back_to_human_when_boat_is_missing_from_selector():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(store_in_trunk=True)
+    bot._player_storage_fallback_active = False
+    bot._sleep_random = lambda minimum, extra: None
+    bot._click_storage_option_from_screenshot = lambda target, anchor: False
+    logs: list[str] = []
+    clicks: list[str] = []
+    bot._log = logs.append
+    bot._click_match = lambda match: clicks.append(match.name or "")
+    human = TemplateMatch(20, 30, 1.0, 10, 10, "human")
+
+    result, anchor_match = bot._ensure_storage_selection(
+        {
+            "start": TemplateMatch(1, 1, 1.0, 10, 10, "start"),
+            "human": human,
+        },
+        selector_opened=True,
+        anchor=human,
+    )
+
+    assert result == "progress"
+    assert anchor_match is human
+    assert clicks == ["human"]
+    assert bot._player_storage_fallback_active is True
+    assert bot._last_confirmed_storage == "human"
+    assert any("human fallback" in message for message in logs)
 
 
 def test_storage_screenshot_click_uses_selector_anchor_when_start_is_temporarily_hidden(tmp_path, monkeypatch):
@@ -1454,6 +1484,65 @@ def test_stop_cleanup_failure_does_not_leave_bot_running():
     assert "timer_stop" in events
     assert "notify_stop" in events
     assert any("reeling tracker" in message for message in logs)
+
+
+def test_trunk_overweight_switches_to_player_storage_before_final_action():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(store_in_trunk=True, overweight_action="stop")
+    bot.state = BotState(running=True)
+    bot.input_controller = DummyInput()
+    bot._stop_event = threading.Event()
+    bot._last_confirmed_storage = "boat"
+    bot._player_storage_fallback_active = False
+    bot.inventory_full = False
+    bot._inventory_retry_after = 100.0
+    bot._kickstart_requested = False
+    bot._last_catch_result = None
+    bot._last_triggers = {}
+    bot._focus_game = lambda: None
+    bot._refresh_triggers = lambda: setattr(bot, "_last_triggers", {})
+    bot._sleep = lambda seconds: None
+    entry_reasons: list[str] = []
+    bot._press_fishing_entry = lambda reason: entry_reasons.append(reason) or True
+    logs: list[str] = []
+    bot._log = logs.append
+    events: list[str] = []
+    bot.notification_manager = type("Notifier", (), {"notify_inventory_full": lambda self: events.append("notify")})()
+    bot._handle_overweight_action = lambda previous_result: events.append("action")
+
+    bot._handle_overweight_trigger()
+
+    assert bot.inventory_full is False
+    assert bot._player_storage_fallback_active is True
+    assert bot._last_confirmed_storage == ""
+    assert bot._inventory_retry_after == 0.0
+    assert bot._kickstart_requested is True
+    assert bot.state.phase == BotPhase.RECOVERY
+    assert bot.input_controller.keys == ["esc"]
+    assert entry_reasons == ["Перевес: переключение хранилища"]
+    assert events == []
+    assert any("багажник заполнен" in message for message in logs)
+
+
+def test_player_storage_overweight_runs_action_after_trunk_fallback():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(store_in_trunk=True, overweight_action="stop")
+    bot._last_confirmed_storage = "human"
+    bot._player_storage_fallback_active = True
+    bot.inventory_full = False
+    previous_result = object()
+    bot._last_catch_result = previous_result
+    logs: list[str] = []
+    events: list[object] = []
+    bot._log = logs.append
+    bot.notification_manager = type("Notifier", (), {"notify_inventory_full": lambda self: events.append("notify")})()
+    bot._handle_overweight_action = lambda previous_result: events.append(("action", previous_result))
+
+    bot._handle_overweight_trigger()
+
+    assert bot.inventory_full is True
+    assert events == ["notify", ("action", previous_result)]
+    assert any("инвентарь помечен как полный" in message for message in logs)
 
 
 def test_overweight_terminal_actions_finish_stop_lifecycle():
