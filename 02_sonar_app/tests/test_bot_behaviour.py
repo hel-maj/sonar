@@ -604,6 +604,22 @@ def test_hooking_wait_is_interrupted_by_player_status_scan_request():
     assert any("прерываю ожидание подсечки" in message for message in bot._log_messages)
 
 
+def test_player_status_inventory_scan_notifies_when_inventory_cannot_open():
+    events: list[PlayerStatus | None] = []
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot._log = lambda _message: None
+    bot._open_inventory = lambda: False
+    bot.notification_manager = type(
+        "Notifier",
+        (),
+        {"notify_player_status_scan_result": lambda self, status: events.append(status)},
+    )()
+
+    assert bot._do_player_status_inventory_scan() is None
+    assert events == [None]
+
+
 def test_player_status_scan_request_is_queued_when_running():
     bot = FishingBot.__new__(FishingBot)
     bot.state = BotState(running=True, phase=BotPhase.IDLE, detected_stage="Ожидание поклёвки")
@@ -895,6 +911,22 @@ def test_non_inventory_brain_error_still_uses_fishing_recovery():
     assert "recover" in calls
 
 
+def test_reeling_capture_error_continues_without_recovery():
+    calls: list[str] = []
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True, phase=BotPhase.REELING, detected_stage="Вываживание")
+    bot._last_triggers = {"ad": 1.0}
+    bot._log = lambda message: calls.append(message)
+    bot._sleep = lambda seconds: calls.append(f"sleep:{seconds}")
+    bot._try_recover = lambda: calls.append("recover")
+
+    bot._handle_brain_error(RuntimeError("CreateCompatibleDC failed"))
+
+    assert any("временная ошибка захвата кадра" in message for message in calls)
+    assert "sleep:0.2" in calls
+    assert "recover" not in calls
+
+
 def test_bot_is_stopping_while_worker_thread_is_still_alive_after_idle_phase():
     class AliveThread:
         def is_alive(self) -> bool:
@@ -1000,7 +1032,7 @@ def test_exit_to_idle_waits_after_escape_before_rechecking_stage():
     bot._log = lambda _message: None
 
     assert bot._exit_to_idle_before_inventory(timeout=1.0) is True
-    assert events[:3] == ["key:esc", "sleep:0.8", "sleep_random:1.2:1.0"]
+    assert events[:3] == ["key:esc", "sleep:2.3", "sleep_random:1.2:1.0"]
 
 
 def test_failed_inventory_tasks_are_retried_instead_of_casting():

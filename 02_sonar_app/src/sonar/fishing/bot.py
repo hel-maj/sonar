@@ -124,7 +124,7 @@ TACKLE_DEPLETION_CONFIRM_DELAY_SECONDS = 0.5
 TACKLE_DEPLETION_CONFIRM_ATTEMPTS = 2
 TACKLE_ACTIVE_STAGE_SCAN_INTERVAL_SECONDS = 6.0
 INVENTORY_OPEN_PAUSE_SECONDS = 1.0
-INVENTORY_STAGE_EXIT_SETTLE_SECONDS = 0.8
+INVENTORY_STAGE_EXIT_SETTLE_SECONDS = 2.3
 INVENTORY_OPEN_RETRY_DELAY_SECONDS = 0.5
 INVENTORY_OPEN_CONFIRM_TIMEOUT_SECONDS = 4.0
 INVENTORY_CLOSE_PAUSE_SECONDS = 1.5
@@ -847,6 +847,10 @@ class FishingBot:
 
     def _handle_brain_error(self, exc: Exception) -> None:
         self.state.last_error = str(exc)
+        if self._should_continue_reeling_after_capture_error(exc):
+            self._log(f"Вываживание: временная ошибка захвата кадра, продолжаю: {exc}")
+            self._sleep(0.2)
+            return
         self._log(f"Brain error: {exc}")
         if self.state.phase == BotPhase.INVENTORY:
             self._inventory_tasks_retry_pending = True
@@ -858,6 +862,26 @@ class FishingBot:
             self._try_recover()
         except Exception:
             self._sleep(1.0)
+
+    def _should_continue_reeling_after_capture_error(self, exc: Exception) -> bool:
+        if self.state.phase != BotPhase.REELING:
+            return False
+        if not self._is_transient_capture_error(exc):
+            return False
+        return "ad" in getattr(self, "_last_triggers", {}) or self.state.detected_stage == self._stage_label("ad")
+
+    @staticmethod
+    def _is_transient_capture_error(exc: Exception) -> bool:
+        message = str(exc)
+        return any(
+            marker in message
+            for marker in (
+                "CreateCompatibleDC failed",
+                "CreateCompatibleBitmap failed",
+                "BitBlt failed",
+                "GetBitmapBits failed",
+            )
+        )
 
     def _stop_if_no_stage_timed_out(self, stage: str | None, needs_meal: bool) -> bool:
         if stage is not None or needs_meal or self._has_pending_catch():
@@ -2013,14 +2037,17 @@ class FishingBot:
         self._log("Показатели: открываю инвентарь для сканирования")
         if not self._open_inventory():
             self._log("Показатели: инвентарь не открыт, сканирование пропущено")
+            self._notify_player_status_scan_result(None)
             return None
         status: PlayerStatus | None = None
+        result: PlayerStatus | None = None
         try:
             frame = self.capture.capture()
             status = self.meal_system.detect_player_status(frame)
             self._remember_player_status(status, inventory_scan=True)
             estimated = self.estimated_player_status() or status
             self._publish_player_status(estimated)
+            result = estimated
             if estimated is None or not estimated.has_any_value():
                 self._log("Показатели: не удалось прочитать еду, воду или вес")
             else:
@@ -2031,8 +2058,14 @@ class FishingBot:
             self._log(f"Показатели: ошибка сканирования: {exc}")
             return None
         finally:
+            self._notify_player_status_scan_result(result)
             if self.state.running and not self._stop_event.is_set():
                 self._return_to_fishing()
+
+    def _notify_player_status_scan_result(self, status: PlayerStatus | None) -> None:
+        notify = getattr(getattr(self, "notification_manager", None), "notify_player_status_scan_result", None)
+        if callable(notify):
+            notify(status)
 
     @staticmethod
     def _format_player_status_for_log(status: PlayerStatus) -> str:

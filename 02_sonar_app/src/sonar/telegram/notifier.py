@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import hashlib
 import ipaddress
+import json
 import random
 import re
 import threading
@@ -121,6 +122,9 @@ class NotificationManager:
     _stream_link_delivery_generation: int = field(default=0, init=False)
     _stream_link_messages: dict[int, set[int]] = field(default_factory=dict, init=False)
     _stream_verified_url: str = field(default="", init=False)
+    _commands_registered_signature: tuple[str, tuple[int, ...]] | None = field(default=None, init=False)
+    _player_status_scan_waiting_chat_ids: set[int] = field(default_factory=set, init=False)
+    _player_status_scan_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
     def __post_init__(self) -> None:
         self._stop_event = threading.Event()
@@ -132,6 +136,9 @@ class NotificationManager:
         self._stream_link_delivery_generation = 0
         self._stream_link_messages = {}
         self._stream_verified_url = ""
+        self._commands_registered_signature = None
+        self._player_status_scan_waiting_chat_ids = set()
+        self._player_status_scan_lock = threading.Lock()
 
     def configure(
         self,
@@ -227,6 +234,10 @@ class NotificationManager:
     def _stream_runtime_enabled(self) -> bool:
         return self._callback_enabled(self.stream_runtime_enabled_callback)
 
+    @staticmethod
+    def _menu_reply_markup() -> dict[str, Any]:
+        return {"inline_keyboard": [[{"text": "📋 Меню", "callback_data": "menu:main"}]]}
+
     def _send_unavailable(self, chat_id: int, feature: str, *, message_id: int | None = None) -> None:
         self._send_or_edit_message(
             f"Функция «{feature}» недоступна для этой подписки.",
@@ -238,6 +249,7 @@ class NotificationManager:
     def start_polling(self) -> None:
         if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
             return
+        self._register_bot_commands()
         poll_thread = getattr(self, "_poll_thread", None)
         if poll_thread and poll_thread.is_alive():
             return
@@ -246,6 +258,28 @@ class NotificationManager:
         self._stop_event.clear()
         self._poll_thread = threading.Thread(target=self._poll_loop, name="sonar-telegram", daemon=True)
         self._poll_thread.start()
+
+    def _register_bot_commands(self) -> None:
+        if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
+            return
+        admin_ids = tuple(int(chat_id) for chat_id in self.settings.admin_ids)
+        signature = (self.settings.bot_token.strip(), admin_ids)
+        if self._commands_registered_signature == signature:
+            return
+        commands = [{"command": "menu", "description": "Открыть меню Sonar"}]
+        default_response = self._api_post("setMyCommands", json={"commands": commands})
+        ok = bool(default_response and default_response.ok)
+        for chat_id in admin_ids:
+            response = self._api_post(
+                "setMyCommands",
+                json={
+                    "commands": commands,
+                    "scope": {"type": "chat", "chat_id": chat_id},
+                },
+            )
+            ok = bool(response and response.ok) and ok
+        if ok:
+            self._commands_registered_signature = signature
 
     def stop_polling(self) -> None:
         if not hasattr(self, "_stop_event"):
@@ -287,9 +321,15 @@ class NotificationManager:
         if not self.settings.notify_start_stop:
             return
         if not has_stats:
-            self.send_message("🚤 <b>Рыбалка началась!</b>\n\n🎣 Удочка закинута, ждём улов...")
+            self.send_message(
+                "🚤 <b>Рыбалка началась!</b>\n\n🎣 Удочка закинута, ждём улов...",
+                reply_markup=self._menu_reply_markup(),
+            )
             return
-        self.send_message(self._format_session_stats_message("🚤 Рыбалка началась!", "📊 Текущая сессия", totals))
+        self.send_message(
+            self._format_session_stats_message("🚤 Рыбалка началась!", "📊 Текущая сессия", totals),
+            reply_markup=self._menu_reply_markup(),
+        )
 
     def notify_fishing_stopped(
         self,
@@ -301,9 +341,9 @@ class NotificationManager:
         if not self.settings.notify_start_stop:
             return
         message = self._format_session_stats_message("🛑 Рыбалка остановлена!", "📊 Статистика сессии", totals, reason=reason)
-        if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message):
+        if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message, reply_markup=self._menu_reply_markup()):
             return
-        self.send_message(message)
+        self.send_message(message, reply_markup=self._menu_reply_markup())
 
     def notify_meal_eaten(
         self,
@@ -401,22 +441,38 @@ class NotificationManager:
                 self._track_stream_link_message(target_id, response)
         return ok
 
-    def send_photo(self, chat_id: int, image_bytes: bytes, caption: str = "📸 Скриншот игры") -> bool:
+    def send_photo(
+        self,
+        chat_id: int,
+        image_bytes: bytes,
+        caption: str = "📸 Скриншот игры",
+        *,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> bool:
         if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
             return False
+        data: dict[str, Any] = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+        if reply_markup is not None:
+            data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
         response = self._api_post(
             "sendPhoto",
-            data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
+            data=data,
             files={"photo": ("screen.png", image_bytes, "image/png")},
         )
         return bool(response and response.ok)
 
-    def send_photo_to_admins(self, image_bytes: bytes, caption: str = "📸 Скриншот игры") -> bool:
+    def send_photo_to_admins(
+        self,
+        image_bytes: bytes,
+        caption: str = "📸 Скриншот игры",
+        *,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> bool:
         if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token or not self.settings.admin_ids:
             return False
         ok = True
         for chat_id in self.settings.admin_ids:
-            ok = self.send_photo(chat_id, image_bytes, caption=caption) and ok
+            ok = self.send_photo(chat_id, image_bytes, caption=caption, reply_markup=reply_markup) and ok
         return ok
 
     def _poll_loop(self) -> None:
@@ -674,12 +730,11 @@ class NotificationManager:
         rows = self.stats_rows_callback() if self.stats_rows_callback else None
         self.send_message(self._format_session_stats_message("📊 Текущая статистика", "🎣 Сессия рыбалки", totals, rows=rows), chat_id=chat_id)
 
-    def _send_player_status(self, chat_id: int) -> None:
-        status = self.player_status_callback() if self.player_status_callback else None
-        if status is None:
-            self.send_message("📊 Показатели игрока\n\nПоследнего сканирования ещё нет.", chat_id=chat_id)
-            return
-        lines = ["📊 <b>Показатели игрока</b>", ""]
+    def _player_status_unavailable_message(self) -> str:
+        return "📊 Показатели игрока\n\nПоследнего сканирования ещё нет."
+
+    def _format_player_status_message(self, status: PlayerStatus, *, title: str = "📊 <b>Показатели игрока</b>") -> str:
+        lines = [title, ""]
         if status.food is not None:
             lines.append(f"🍗 Еда: <b>{status.food}%</b>")
         if status.water is not None:
@@ -694,15 +749,46 @@ class NotificationManager:
             lines.append(f"🧳 Рюкзак: <b>{backpack_weight}</b> кг")
         if len(lines) == 2:
             lines.append("Данных пока нет.")
-        self.send_message("\n".join(lines), chat_id=chat_id)
+        return "\n".join(lines)
+
+    def _send_player_status(self, chat_id: int) -> None:
+        status = self.player_status_callback() if self.player_status_callback else None
+        if status is None:
+            self.send_message(self._player_status_unavailable_message(), chat_id=chat_id)
+            return
+        self.send_message(self._format_player_status_message(status), chat_id=chat_id)
 
     def _request_player_status_scan(self, chat_id: int) -> None:
         if self.player_status_scan_callback is None:
             self.send_message("🔎 Сканирование показателей недоступно", chat_id=chat_id)
             return
         ok, message = self.player_status_scan_callback()
+        if ok:
+            if not hasattr(self, "_player_status_scan_lock"):
+                self._player_status_scan_lock = threading.Lock()
+            if not hasattr(self, "_player_status_scan_waiting_chat_ids"):
+                self._player_status_scan_waiting_chat_ids = set()
+            with self._player_status_scan_lock:
+                self._player_status_scan_waiting_chat_ids.add(chat_id)
         prefix = "✅" if ok else "⚠️"
         self.send_message(f"{prefix} {message}", chat_id=chat_id)
+
+    def notify_player_status_scan_result(self, status: PlayerStatus | None) -> None:
+        if not hasattr(self, "_player_status_scan_lock"):
+            self._player_status_scan_lock = threading.Lock()
+        if not hasattr(self, "_player_status_scan_waiting_chat_ids"):
+            self._player_status_scan_waiting_chat_ids = set()
+        with self._player_status_scan_lock:
+            chat_ids = sorted(self._player_status_scan_waiting_chat_ids)
+            self._player_status_scan_waiting_chat_ids.clear()
+        if not chat_ids:
+            return
+        if status is None:
+            text = "🔎 <b>Сканирование показателей завершено</b>\n\nДанные не прочитаны."
+        else:
+            text = self._format_player_status_message(status, title="🔎 <b>Показатели просканированы</b>")
+        for chat_id in chat_ids:
+            self.send_message(text, chat_id=chat_id)
 
     def _send_tackle(self, chat_id: int) -> None:
         if not self._tackle_runtime_enabled():
@@ -1413,7 +1499,7 @@ class NotificationManager:
             lines.append(f"🌊 <b>Статус:</b> {_h(status)}")
         lines.append("")
         lines.append(f"📦 <b>Всего:</b> {_h(format_weight(totals.caught_kg))} · {totals.caught_count} выловов")
-        lines.append(f"📦 <b>Всего оставлено:</b> {_h(format_weight(totals.kept_kg))} · {totals.kept_count} выловов")
+        lines.append(f"📦 <b>Оставлено:</b> {_h(format_weight(totals.kept_kg))} · {totals.kept_count} выловов")
         lines.append(f"💰 <b>Доход:</b> от {_h(format_money(totals.earned_min))}")
         if xp_current is not None and xp_total is not None:
             lines.append(f"⭐ <b>Опыт:</b> {xp_current} / {xp_total}")
