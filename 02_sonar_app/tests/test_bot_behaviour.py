@@ -9,7 +9,7 @@ import numpy as np
 import sonar.automation.input_controller as input_controller_module
 import sonar.fishing.bot as bot_module
 from sonar.automation.input_controller import SCAN_CODES, InputController
-from sonar.config.models import FishingSettings
+from sonar.config.models import FishingSettings, TelegramSettings
 from sonar.core.state import BotPhase, BotState
 from sonar.fishing.bot import FishingBot
 from sonar.fishing.item_info import ItemInfo
@@ -314,6 +314,57 @@ def test_storage_selection_falls_back_to_human_when_boat_is_missing_from_selecto
     assert bot._player_storage_fallback_active is True
     assert bot._last_confirmed_storage == "human"
     assert any("human fallback" in message for message in logs)
+
+
+def test_storage_selection_falls_back_to_human_after_unconfirmed_boat_click():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(store_in_trunk=True)
+    bot._player_storage_fallback_active = False
+    bot._storage_boat_unconfirmed_attempts = 0
+    bot._sleep_random = lambda minimum, extra: None
+    logs: list[str] = []
+    clicks: list[str] = []
+    screenshot_clicks: list[str] = []
+    bot._log = logs.append
+    bot._click_match = lambda match: clicks.append(match.name or "")
+
+    def click_storage_option_from_screenshot(target: str, anchor: TemplateMatch) -> bool:
+        del anchor
+        screenshot_clicks.append(target)
+        return True
+
+    bot._click_storage_option_from_screenshot = click_storage_option_from_screenshot
+    human = TemplateMatch(20, 30, 1.0, 10, 10, "human")
+    matches = {
+        "start": TemplateMatch(1, 1, 1.0, 10, 10, "start"),
+        "human": human,
+    }
+
+    result, anchor_match = bot._ensure_storage_selection(
+        matches,
+        selector_opened=True,
+        anchor=human,
+    )
+
+    assert result == "progress"
+    assert anchor_match is human
+    assert screenshot_clicks == ["boat"]
+    assert clicks == []
+
+    result, anchor_match = bot._ensure_storage_selection(
+        matches,
+        selector_opened=True,
+        anchor=human,
+    )
+
+    assert result == "progress"
+    assert anchor_match is human
+    assert screenshot_clicks == ["boat"]
+    assert clicks == ["human"]
+    assert bot._player_storage_fallback_active is True
+    assert bot._last_confirmed_storage == "human"
+    assert bot._storage_boat_unconfirmed_attempts == 0
+    assert any("not confirmed" in message for message in logs)
 
 
 def test_storage_screenshot_click_uses_selector_anchor_when_start_is_temporarily_hidden(tmp_path, monkeypatch):
@@ -720,6 +771,20 @@ def test_auto_stop_is_cancelled_when_final_stage_check_sees_stage():
     assert bot._stop_if_no_stage_timed_out(None, needs_meal=False) is False
     assert bot._no_stage_since is None
     assert reasons == []
+
+
+def test_lost_hooking_stage_does_not_reuse_stale_no_stage_timer():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot._stop_event = threading.Event()
+    bot._no_stage_since = time.time() - bot_module.AUTO_STOP_TIMEOUT_SECONDS - 1.0
+    bot._do_hooking = lambda: False
+    bot._focus_game = lambda: None
+    bot._log = lambda message: None
+
+    bot._handle_start2_stage()
+
+    assert bot._no_stage_since is None
 
 
 def test_trigger_match_with_fishing_stage_resets_no_stage_timer():
@@ -2273,6 +2338,33 @@ def test_kept_fish_weight_is_added_only_for_confirmed_human_storage():
     bot._last_confirmed_storage = "human"
     bot._add_kept_fish_weight_to_inventory_estimate(2.5)
     assert bot.estimated_player_status().inventory_weight == 12.5
+
+
+def test_low_inventory_space_notification_skips_when_bot_is_stopped():
+    calls = []
+
+    class ConfigManager:
+        def load(self):
+            class Settings:
+                telegram = TelegramSettings(notify_inventory_space_low=True, inventory_space_low_threshold_kg=1.0)
+
+            return Settings()
+
+    class NotificationManager:
+        def notify_inventory_space_low(self, free_kg, threshold, status):
+            calls.append((free_kg, threshold, status))
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=False)
+    bot._stop_event = threading.Event()
+    bot._inventory_space_low_notified = True
+    bot.config_manager = ConfigManager()
+    bot.notification_manager = NotificationManager()
+
+    bot._check_inventory_space_notification(PlayerStatus(inventory_weight=39.5, inventory_weight_max=40.0, source="estimate"))
+
+    assert calls == []
+    assert bot._inventory_space_low_notified is False
 
 
 def test_removed_hp_threshold_does_not_request_meal():

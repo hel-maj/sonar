@@ -22,9 +22,9 @@ def _load_server():
 def test_iter_archive_files_only_accepts_build_archives(tmp_path):
     server = _load_server()
     key = "a" * 11
-    valid = tmp_path / f"{key}-Game Name.exe.zip"
+    valid = tmp_path / f"{key}-Game Name.zip"
     invalid = tmp_path / "plain.zip"
-    nested = tmp_path / "nested" / f"{key}-Nested.exe.zip"
+    nested = tmp_path / "nested" / f"{key}-Nested.zip"
     nested.parent.mkdir()
     valid.write_bytes(b"zip")
     invalid.write_bytes(b"zip")
@@ -34,15 +34,24 @@ def test_iter_archive_files_only_accepts_build_archives(tmp_path):
     assert server.iter_invalid_archive_files(tmp_path) == [invalid]
 
 
+def test_iter_archive_files_keeps_old_exe_zip_compatibility(tmp_path):
+    server = _load_server()
+    key = "b" * 11
+    archive = tmp_path / f"{key}-Old Name.exe.zip"
+    archive.write_bytes(b"zip")
+
+    assert server.iter_archive_files(tmp_path) == [archive]
+
+
 def test_iter_archive_files_uses_latest_version_folder_only(tmp_path):
     server = _load_server()
     old = tmp_path / "0.1.0"
     latest = tmp_path / "0.2.0"
     old.mkdir()
     latest.mkdir()
-    old_archive = old / f"{'a' * 11}-Old.exe.zip"
-    latest_archive = latest / f"{'b' * 11}-Latest.exe.zip"
-    root_archive = tmp_path / f"{'c' * 11}-Root.exe.zip"
+    old_archive = old / f"{'a' * 11}-Old.zip"
+    latest_archive = latest / f"{'b' * 11}-Latest.zip"
+    root_archive = tmp_path / f"{'c' * 11}-Root.zip"
     old_archive.write_bytes(b"old")
     latest_archive.write_bytes(b"latest")
     root_archive.write_bytes(b"root")
@@ -53,8 +62,8 @@ def test_iter_archive_files_uses_latest_version_folder_only(tmp_path):
 
 def test_choose_build_archive_returns_random_valid_archive(tmp_path):
     server = _load_server()
-    first = tmp_path / f"{'a' * 64}-A.exe.zip"
-    second = tmp_path / f"{'b' * 64}-B.exe.zip"
+    first = tmp_path / f"{'a' * 64}-A.zip"
+    second = tmp_path / f"{'b' * 64}-B.zip"
     first.write_bytes(b"a")
     second.write_bytes(b"b")
 

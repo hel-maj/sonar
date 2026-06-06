@@ -99,7 +99,7 @@ ACCESS_TOKEN = os.environ.get("SONAR_RANDOM_BUILD_TOKEN", "").strip()
 STARTUP_BLOCKLIST_PATH = Path(os.environ.get("SONAR_STARTUP_BLOCKLIST_PATH", str(ROOT / "startup-blocklist.json"))).resolve()
 STARTUP_BLOCK_DOWNLOAD_URL = os.environ.get("SONAR_STARTUP_BLOCK_DOWNLOAD_URL", "https://m-sonar-addr.ru/download").strip()
 STARTUP_BLOCK_PRIVATE_KEY = os.environ.get("SONAR_STARTUP_BLOCK_PRIVATE_KEY", "").strip()
-ARCHIVE_NAME_RE = re.compile(r"^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$", re.IGNORECASE)
+ARCHIVE_NAME_RE = re.compile(r"^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+(?:\.exe)?\.zip$", re.IGNORECASE)
 VERSION_DIR_RE = re.compile(r"^v?([0-9]+(?:\.[0-9]+){0,3})$")
 MAX_STARTUP_BLOCK_REQUEST_BYTES = 16 * 1024
 

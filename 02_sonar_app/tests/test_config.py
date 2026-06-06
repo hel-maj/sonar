@@ -105,6 +105,14 @@ def test_telegram_settings_accepts_low_inventory_space_threshold():
     assert settings.inventory_space_low_threshold_kg == 2.75
 
 
+def test_telegram_settings_accepts_notification_sound_toggles():
+    settings = TelegramSettings.from_dict({"sound_catch": False, "sound_inventory_space_low": False})
+
+    assert settings.sound_catch is False
+    assert settings.sound_inventory_space_low is False
+    assert settings.sound_start_stop is True
+
+
 def test_telegram_settings_clamps_low_inventory_space_threshold():
     settings = TelegramSettings.from_dict({"inventory_space_low_threshold_kg": "0,5"})
 

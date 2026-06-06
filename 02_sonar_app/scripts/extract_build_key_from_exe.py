@@ -135,7 +135,7 @@ def result_payload(result: ExtractionResult) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Extract Sonar build key from a built exe or build zip.")
-    parser.add_argument("path", type=Path, help="Path to .exe or <build_key>-<exe>.zip")
+    parser.add_argument("path", type=Path, help="Path to .exe or <build_key>-<name>.zip")
     parser.add_argument("--map", dest="build_map", type=Path, default=DEFAULT_BUILD_MAP, help="Path to sonar_build_keys.json")
     parser.add_argument("--no-map", action="store_true", help="Do not use sonar_build_keys.json to resolve ambiguous keys")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")

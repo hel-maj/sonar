@@ -81,10 +81,12 @@ def test_secure_build_creates_uploadable_zip_archive_next_to_exe():
     assert "--startup-block-url" in script
     assert "--startup-block-public-key" in script
     assert "function New-BuildArchive" in script
+    assert "[System.IO.Path]::GetFileNameWithoutExtension($ExeName)" in script
     assert "[System.IO.Compression.ZipFile]::Open" in script
     assert "[System.IO.Compression.CompressionLevel]::NoCompression" in script
     assert "$VersionDistRoot = Join-Path $DistRoot $AppVersion" in script
     assert "\"{0}-{1}.zip\"" in script
+    assert "CreateEntryFromFile" in script
     assert "Build archive:" in script
     assert "Build version:" in script
 

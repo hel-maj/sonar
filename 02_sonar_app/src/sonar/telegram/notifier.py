@@ -49,6 +49,15 @@ CATCH_FOREGROUND_EDGE_PADDING_PX = 8
 CATCH_FRAME_INSET_PX = 8
 CATCH_FRAME_SHADOW_PRIMARY_ALPHA = 124
 CATCH_FRAME_SHADOW_SECONDARY_ALPHA = 68
+TELEGRAM_NOTIFICATION_ITEMS = (
+    ("notify_catch", "sound_catch", "Поймана рыба"),
+    ("notify_start_stop", "sound_start_stop", "Запуск/Остановка"),
+    ("notify_meal", "sound_meal", "Питание"),
+    ("notify_inventory_full", "sound_inventory_full", "Закончилось место"),
+    ("notify_inventory_space_low", "sound_inventory_space_low", "Мало места"),
+    ("notify_bait_tired", "sound_bait_tired", "Устала от приманки"),
+    ("notify_focus_lost", "sound_focus_lost", "Потеря фокуса игры"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,9 +322,10 @@ class NotificationManager:
         )
         if image_bytes is not None:
             image_bytes = self._decorate_catch_photo(image_bytes, released=bool(released))
-        if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message):
+        silent = not self._notification_sound_enabled("sound_catch")
+        if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message, disable_notification=silent):
             return
-        self.send_message(message)
+        self.send_message(message, disable_notification=silent)
 
     def notify_fishing_started(self, totals: SessionTotals, has_stats: bool) -> None:
         if not self.settings.notify_start_stop:
@@ -324,11 +334,13 @@ class NotificationManager:
             self.send_message(
                 "🚤 <b>Рыбалка началась!</b>\n\n🎣 Удочка закинута, ждём улов...",
                 reply_markup=self._menu_reply_markup(),
+                disable_notification=not self._notification_sound_enabled("sound_start_stop"),
             )
             return
         self.send_message(
             self._format_session_stats_message("🚤 Рыбалка началась!", "📊 Текущая сессия", totals),
             reply_markup=self._menu_reply_markup(),
+            disable_notification=not self._notification_sound_enabled("sound_start_stop"),
         )
 
     def notify_fishing_stopped(
@@ -341,9 +353,15 @@ class NotificationManager:
         if not self.settings.notify_start_stop:
             return
         message = self._format_session_stats_message("🛑 Рыбалка остановлена!", "📊 Статистика сессии", totals, reason=reason)
-        if image_bytes is not None and self.send_photo_to_admins(image_bytes, caption=message, reply_markup=self._menu_reply_markup()):
+        silent = not self._notification_sound_enabled("sound_start_stop")
+        if image_bytes is not None and self.send_photo_to_admins(
+            image_bytes,
+            caption=message,
+            reply_markup=self._menu_reply_markup(),
+            disable_notification=silent,
+        ):
             return
-        self.send_message(message, reply_markup=self._menu_reply_markup())
+        self.send_message(message, reply_markup=self._menu_reply_markup(), disable_notification=silent)
 
     def notify_meal_eaten(
         self,
@@ -356,11 +374,17 @@ class NotificationManager:
         del image_bytes
         if not self.settings.notify_meal:
             return
-        self.send_message(self._format_meal_message(item_name, item_info, player_status))
+        self.send_message(
+            self._format_meal_message(item_name, item_info, player_status),
+            disable_notification=not self._notification_sound_enabled("sound_meal"),
+        )
 
     def notify_meal_ended(self) -> None:
         if self.settings.notify_meal:
-            self.send_message("🍽 <b>Эффект еды закончился</b>")
+            self.send_message(
+                "🍽 <b>Эффект еды закончился</b>",
+                disable_notification=not self._notification_sound_enabled("sound_meal"),
+            )
 
     def notify_backpack_stored(self, count: int) -> None:
         del count
@@ -368,7 +392,10 @@ class NotificationManager:
 
     def notify_inventory_full(self) -> None:
         if self.settings.notify_inventory_full:
-            self.send_message("📦 <b>Закончилось место!</b>")
+            self.send_message(
+                "📦 <b>Закончилось место!</b>",
+                disable_notification=not self._notification_sound_enabled("sound_inventory_full"),
+            )
 
     def notify_inventory_space_low(
         self,
@@ -391,27 +418,36 @@ class NotificationManager:
                 lines.append(f"🎒 Инвентарь: {inventory_weight} кг")
             if backpack_weight:
                 lines.append(f"🧳 Рюкзак: {backpack_weight} кг")
-        self.send_message("\n".join(lines))
+        self.send_message(
+            "\n".join(lines),
+            disable_notification=not self._notification_sound_enabled("sound_inventory_space_low"),
+        )
 
     def notify_bait_tired(self) -> None:
         if self.settings.notify_bait_tired:
-            self.send_message("<b>Рыба устала от приманки</b>\nИсправляем")
+            self.send_message(
+                "<b>Рыба устала от приманки</b>\nИсправляем",
+                disable_notification=not self._notification_sound_enabled("sound_bait_tired"),
+            )
 
     def notify_focus_lost(self) -> None:
         if self.settings.notify_focus_lost:
             self.send_message(
                 "⚠️🎮 <b>Фокус ушёл с игры</b>\n\n"
                 "Ввод поставлен на паузу, чтобы клавиши не нажимались в другом окне. "
-                "Откройте меню Telegram и нажмите «Вернуть фокус игре»."
+                "Откройте меню Telegram и нажмите «Вернуть фокус игре».",
+                disable_notification=not self._notification_sound_enabled("sound_focus_lost"),
             )
 
     def notify_fishing_failed(self) -> None:
         if self.settings.notify_start_stop:
-            self.send_message("⚠️ <b>Не удалось восстановить рыбалку</b>")
+            self.send_message(
+                "⚠️ <b>Не удалось восстановить рыбалку</b>",
+                disable_notification=not self._notification_sound_enabled("sound_start_stop"),
+            )
 
     def notify_fishing_restored(self) -> None:
-        if self.settings.notify_start_stop:
-            self.send_message("✅ <b>Рыбалка восстановлена</b>")
+        return
 
     def notify_app_started(self) -> None:
         self.send_message("<b>Sonar запущен</b>")
@@ -422,7 +458,14 @@ class NotificationManager:
         self._delete_stream_link_messages()
         self.send_message("<b>Sonar выключен</b>")
 
-    def send_message(self, text: str, *, chat_id: int | None = None, reply_markup: dict[str, Any] | None = None) -> bool:
+    def send_message(
+        self,
+        text: str,
+        *,
+        chat_id: int | None = None,
+        reply_markup: dict[str, Any] | None = None,
+        disable_notification: bool = False,
+    ) -> bool:
         if self.sink:
             self.sink(text)
         if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
@@ -431,6 +474,8 @@ class NotificationManager:
         if not chat_ids:
             return False
         payload_base: dict[str, Any] = {"text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+        if disable_notification:
+            payload_base["disable_notification"] = True
         if reply_markup is not None:
             payload_base["reply_markup"] = reply_markup
         ok = True
@@ -448,10 +493,13 @@ class NotificationManager:
         caption: str = "📸 Скриншот игры",
         *,
         reply_markup: dict[str, Any] | None = None,
+        disable_notification: bool = False,
     ) -> bool:
         if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token:
             return False
         data: dict[str, Any] = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+        if disable_notification:
+            data["disable_notification"] = True
         if reply_markup is not None:
             data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
         response = self._api_post(
@@ -467,13 +515,23 @@ class NotificationManager:
         caption: str = "📸 Скриншот игры",
         *,
         reply_markup: dict[str, Any] | None = None,
+        disable_notification: bool = False,
     ) -> bool:
         if not self.runtime_enabled or not self.settings.enabled or not self.settings.bot_token or not self.settings.admin_ids:
             return False
         ok = True
         for chat_id in self.settings.admin_ids:
-            ok = self.send_photo(chat_id, image_bytes, caption=caption, reply_markup=reply_markup) and ok
+            ok = self.send_photo(
+                chat_id,
+                image_bytes,
+                caption=caption,
+                reply_markup=reply_markup,
+                disable_notification=disable_notification,
+            ) and ok
         return ok
+
+    def _notification_sound_enabled(self, field_name: str) -> bool:
+        return bool(getattr(self.settings, field_name, True))
 
     def _poll_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -553,6 +611,9 @@ class NotificationManager:
                 self._send_stream_quality(chat_id, message_id=message_id)
             elif data.startswith("toggle:"):
                 self._toggle_notification(data.removeprefix("toggle:"))
+                self._send_notifications(chat_id, message_id=message_id)
+            elif data.startswith("toggle_sound:"):
+                self._toggle_notification_sound(data.removeprefix("toggle_sound:"))
                 self._send_notifications(chat_id, message_id=message_id)
             elif data.startswith("stream:quality:"):
                 self._set_stream_quality(data.removeprefix("stream:quality:"), chat_id, message_id=message_id)
@@ -697,25 +758,25 @@ class NotificationManager:
         )
 
     def _send_notifications(self, chat_id: int, *, message_id: int | None = None) -> None:
-        items = [
-            ("notify_catch", "Поймана рыба"),
-            ("notify_start_stop", "Запуск/Остановка"),
-            ("notify_meal", "Питание"),
-            ("notify_inventory_full", "Закончилось место"),
-            ("notify_inventory_space_low", "Мало места"),
-            ("notify_bait_tired", "Устала от приманки"),
-        ]
-        items.append(("notify_focus_lost", "Потеря фокуса игры"))
         keyboard = []
-        for index in range(0, len(items), 2):
-            row = []
-            for field_name, label in items[index : index + 2]:
-                enabled = bool(getattr(self.settings, field_name))
-                icon = "🔔" if enabled else "🔕"
-                row.append({"text": f"{icon} {label}", "callback_data": f"toggle:{field_name}"})
-            keyboard.append(row)
+        for notify_field, sound_field, label in TELEGRAM_NOTIFICATION_ITEMS:
+            notify_enabled = bool(getattr(self.settings, notify_field))
+            sound_enabled = self._notification_sound_enabled(sound_field)
+            notify_icon = "🔔" if notify_enabled else "🔕"
+            sound_icon = "🔈" if sound_enabled else "🔇"
+            keyboard.append(
+                [
+                    {"text": f"{notify_icon} {label}", "callback_data": f"toggle:{notify_field}"},
+                    {"text": f"{sound_icon} Звук", "callback_data": f"toggle_sound:{sound_field}"},
+                ]
+            )
         keyboard.append([{"text": "⬅️ Меню", "callback_data": "menu:main"}])
-        self._send_or_edit_message("🔔 Уведомления", chat_id=chat_id, message_id=message_id, reply_markup={"inline_keyboard": keyboard})
+        self._send_or_edit_message(
+            "🔔 Уведомления\n\n🔔 - отправка уведомления\n🔈 - звук уведомления",
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup={"inline_keyboard": keyboard},
+        )
 
     def _send_stats(self, chat_id: int) -> None:
         if not self._stats_runtime_enabled():
@@ -809,17 +870,18 @@ class NotificationManager:
         self.send_message(text, chat_id=chat_id)
 
     def _toggle_notification(self, field_name: str) -> None:
-        if field_name not in {
-            "notify_catch",
-            "notify_start_stop",
-            "notify_meal",
-            "notify_inventory_full",
-            "notify_inventory_space_low",
-            "notify_bait_tired",
-            "notify_focus_lost",
-        }:
+        allowed_fields = {notify_field for notify_field, _sound_field, _label in TELEGRAM_NOTIFICATION_ITEMS}
+        if field_name not in allowed_fields:
             return
         setattr(self.settings, field_name, not bool(getattr(self.settings, field_name)))
+        if self.settings_changed_callback:
+            self.settings_changed_callback(self.settings)
+
+    def _toggle_notification_sound(self, field_name: str) -> None:
+        allowed_fields = {sound_field for _notify_field, sound_field, _label in TELEGRAM_NOTIFICATION_ITEMS}
+        if field_name not in allowed_fields:
+            return
+        setattr(self.settings, field_name, not self._notification_sound_enabled(field_name))
         if self.settings_changed_callback:
             self.settings_changed_callback(self.settings)
 

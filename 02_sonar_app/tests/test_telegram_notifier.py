@@ -157,8 +157,44 @@ def test_notification_menu_edits_callback_message_and_uses_two_columns(monkeypat
     manager._send_notifications(1, message_id=42)
 
     assert calls[0][0] == "editMessageText"
-    keyboard = calls[0][1]["json"]["reply_markup"]["inline_keyboard"]
-    assert [len(row) for row in keyboard] == [2, 2, 2, 1, 1]
+    payload = calls[0][1]["json"]
+    keyboard = payload["reply_markup"]["inline_keyboard"]
+    assert "🔔 - отправка уведомления" in payload["text"]
+    assert "🔈 - звук уведомления" in payload["text"]
+    assert [len(row) for row in keyboard] == [2, 2, 2, 2, 2, 2, 2, 1]
+    assert keyboard[0][0]["callback_data"] == "toggle:notify_catch"
+    assert keyboard[0][1]["callback_data"] == "toggle_sound:sound_catch"
+
+
+def test_notification_sound_toggle_updates_setting(monkeypatch):
+    changed = []
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        settings_changed_callback=lambda settings: changed.append(settings.sound_catch),
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._handle_update(
+        {
+            "update_id": 1,
+            "callback_query": {
+                "id": "cb",
+                "data": "toggle_sound:sound_catch",
+                "message": {"chat": {"id": 1}, "message_id": 10},
+            },
+        }
+    )
+
+    assert manager.settings.sound_catch is False
+    assert changed == [False]
+    keyboard = calls[-1][1]["json"]["reply_markup"]["inline_keyboard"]
+    assert keyboard[0][1]["text"] == "🔇 Звук"
 
 
 def test_main_menu_contains_stream_entry(monkeypatch):
@@ -1122,3 +1158,26 @@ def test_low_inventory_space_notification_respects_setting(monkeypatch):
     assert "Мало места" in text
     assert "0.75" in text
     assert "1" in text
+
+
+def test_disabled_notification_sound_sends_silent_message(monkeypatch):
+    manager = NotificationManager(
+        settings=TelegramSettings(
+            enabled=True,
+            bot_token="token",
+            admin_ids=[1],
+            notify_inventory_space_low=True,
+            sound_inventory_space_low=False,
+        )
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_inventory_space_low(0.75, 1.0)
+
+    assert calls[0][1]["json"]["disable_notification"] is True
