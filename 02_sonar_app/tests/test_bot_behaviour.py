@@ -2202,6 +2202,58 @@ def test_status_timer_is_disabled_when_auto_meal_is_off():
     assert bot._status_timer_needs_meal() is False
 
 
+def test_player_status_estimate_uses_shorter_food_or_water_timer(monkeypatch):
+    current_time = 1000.0
+    monkeypatch.setattr(bot_module.time, "time", lambda: current_time)
+    estimate = bot_module.PlayerStatusEstimate()
+    estimate.update(
+        PlayerStatus(food=100, water=100, health=100, source="screenshot"),
+        trusted_core=True,
+    )
+
+    food_wait, water_wait = estimate.seconds_until_below_breakdown(food_threshold=50, water_threshold=80)
+
+    assert food_wait == 7800.0
+    assert water_wait == 1980.0
+    assert estimate.seconds_until_below(food_threshold=50, water_threshold=80) == 1980.0
+
+
+def test_player_status_estimate_does_not_schedule_long_timer_from_partial_status(monkeypatch):
+    current_time = 1000.0
+    monkeypatch.setattr(bot_module.time, "time", lambda: current_time)
+    estimate = bot_module.PlayerStatusEstimate()
+    estimate.update(
+        PlayerStatus(food=100, water=None, health=100, source="screenshot"),
+        trusted_core=True,
+    )
+
+    assert estimate.seconds_until_below_breakdown(food_threshold=50, water_threshold=80) is None
+    assert estimate.seconds_until_below(food_threshold=50, water_threshold=80) is None
+
+
+def test_detect_player_status_reschedules_inventory_retry_from_fresh_status(monkeypatch):
+    current_time = 1000.0
+    monkeypatch.setattr(bot_module.time, "time", lambda: current_time)
+
+    class MealSystem:
+        def detect_player_status(self, _frame, *, allow_screenshot_fallback: bool = False):
+            del allow_screenshot_fallback
+            return PlayerStatus(food=100, water=100, health=100, source="screenshot")
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(auto_meal=True, restore_food_from=50, restore_water_from=80)
+    bot.meal_system = MealSystem()
+    bot._meal_search_disabled_until_restart = False
+    bot._player_status_estimate = bot_module.PlayerStatusEstimate()
+    bot._inventory_retry_after = current_time + 60.0
+    bot._check_inventory_space_notification = lambda status=None: None
+    bot._publish_player_status = lambda status: None
+
+    bot.detect_player_status()
+
+    assert bot._inventory_retry_after == current_time + 1800.0
+
+
 def test_kept_fish_weight_is_added_only_for_confirmed_human_storage():
     bot = FishingBot.__new__(FishingBot)
     bot._player_status_estimate = bot_module.PlayerStatusEstimate()

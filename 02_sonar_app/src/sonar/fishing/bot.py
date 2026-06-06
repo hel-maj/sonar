@@ -273,6 +273,7 @@ class FishingBot:
         self._remember_player_status(status)
         estimated = self.estimated_player_status() or status
         self._publish_player_status(estimated)
+        self._sync_next_meal_check_from_status(estimated, log=False)
         return estimated
 
     def estimated_player_status(self) -> PlayerStatus | None:
@@ -938,19 +939,43 @@ class FishingBot:
             return False
         return time.time() >= self._inventory_retry_after > 0.0
 
-    def _schedule_next_meal_check_from_estimate(self) -> None:
+    def _sync_next_meal_check_from_status(self, status: PlayerStatus | None, *, log: bool = False) -> None:
+        if not self.settings.auto_meal or getattr(self, "_meal_search_disabled_until_restart", False):
+            return
+        if status is None or status.food is None or status.water is None:
+            return
+        if self._status_needs_meal_for_scan(status):
+            self._inventory_retry_after = 0.0
+            if log:
+                self._log("Питание: показатели ниже порога, проверка нужна сейчас")
+            return
+        self._schedule_next_meal_check_from_estimate(log=log)
+
+    def _schedule_next_meal_check_from_estimate(self, *, log: bool = True) -> None:
         estimate = getattr(self, "_player_status_estimate", None)
-        wait_seconds = None
+        waits = None
         if estimate is not None:
-            wait_seconds = estimate.seconds_until_below(
+            waits = estimate.seconds_until_below_breakdown(
                 food_threshold=self._meal_food_threshold(),
                 water_threshold=self._meal_water_threshold(),
             )
-        if wait_seconds is None:
+        if waits is None:
             self._inventory_retry_after = time.time() + MEAL_MISSING_RETRY_SECONDS
+            if log:
+                self._log(
+                    "Питание: еда или вода не прочитаны, повторная проверка через "
+                    f"{self._format_seconds(MEAL_MISSING_RETRY_SECONDS)}"
+                )
             return
+        food_wait, water_wait = waits
+        wait_seconds = min(food_wait, water_wait)
         self._inventory_retry_after = time.time() + max(0.0, wait_seconds)
-        self._log(f"Питание: следующая проверка через {self._format_seconds(wait_seconds)}")
+        if log:
+            self._log(
+                "Питание: следующая проверка через "
+                f"{self._format_seconds(wait_seconds)} "
+                f"(еда {self._format_seconds(food_wait)}, вода {self._format_seconds(water_wait)})"
+            )
 
     def _meal_food_threshold(self) -> int:
         return min(100, self.settings.restore_food_from + MEAL_STATUS_THRESHOLD_TOLERANCE)
@@ -2060,6 +2085,7 @@ class FishingBot:
             self._remember_player_status(status, inventory_scan=True)
             estimated = self.estimated_player_status() or status
             self._publish_player_status(estimated)
+            self._sync_next_meal_check_from_status(estimated, log=True)
             result = estimated
             if estimated is None or not estimated.has_any_value():
                 self._log("Показатели: не удалось прочитать еду, воду или вес")
