@@ -62,6 +62,10 @@ class FishStat:
     released_kg: float = 0.0
 
     @property
+    def kept_count(self) -> int:
+        return max(0, self.caught_count - self.released_count)
+
+    @property
     def kept_kg(self) -> float:
         return max(0.0, self.caught_kg - self.released_kg)
 
@@ -79,6 +83,10 @@ class SessionTotals:
     @property
     def kept_kg(self) -> float:
         return max(0.0, self.caught_kg - self.released_kg)
+
+    @property
+    def kept_count(self) -> int:
+        return max(0, self.caught_count - self.released_count)
 
     @property
     def earned(self) -> float:

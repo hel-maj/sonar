@@ -14,13 +14,52 @@ from sonar.fishing.constants import resolution_name
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gameplay"
+FIXTURES_4K = Path(__file__).parent / "fixtures" / "gameplay_4k"
 TACKLE_FIXTURES = Path(__file__).parent / "fixtures" / "tackle"
+SUPPLIED_4K_FIXTURES = (
+    "20260605174240_1.jpg",
+    "20260605174254_1.jpg",
+    "20260605174259_1.jpg",
+    "20260605174331_1.jpg",
+    "20260605174340_1.jpg",
+    "20260605174357_1.jpg",
+    "20260605174359_1.jpg",
+    "20260605174408_1.jpg",
+    "20260605174410_1.jpg",
+    "20260605174442_1.jpg",
+    "20260605174510_1.jpg",
+    "20260605174511_1.jpg",
+    "20260605174527_1.jpg",
+    "20260605174529_1.jpg",
+    "20260605174625_1.jpg",
+    "20260605174635_1.jpg",
+    "20260605174738_1.jpg",
+    "20260605174739_1.jpg",
+    "20260605174740_1.jpg",
+    "20260605174802_1.jpg",
+    "20260605174808_1.jpg",
+    "20260605174829_1.jpg",
+    "20260605174830_1.jpg",
+    "20260605174832_1.jpg",
+    "20260605174834_1.jpg",
+    "20260605174836_1.jpg",
+    "20260605174838_1.jpg",
+    "20260605174840_1.jpg",
+)
 
 
 def load_frame(name: str):
     path = FIXTURES / name
     frame = cv2.imread(str(path))
     assert frame is not None, f"Fixture is not readable: {path}"
+    return frame
+
+
+def load_4k_frame(name: str):
+    path = FIXTURES_4K / name
+    frame = cv2.imread(str(path))
+    assert frame is not None, f"Fixture is not readable: {path}"
+    assert frame.shape[:2] == (2160, 3840)
     return frame
 
 
@@ -33,6 +72,10 @@ def load_tackle_frame(name: str):
 
 def detections(name: str) -> dict[str, float]:
     return TriggerMonitor().detect(load_frame(name))
+
+
+def detections_4k(name: str) -> dict[str, float]:
+    return TriggerMonitor().detect(load_4k_frame(name))
 
 
 def stage_from_detections(matches: dict[str, float]) -> str | None:
@@ -255,3 +298,84 @@ def test_inventory_and_backpack_regions_do_not_overlap():
     assert inventory_roi.x >= frame.shape[1] // 2
     assert backpack_roi.right <= frame.shape[1] // 2
     assert backpack_roi.y >= frame.shape[0] // 2
+
+
+@pytest.mark.parametrize("fixture", SUPPLIED_4K_FIXTURES)
+def test_supplied_4k_gameplay_fixture_is_readable(fixture: str):
+    load_4k_frame(fixture)
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expected_stage"),
+    [
+        ("20260605174240_1.jpg", "start"),
+        ("20260605174331_1.jpg", "start"),
+        ("20260605174357_1.jpg", "start1"),
+        ("20260605174442_1.jpg", "start2"),
+        ("20260605174527_1.jpg", "ad"),
+        ("20260605174738_1.jpg", "start2"),
+    ],
+)
+def test_4k_fishing_stages_are_detected(fixture: str, expected_stage: str):
+    assert stage_from_detections(detections_4k(fixture)) == expected_stage
+
+
+@pytest.mark.parametrize("fixture", ["20260605174254_1.jpg", "20260605174259_1.jpg", "20260605174802_1.jpg"])
+def test_4k_non_stage_screens_do_not_report_fishing_stage(fixture: str):
+    assert stage_from_detections(detections_4k(fixture)) is None
+
+
+@pytest.mark.parametrize(
+    ("fixture", "storage"),
+    [
+        ("20260605174240_1.jpg", "human"),
+        ("20260605174357_1.jpg", "boat"),
+    ],
+)
+def test_4k_storage_selector_state_is_detected(fixture: str, storage: str):
+    matches = detections_4k(fixture)
+
+    assert storage in matches
+
+
+def test_4k_hook_trigger_presses_space():
+    frame = load_4k_frame("20260605174738_1.jpg")
+    input_controller = DummyInput()
+
+    result = create_monitor_for_frame(frame, input_controller).check_and_act(frame)
+
+    assert result.red_detected is True
+    assert result.pressed is True
+    assert input_controller.keys == ["space"]
+
+
+def test_4k_waiting_screen_does_not_press_space_before_hook_trigger():
+    frame = load_4k_frame("20260605174442_1.jpg")
+    input_controller = DummyInput()
+
+    result = create_monitor_for_frame(frame, input_controller).check_and_act(frame)
+
+    assert result.pressed is False
+    assert input_controller.keys == []
+
+
+@pytest.mark.parametrize("fixture", ["20260605174625_1.jpg", "20260605174635_1.jpg"])
+def test_4k_catch_screen_is_detected(fixture: str):
+    result = CatchScreenDetector().detect(load_4k_frame(fixture))
+
+    assert result.visible is True
+    assert result.fish_id == "krasny_gorbyl"
+    assert result.weight_kg == pytest.approx(9.19)
+
+
+@pytest.mark.parametrize("fixture", ["20260605174808_1.jpg", "20260605174829_1.jpg", "20260605174830_1.jpg"])
+def test_4k_inventory_and_backpack_irp_are_detected(fixture: str):
+    frame = load_4k_frame(fixture)
+    meal = MealSystem()
+    meal.load_templates(resolution_name(frame.shape[1], frame.shape[0]))
+
+    assert InventoryStageDetector().is_open(frame) is True
+    match = meal.find_food_in_backpack(frame)
+    assert match is not None
+    assert match.key == "irp"
+    assert match.source == "backpack"

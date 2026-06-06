@@ -679,8 +679,14 @@ def _replay_motion_direction_fixture(data: Any) -> tuple[float | None, int]:
     perf_times = data["perf_times"].astype(np.float64)
     fish_positions = data["fish_positions"].astype(np.float32)
     right_vectors = data["player_right_vectors"].astype(np.float32)
+    if "player_positions" in data:
+        player_positions = data["player_positions"].astype(np.float32)
+    else:
+        player_positions = np.full_like(fish_positions, np.nan, dtype=np.float32)
     if not (labels.size == perf_times.size == fish_positions.shape[0] == right_vectors.shape[0]):
         raise ValueError("Motion fixture sample counts differ")
+    if player_positions.shape[0] != labels.size:
+        raise ValueError("Motion fixture player position sample count differs")
 
     fixture_addr = 0x20000000000
     tracker = MemoryReelingTracker.__new__(MemoryReelingTracker)
@@ -692,11 +698,26 @@ def _replay_motion_direction_fixture(data: Any) -> tuple[float | None, int]:
     tracker._reset_move_stabilizer()
     predictions: list[int] = []
     expected: list[int] = []
-    for now, label, fish_pos, right in zip(perf_times, labels, fish_positions, right_vectors):
+    for now, label, fish_pos, right, player_pos in zip(
+        perf_times,
+        labels,
+        fish_positions,
+        right_vectors,
+        player_positions,
+    ):
         if not np.isfinite(fish_pos).all() or not np.isfinite(right).all():
             continue
         motion_updated = tracker._update_fish_velocity(float(now), tuple(float(value) for value in fish_pos), False)
         velocity_along = tracker.velocity_xy[0] * float(right[0]) + tracker.velocity_xy[1] * float(right[1])
+        if np.isfinite(player_pos).all():
+            velocity_along, _fish_forward, _fish_behind_player = (
+                MemoryReelingTracker._orient_projected_velocity_to_fish_side(
+                    velocity_along,
+                    (float(right[0]), float(right[1])),
+                    tuple(float(value) for value in player_pos),
+                    tuple(float(value) for value in fish_pos),
+                )
+            )
         move_val, _source, action_eps = tracker._movement_from_projected_velocity(
             velocity_along=velocity_along,
             fish_addr=fixture_addr,
@@ -845,6 +866,10 @@ def _write_fixture(npz_path: Path, fixture_path: Path, max_samples: int, minimum
     if "fish_positions" in data and "player_bytes" in data:
         right_vectors = _capture_right_vectors(data)
         fish_positions = data["fish_positions"][:, 0].astype(np.float32)
+        if "player_positions" in data:
+            player_positions = data["player_positions"][:, 0].astype(np.float32)
+        else:
+            player_positions = np.full_like(fish_positions, np.nan, dtype=np.float32)
         valid = _motion_fixture_indices(
             labels,
             fish_addrs,
@@ -856,7 +881,7 @@ def _write_fixture(npz_path: Path, fixture_path: Path, max_samples: int, minimum
         )
         fixture_metadata = {
             "kind": "sonar_reeling_direction_fixture",
-            "version": 2,
+            "version": 3,
             "source_capture": npz_path.name,
             "source_capture_version": source_metadata.get("version"),
             "label": source_metadata.get("label", ""),
@@ -870,6 +895,7 @@ def _write_fixture(npz_path: Path, fixture_path: Path, max_samples: int, minimum
             perf_times=data["perf_times"][valid].astype(np.float64),
             key_labels=labels[valid],
             fish_positions=fish_positions[valid],
+            player_positions=player_positions[valid],
             player_right_vectors=right_vectors[valid],
             completion_perf_times=data["perf_times"][completion_valid].astype(np.float64),
             completion_key_labels=labels[completion_valid],

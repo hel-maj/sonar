@@ -13,6 +13,7 @@ from sonar.fishing.constants import (
     PROCESS_NAME,
     garbage_roi_for_resolution,
     resolution_name,
+    template_scales_for_frame,
 )
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.capture import WindowCapture
@@ -35,6 +36,7 @@ class GarbageDisposal:
     capture: WindowCapture = field(init=False)
     matcher: TemplateMatcher = field(init=False)
     templates: dict[str, np.ndarray] = field(default_factory=dict)
+    loaded_resolution: str | None = None
 
     def __post_init__(self) -> None:
         self.capture = WindowCapture(self.process_name)
@@ -51,14 +53,28 @@ class GarbageDisposal:
         files = GARBAGE_TEMPLATE_FILES_2K if resolution == "2k" else GARBAGE_TEMPLATE_FILES_FHD
         template_dir = self.resource_dir / "garbage"
         self.templates = {key: load_template(template_dir / filename) for key, filename in files.items()}
+        self.loaded_resolution = resolution
 
     def find_template(self, screenshot: np.ndarray, template: np.ndarray) -> TemplateMatch | None:
         height, width = screenshot.shape[:2]
-        return self.matcher.find_best(screenshot, template, roi=garbage_roi_for_resolution(width, height))
+        template_resolution = self.loaded_resolution or resolution_name(width, height)
+        return self.matcher.find_best_scaled(
+            screenshot,
+            template,
+            roi=garbage_roi_for_resolution(width, height),
+            scales=template_scales_for_frame(width, height, template_resolution),
+        )
 
     def find_all_template_matches(self, screenshot: np.ndarray, template: np.ndarray, name: str) -> list[TemplateMatch]:
         height, width = screenshot.shape[:2]
-        return self.matcher.find_all(screenshot, template, roi=garbage_roi_for_resolution(width, height), name=name)
+        template_resolution = self.loaded_resolution or resolution_name(width, height)
+        return self.matcher.find_all_scaled(
+            screenshot,
+            template,
+            roi=garbage_roi_for_resolution(width, height),
+            name=name,
+            scales=template_scales_for_frame(width, height, template_resolution),
+        )
 
     def find_all_garbage(self, screenshot: np.ndarray, enabled_keys: set[str] | None = None) -> list[dict[str, object]]:
         enabled = enabled_keys or set(self.templates)

@@ -96,6 +96,25 @@ class TemplateMatcher:
         ]
         return remove_overlapping_matches(matches, min_distance=max(w, h) // 2)
 
+    def find_all_scaled(
+        self,
+        screenshot: np.ndarray,
+        template: np.ndarray,
+        roi: Rect | None = None,
+        name: str = "",
+        scales: tuple[float, ...] = (1.0,),
+    ) -> list[TemplateMatch]:
+        matches: list[TemplateMatch] = []
+        for scale in self._prioritize_scales(scales):
+            scaled = resize_template(template, scale)
+            if scaled is None:
+                continue
+            matches.extend(self.find_all(screenshot, scaled, roi=roi, name=name))
+        if not matches:
+            return []
+        min_distance = max(1, max(max(match.width, match.height) for match in matches) // 2)
+        return remove_overlapping_matches(matches, min_distance=min_distance)
+
     def find_best_scaled(
         self,
         screenshot: np.ndarray,

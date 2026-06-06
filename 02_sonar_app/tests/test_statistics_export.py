@@ -26,4 +26,6 @@ def test_write_stats_csv_contains_totals_and_fish_rows(tmp_path):
     assert "Программа;Build" in text
     assert "Хэш билда;hash-1" in text
     assert "Общий вес;3.1 кг" in text
-    assert "Albula;2 шт · 4.1 кг;1 шт · 1 кг;1-2 $/шт · 1000-2000 $/1000;;от 3 100 $ до 6 200 $" in text
+    assert "Оставлено;1 шт · 3.1 кг" in text
+    assert "Рыба;Поймано;Оставлено;Цена;Своя цена за 1000;Доход" in text
+    assert "Albula;2 шт · 4.1 кг;1 шт · 3.1 кг;1-2 $/шт · 1000-2000 $/1000;;от 3 100 $ до 6 200 $" in text

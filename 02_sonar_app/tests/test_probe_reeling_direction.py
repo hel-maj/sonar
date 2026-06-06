@@ -220,6 +220,44 @@ def test_exported_fixture_replays_direction_labels(tmp_path: Path) -> None:
     assert fixture["completion_fish_bytes"].shape == (0, fixture["fish_bytes"].shape[1])
 
 
+def test_motion_fixture_replay_flips_projection_when_fish_is_behind_player(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "behind_player.fixture.npz"
+    sample_count = 40
+    perf_times = np.linspace(0.0, 1.6, sample_count, dtype=np.float64)
+    fish_positions = np.column_stack(
+        (
+            np.linspace(0.0, 8.0, sample_count, dtype=np.float32),
+            np.full(sample_count, -10.0, dtype=np.float32),
+            np.zeros(sample_count, dtype=np.float32),
+        )
+    )
+    metadata = {
+        "kind": "sonar_reeling_direction_fixture",
+        "version": 3,
+        "minimum_accuracy": 0.9,
+        "sample_count": sample_count,
+        "completion_sample_count": 0,
+    }
+    np.savez_compressed(
+        fixture_path,
+        perf_times=perf_times,
+        key_labels=np.ones(sample_count, dtype=np.int8),
+        fish_positions=fish_positions,
+        player_positions=np.zeros((sample_count, 3), dtype=np.float32),
+        player_right_vectors=np.tile(
+            np.array((1.0, 0.0), dtype=np.float32),
+            (sample_count, 1),
+        ),
+        metadata=json.dumps(metadata),
+    )
+
+    accuracy, replayed_count = replay_direction_fixture(fixture_path)
+
+    assert replayed_count == sample_count
+    assert accuracy is not None
+    assert accuracy >= float(metadata["minimum_accuracy"])
+
+
 def test_direction_fixture_indices_exclude_transitions_and_noisy_tail() -> None:
     perf_times = np.arange(0.0, 6.0, 0.1, dtype=np.float64)
     labels = np.where(perf_times < 3.0, -1, 1).astype(np.int8)

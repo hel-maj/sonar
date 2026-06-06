@@ -4,7 +4,8 @@ param(
     [double]$Countdown = 5,
     [double]$AutoStopIdle = 5,
     [ValidateSet("AD", "Arrows")]
-    [string]$LabelKeys = "AD"
+    [string]$LabelKeys = "AD",
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +37,15 @@ $Arguments = @(
 )
 if ($Label) {
     $Arguments += @("--label", $Label)
+}
+
+if ($DryRun) {
+    [pscustomobject]@{
+        Python = $Python
+        WorkingDirectory = $Root
+        Arguments = $Arguments
+    } | ConvertTo-Json -Compress
+    exit 0
 }
 
 Push-Location $Root

@@ -8,7 +8,13 @@ from typing import Callable
 import numpy as np
 
 from sonar.automation.input_controller import InputController
-from sonar.fishing.constants import HOOKING_MATCH_THRESHOLD, HOOKING_PAUSE_SECONDS, hooking_rois_for_resolution, resolution_name
+from sonar.fishing.constants import (
+    HOOKING_MATCH_THRESHOLD,
+    HOOKING_PAUSE_SECONDS,
+    hooking_rois_for_resolution,
+    resolution_name,
+    template_scales_for_frame,
+)
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.geometry import Rect
 from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
@@ -37,6 +43,7 @@ class TemplateMonitor:
     roi1: Rect
     roi2: Rect
     resolution_type: str
+    template_scales: tuple[float, ...] = (1.0,)
     resource_dir: Path = FISHING_RESOURCE_DIR
     input_controller: InputController = field(default_factory=InputController)
     focus_callback: Callable[[], bool] | None = None
@@ -58,14 +65,14 @@ class TemplateMonitor:
         self.bubles_template = load_template(trigger_dir / bubles_name)
 
     def match_template(self, frame: np.ndarray, template: np.ndarray, roi: Rect) -> tuple[float, bool]:
-        match = self.matcher.find_best(frame, template, roi=roi)
+        match = self.matcher.find_best_scaled(frame, template, roi=roi, scales=self.template_scales)
         if match is None:
             return 0.0, False
         return match.confidence, True
 
     def match_red_template(self, frame: np.ndarray) -> tuple[float, bool]:
         assert self.red_template is not None
-        match = self.matcher.find_best(frame, self.red_template, roi=self.roi1)
+        match = self.matcher.find_best_scaled(frame, self.red_template, roi=self.roi1, scales=self.template_scales)
         if match is None or not self.is_red_match_valid(frame, match):
             return 0.0, False
         return match.confidence, True
@@ -122,11 +129,13 @@ def create_monitor_for_frame(
     focus_callback: Callable[[], bool] | None = None,
 ) -> TemplateMonitor:
     height, width = frame.shape[:2]
+    resolution = resolution_name(width, height)
     roi1, roi2 = hooking_rois_for_resolution(width, height)
     return TemplateMonitor(
         roi1,
         roi2,
-        resolution_name(width, height),
+        resolution,
+        template_scales=template_scales_for_frame(width, height, resolution),
         input_controller=input_controller or InputController(),
         focus_callback=focus_callback,
     )

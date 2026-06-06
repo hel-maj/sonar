@@ -156,6 +156,18 @@ def test_catch_screen_detects_marlin_from_gameplay_fixture():
     assert result.is_max_level is True
 
 
+def test_catch_screen_reads_user_marlin_353_debug_crop():
+    result = CatchScreenDetector().detect(_load_gameplay_fixture("catch_marlin_353_20260605.png"))
+
+    assert result.visible is True
+    assert result.fish_id == "marlin"
+    assert result.fish_text == "Марлин"
+    assert result.weight_kg == pytest.approx(3.53, abs=0.03)
+    assert result.quality_text == "Рекордный улов"
+    assert result.xp_current == 13634
+    assert result.is_max_level is True
+
+
 @pytest.mark.parametrize(
     ("fixture", "fish_id", "weight"),
     [

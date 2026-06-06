@@ -793,7 +793,7 @@ class MainWindow(QMainWindow):
         metrics.setSpacing(7)
         self.overview_duration_metric = CompactMetric("Время", "00:00", ui_icon("clock.svg"))
         self.overview_caught_metric = CompactMetric("Поймано", "0", ui_icon("fish_solid.svg"))
-        self.overview_released_metric = CompactMetric("Отпущено", "0", ui_icon("fish.svg"))
+        self.overview_released_metric = CompactMetric("Оставлено", "0", ui_icon("fish.svg"))
         self.overview_income_metric = CompactMetric("Доход", "0 $", ui_icon("dollar.svg"))
         self.overview_income_hour_metric = CompactMetric("Доход / час", "0 $", ui_icon("profit.svg"))
         self.overview_premium_session_metrics = (
@@ -1757,7 +1757,7 @@ class MainWindow(QMainWindow):
         metrics.setSpacing(9)
         self.stats_duration_label = MetricCard("Время рыбалки", "0 мин", ui_icon("clock.svg"))
         self.stats_caught_label = MetricCard("Поймано", "0 шт · 0 кг", ui_icon("fish_solid.svg"))
-        self.stats_released_label = MetricCard("Отпущено", "0 шт · 0 кг", ui_icon("fish.svg"))
+        self.stats_released_label = MetricCard("Оставлено", "0 шт · 0 кг", ui_icon("fish.svg"))
         self.stats_kept_label = MetricCard("Общий вес", "0 кг", ui_icon("weigher.svg"))
         self.stats_income_label = MetricCard("Доход", "0 $", ui_icon("dollar.svg"))
         self.stats_income_per_hour_label = MetricCard("Доход в час", "0 $", ui_icon("profit.svg"))
@@ -1783,7 +1783,7 @@ class MainWindow(QMainWindow):
         table_layout.addWidget(table_title)
         self.stats_table = QTableWidget(0, 6)
         self.stats_table.setMinimumHeight(260)
-        self.stats_table.setHorizontalHeaderLabels(["Рыба", "Поймано", "Отпущено", "Цена", "Своя цена", "Доход"])
+        self.stats_table.setHorizontalHeaderLabels(["Рыба", "Поймано", "Оставлено", "Цена", "Своя цена", "Доход"])
         self.stats_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.stats_table.horizontalHeader().setMinimumSectionSize(58)
         self.stats_table.setAlternatingRowColors(True)
@@ -3689,14 +3689,14 @@ class MainWindow(QMainWindow):
         current_totals = self.session_stats.totals()
         duration = format_duration(totals.duration_seconds)
         caught = format_catch_summary(totals.caught_count, totals.caught_kg)
-        released = format_catch_summary(totals.released_count, totals.released_kg)
+        kept_summary = format_catch_summary(totals.kept_count, totals.kept_kg)
         kept = format_weight(totals.kept_kg)
         income = format_money_range(totals.earned_min, totals.earned_max)
         income_hour = format_money_range(totals.earned_per_hour_min, totals.earned_per_hour_max) if totals.duration_seconds > 0 else "0 $"
         metrics_signature = (
             duration,
             caught,
-            released,
+            kept_summary,
             kept,
             income,
             income_hour,
@@ -3705,7 +3705,7 @@ class MainWindow(QMainWindow):
         if force or metrics_signature != self._stats_metrics_signature:
             self.stats_duration_label.set_value(duration)
             self.stats_caught_label.set_value(caught)
-            self.stats_released_label.set_value(released)
+            self.stats_released_label.set_value(kept_summary)
             self.stats_kept_label.set_value(kept)
             self.stats_income_label.set_value(income)
             self.stats_income_per_hour_label.set_value(income_hour)
@@ -3723,9 +3723,10 @@ class MainWindow(QMainWindow):
         for metric in (getattr(self, "overview_caught_metric", None), getattr(self, "fishing_caught_metric", None)):
             if metric is not None:
                 metric.set_value(str(current_totals.caught_count))
-        for metric in (getattr(self, "overview_released_metric", None), getattr(self, "fishing_released_metric", None)):
-            if metric is not None:
-                metric.set_value(str(current_totals.released_count))
+        if hasattr(self, "overview_released_metric"):
+            self.overview_released_metric.set_value(str(current_totals.kept_count))
+        if hasattr(self, "fishing_released_metric"):
+            self.fishing_released_metric.set_value(str(current_totals.released_count))
         for metric in (getattr(self, "overview_income_metric", None), getattr(self, "fishing_income_metric", None)):
             if metric is not None:
                 metric.set_value(current_income)
@@ -3747,8 +3748,8 @@ class MainWindow(QMainWindow):
                 row.stat.name,
                 row.stat.caught_count,
                 round(row.stat.caught_kg, 3),
-                row.stat.released_count,
-                round(row.stat.released_kg, 3),
+                row.stat.kept_count,
+                round(row.stat.kept_kg, 3),
                 row.custom_price,
                 round(row.earned_min, 2),
                 round(row.earned_max, 2),
@@ -3765,7 +3766,7 @@ class MainWindow(QMainWindow):
             values = [
                 stat.name,
                 format_catch_summary(stat.caught_count, stat.caught_kg),
-                format_catch_summary(stat.released_count, stat.released_kg),
+                format_catch_summary(stat.kept_count, stat.kept_kg),
                 format_base_price(row.base_price),
                 f"{row.custom_price:g}" if row.custom_price is not None else "",
                 format_money_range(row.earned_min, row.earned_max),

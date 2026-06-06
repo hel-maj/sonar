@@ -14,6 +14,7 @@ from sonar.vision.geometry import Rect
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "inventory_item_info"
+GAMEPLAY_4K_DIR = Path(__file__).parent / "fixtures" / "gameplay_4k"
 METADATA_PATH = FIXTURE_DIR / "metadata.csv"
 STATUS_METADATA_PATH = FIXTURE_DIR / "status_metadata.csv"
 COORDINATE_TOLERANCE = 64
@@ -249,6 +250,52 @@ def test_item_info_detector_reads_problematic_screenshot_ocr(source_image: str, 
     assert item_info.effect_descriptions == expected["effect_descriptions"]
     assert item_info.parameter_modifications == expected["parameter_modifications"]
     assert item_info.description == expected["description"]
+
+
+@pytest.mark.parametrize(
+    ("source_image", "expected"),
+    [
+        (
+            "20260605174829_1.jpg",
+            {
+                "title": "ИРП Армии США",
+                "weight": "1.2",
+                "satiety_change": "+80",
+                "thirst_change": "+75",
+            },
+        ),
+        (
+            "20260605174830_1.jpg",
+            {
+                "title": "BIOLINK",
+                "weight": "0.4",
+                "satiety_change": "+100",
+                "thirst_change": "+100",
+            },
+        ),
+        (
+            "20260605174832_1.jpg",
+            {
+                "title": "BIOLINK",
+                "weight": "0.4",
+                "satiety_change": "+100",
+                "thirst_change": "+100",
+            },
+        ),
+    ],
+)
+def test_item_info_detector_reads_4k_tooltips(source_image: str, expected: dict[str, str]):
+    frame = cv2.imread(str(GAMEPLAY_4K_DIR / source_image))
+    assert frame is not None
+    assert frame.shape[:2] == (2160, 3840)
+
+    item_info = ItemInfoDetector().detect(frame, read_text=True)
+
+    assert item_info is not None
+    assert item_info.title == expected["title"]
+    assert item_info.weight == expected["weight"]
+    assert item_info.satiety_change == expected["satiety_change"]
+    assert item_info.thirst_change == expected["thirst_change"]
 
 
 @pytest.mark.parametrize("row", low_res_rows(), ids=lambda row: row["source_image"])

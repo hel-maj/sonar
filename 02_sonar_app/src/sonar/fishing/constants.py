@@ -6,6 +6,11 @@ from sonar.vision.geometry import Rect
 
 PROCESS_NAME = decrypt_text_literal("gta_process_name")
 
+REFERENCE_WIDTH_FHD = 1920
+REFERENCE_HEIGHT_FHD = 1080
+REFERENCE_WIDTH_2K = 2560
+REFERENCE_HEIGHT_2K = 1440
+
 FISH_ROI_FHD = Rect(778, 373, 368, 232)
 FISH_ROI_2K = Rect(1037, 497, 492, 310)
 FISH_MATCH_THRESHOLD = 0.63
@@ -77,31 +82,91 @@ def resolution_name(width: int, height: int) -> str:
     return "2k" if width >= 2500 or height >= 1300 else "fullhd"
 
 
+def reference_size_for_resolution(resolution: str) -> tuple[int, int]:
+    if resolution == "2k":
+        return REFERENCE_WIDTH_2K, REFERENCE_HEIGHT_2K
+    return REFERENCE_WIDTH_FHD, REFERENCE_HEIGHT_FHD
+
+
+def frame_scale(width: int, height: int, *, reference_resolution: str = "fullhd") -> float:
+    reference_width, reference_height = reference_size_for_resolution(reference_resolution)
+    return ((width / reference_width) + (height / reference_height)) / 2.0
+
+
+def scale_rect(
+    rect: Rect,
+    width: int,
+    height: int,
+    *,
+    reference_resolution: str = "fullhd",
+) -> Rect:
+    reference_width, reference_height = reference_size_for_resolution(reference_resolution)
+    scale_x = width / reference_width
+    scale_y = height / reference_height
+    left = int(round(rect.x * scale_x))
+    top = int(round(rect.y * scale_y))
+    right = int(round(rect.right * scale_x))
+    bottom = int(round(rect.bottom * scale_y))
+    return Rect(left, top, max(1, right - left), max(1, bottom - top)).clamp(width, height)
+
+
+def scale_rect_for_resolution(base_rect: Rect, high_res_rect: Rect, width: int, height: int) -> Rect:
+    resolution = resolution_name(width, height)
+    if resolution == "2k":
+        return scale_rect(high_res_rect, width, height, reference_resolution="2k")
+    return scale_rect(base_rect, width, height, reference_resolution="fullhd")
+
+
+def template_scales_for_frame(
+    width: int,
+    height: int,
+    template_resolution: str,
+    *,
+    factors: tuple[float, ...] = (0.82, 0.90, 0.96, 1.0, 1.04, 1.10, 1.20),
+    extras: tuple[float, ...] = (1.0,),
+) -> tuple[float, ...]:
+    base = frame_scale(width, height, reference_resolution=template_resolution)
+    values = {round(base * factor, 2) for factor in factors}
+    values.update(round(value, 2) for value in extras)
+    return tuple(sorted(value for value in values if 0.30 <= value <= 3.25))
+
+
+def trigger_roi_for_resolution(roi_name: str, width: int, height: int) -> Rect | None:
+    resolution = resolution_name(width, height)
+    reference_name = f"{roi_name}_2k" if resolution == "2k" and f"{roi_name}_2k" in TRIGGER_ROIS_FHD else roi_name
+    rect = TRIGGER_ROIS_FHD.get(reference_name)
+    if rect is None:
+        return None
+    reference_resolution = "2k" if reference_name.endswith("_2k") else "fullhd"
+    return scale_rect(rect, width, height, reference_resolution=reference_resolution)
+
+
 def fish_roi_for_resolution(width: int, height: int) -> Rect:
-    return FISH_ROI_2K if resolution_name(width, height) == "2k" else FISH_ROI_FHD
+    return scale_rect_for_resolution(FISH_ROI_FHD, FISH_ROI_2K, width, height)
 
 
 def garbage_roi_for_resolution(width: int, height: int) -> Rect:
-    return GARBAGE_ROI_2K if resolution_name(width, height) == "2k" else GARBAGE_ROI_FHD
+    return scale_rect_for_resolution(GARBAGE_ROI_FHD, GARBAGE_ROI_2K, width, height)
 
 
 def inventory_roi_for_resolution(width: int, height: int) -> Rect:
-    return INVENTORY_ROI_2K if resolution_name(width, height) == "2k" else INVENTORY_ROI_FHD
+    return scale_rect_for_resolution(INVENTORY_ROI_FHD, INVENTORY_ROI_2K, width, height)
 
 
 def food_check_roi_for_resolution(width: int, height: int) -> Rect:
-    return FOOD_CHECK_ROI_2K if resolution_name(width, height) == "2k" else FOOD_CHECK_ROI_FHD
+    return scale_rect_for_resolution(FOOD_CHECK_ROI_FHD, FOOD_CHECK_ROI_2K, width, height)
 
 
 def thirst_check_roi_for_resolution(width: int, height: int) -> Rect:
-    return THIRST_CHECK_ROI_2K if resolution_name(width, height) == "2k" else THIRST_CHECK_ROI_FHD
+    return scale_rect_for_resolution(THIRST_CHECK_ROI_FHD, THIRST_CHECK_ROI_2K, width, height)
 
 
 def casting_roi_for_resolution(width: int, height: int) -> Rect:
-    return CASTING_ROI_2K if resolution_name(width, height) == "2k" else CASTING_ROI_FHD
+    return scale_rect_for_resolution(CASTING_ROI_FHD, CASTING_ROI_2K, width, height)
 
 
 def hooking_rois_for_resolution(width: int, height: int) -> tuple[Rect, Rect]:
-    if resolution_name(width, height) == "2k":
-        return HOOKING_RED_ROI_2K, HOOKING_BUBLES_ROI_2K
-    return HOOKING_RED_ROI_FHD, HOOKING_BUBLES_ROI_FHD
+    return (
+        scale_rect_for_resolution(HOOKING_RED_ROI_FHD, HOOKING_RED_ROI_2K, width, height),
+        scale_rect_for_resolution(HOOKING_BUBLES_ROI_FHD, HOOKING_BUBLES_ROI_2K, width, height),
+    )
