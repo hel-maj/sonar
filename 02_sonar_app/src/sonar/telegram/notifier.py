@@ -236,7 +236,7 @@ class NotificationManager:
 
     @staticmethod
     def _menu_reply_markup() -> dict[str, Any]:
-        return {"inline_keyboard": [[{"text": "📋 Меню", "callback_data": "menu:main"}]]}
+        return {"inline_keyboard": [[{"text": "📋 Меню", "callback_data": "menu:main:new"}]]}
 
     def _send_unavailable(self, chat_id: int, feature: str, *, message_id: int | None = None) -> None:
         self._send_or_edit_message(
@@ -538,7 +538,9 @@ class NotificationManager:
             data = str(query.get("data") or "")
             callback_id = str(query.get("id") or "")
             self._answer_callback(callback_id)
-            if data == "menu:main":
+            if data == "menu:main:new":
+                self._send_menu(chat_id)
+            elif data == "menu:main":
                 self._send_menu(chat_id, message_id=message_id)
             elif data == "menu:notifications":
                 self._send_notifications(chat_id, message_id=message_id)

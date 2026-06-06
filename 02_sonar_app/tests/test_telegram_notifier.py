@@ -252,7 +252,7 @@ def test_fishing_start_stop_notifications_include_menu_button(monkeypatch):
     assert len(send_messages) == 2
     for _method, kwargs in send_messages:
         keyboard = kwargs["json"]["reply_markup"]["inline_keyboard"]
-        assert keyboard == [[{"text": "📋 Меню", "callback_data": "menu:main"}]]
+        assert keyboard == [[{"text": "📋 Меню", "callback_data": "menu:main:new"}]]
 
 
 def test_fishing_stop_photo_notification_includes_menu_button(monkeypatch):
@@ -271,7 +271,33 @@ def test_fishing_stop_photo_notification_includes_menu_button(monkeypatch):
 
     photo_call = next(call for call in calls if call[0] == "sendPhoto")
     reply_markup = json.loads(photo_call[1]["data"]["reply_markup"])
-    assert reply_markup == {"inline_keyboard": [[{"text": "📋 Меню", "callback_data": "menu:main"}]]}
+    assert reply_markup == {"inline_keyboard": [[{"text": "📋 Меню", "callback_data": "menu:main:new"}]]}
+
+
+def test_notification_menu_button_sends_new_menu_message(monkeypatch):
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._handle_update(
+        {
+            "update_id": 1,
+            "callback_query": {
+                "id": "cb",
+                "data": "menu:main:new",
+                "message": {"chat": {"id": 1}, "message_id": 10},
+            },
+        }
+    )
+
+    methods = [method for method, _kwargs in calls]
+    assert "sendMessage" in methods
+    assert "editMessageText" not in methods
 
 
 def test_stream_menu_shows_active_link_and_area_switch(monkeypatch):
