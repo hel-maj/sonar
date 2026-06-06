@@ -144,6 +144,9 @@ class ItemInfoParser:
         lines = [line for line in lines if line]
         if not lines:
             return ParsedItemInfo(text="")
+        title_index = cls._first_title_index(lines)
+        if title_index > 0:
+            lines = lines[title_index:]
         title = cls._normalize_category_title(ItemInfoDetector._clean_title(lines[0]))
         labeled = cls._labeled_values(lines)
         item_name = cls._extract_item_name(title, lines)
@@ -197,6 +200,21 @@ class ItemInfoParser:
                 fallback_lines=lines,
             ),
         )
+
+    @classmethod
+    def _first_title_index(cls, lines: list[str]) -> int:
+        for index, line in enumerate(lines):
+            cleaned = ItemInfoDetector._clean_title(line)
+            if not cleaned or cls._is_metadata_line(cleaned) or cls._is_noise_line(cleaned):
+                continue
+            if ItemInfoDetector._suspicious_title(cleaned) or ItemInfoDetector._looks_like_leading_ocr_artifact(cleaned):
+                continue
+            if re.search(r"[><|\[\]{}]", cleaned):
+                continue
+            letters = sum(1 for char in cleaned if char.isalpha())
+            if letters >= 3:
+                return index
+        return 0
 
     @staticmethod
     def _clean_line(line: str) -> str:
@@ -791,7 +809,8 @@ class ItemInfoDetector:
         text_lines = self._ocr_lines(pytesseract, self._text_crop(frame, rect), region="full")
         title_from_title = self._extract_title(title_lines)
         title_from_text = self._extract_title(text_lines)
-        title = title_from_text if title_from_text and self._suspicious_title(title_from_title) else title_from_title or title_from_text
+        title_is_bad = self._suspicious_title(title_from_title) or self._looks_like_leading_ocr_artifact(title_from_title)
+        title = title_from_text if title_from_text and title_is_bad else title_from_title or title_from_text
         weight = self._extract_weight(weight_lines) or self._extract_weight(text_lines)
         title_group = [title] if title else []
         merged_lines = self._merge_ocr_lines(title_group, text_lines, title_lines, weight_lines)
@@ -811,6 +830,18 @@ class ItemInfoDetector:
         if not cyrillic and " " in title and (re.search(r"[a-z]", title) or re.search(r"\d", title)):
             return True
         return False
+
+    @staticmethod
+    def _looks_like_leading_ocr_artifact(title: str) -> bool:
+        tokens = title.split()
+        if not tokens or len(tokens) > 8:
+            return False
+        digits = sum(1 for char in title if char.isdigit())
+        if digits < 2:
+            return False
+        latin_letters = sum(1 for char in title if char.isascii() and char.isalpha())
+        non_ascii_letters = sum(1 for char in title if not char.isascii() and char.isalpha())
+        return latin_letters >= 3 and 0 < non_ascii_letters <= 4
 
     @staticmethod
     def _merge_ocr_lines(*groups: list[str]) -> list[str]:
@@ -1238,7 +1269,7 @@ class ItemInfoDetector:
             return True
         if rect.x >= int(width * 0.70) and rect.height >= int(height * 0.85):
             return True
-        return rect.x <= int(width * 0.24) and rect.y >= int(height * 0.58)
+        return rect.x <= int(width * 0.18) and rect.y >= int(height * 0.58)
 
     @staticmethod
     def _rect_dark_ratio(frame: np.ndarray, rect: Rect) -> float:

@@ -44,6 +44,10 @@ REEL_DEBUG_INTERVAL_SECONDS = 0.10
 STALE_FISH_POSITION_SECONDS = 0.25
 STALE_REELING_INPUT_HOLD_SECONDS = 0.55
 LATERAL_VELOCITY_EPS = 0.65
+PROJECTED_VELOCITY_MIN_EPS = 0.20
+PROJECTED_VELOCITY_MAX_EPS = 0.75
+PROJECTED_VELOCITY_EPS_WEIGHT = 0.02
+FISH_BEHIND_PLAYER_FORWARD_EPS = 1.0
 FISH_POSITION_CHANGE_EPS = 0.00001
 FISH_VELOCITY_NEW_SAMPLE_WEIGHT = 0.8
 DIRECTION_SWITCH_CONFIRM_SECONDS = 0.015
@@ -222,6 +226,8 @@ class MemoryReelingTracker:
         self._blocked_direction_offsets: set[int] = set()
         self._projected_velocity_fish_addr: int | None = None
         self._projected_velocity = 0.0
+        self._projected_velocity_abs_ema = LATERAL_VELOCITY_EPS
+        self._projected_velocity_eps = LATERAL_VELOCITY_EPS
         self._stable_move_sign: int | None = None
         self._last_stable_move_at = 0.0
         self._pending_move_sign: int | None = None
@@ -553,7 +559,13 @@ class MemoryReelingTracker:
                 )
 
         lateral = (x - px) * right[0] + (y - py) * right[1]
-        velocity_along = self.velocity_xy[0] * right[0] + self.velocity_xy[1] * right[1]
+        raw_velocity_along = self.velocity_xy[0] * right[0] + self.velocity_xy[1] * right[1]
+        velocity_along, fish_forward, fish_behind_player = self._orient_projected_velocity_to_fish_side(
+            raw_velocity_along,
+            right,
+            control_player_pos,
+            fish_pos,
+        )
         move_val, move_source, action_eps = self._movement_from_projected_velocity(
             velocity_along=velocity_along,
             fish_addr=self.fish_addr,
@@ -574,7 +586,10 @@ class MemoryReelingTracker:
                 f"vel=({self.velocity_xy[0]:.4f},{self.velocity_xy[1]:.4f}) dist={distance:.3f} "
                 f"heading={fish_heading_x} "
                 f"lateral={lateral:.4f} move={move_val:.4f} eps={action_eps:.4f} "
-                f"source={move_source}/{stable_source} projected_vel={self._projected_velocity:.4f} stale={using_stale_fish_pos} "
+                f"source={move_source}/{stable_source} projected_raw={raw_velocity_along:.4f} "
+                f"projected_vel={self._projected_velocity:.4f} "
+                f"fish_forward={fish_forward:.4f} fish_behind_player={fish_behind_player} "
+                f"projected_eps={self._projected_velocity_eps:.4f} stale={using_stale_fish_pos} "
                 f"player_candidates={self._format_pos_candidates(self.player_addr)} "
                 f"fish_candidates={self._format_pos_candidates(self.fish_addr)}"
             )
@@ -816,6 +831,8 @@ class MemoryReelingTracker:
     def _reset_projected_velocity_tracking(self) -> None:
         self._projected_velocity_fish_addr = None
         self._projected_velocity = 0.0
+        self._projected_velocity_abs_ema = LATERAL_VELOCITY_EPS
+        self._projected_velocity_eps = LATERAL_VELOCITY_EPS
 
     def _update_fish_velocity(
         self,
@@ -909,16 +926,48 @@ class MemoryReelingTracker:
         if fish_addr is None or self._projected_velocity_fish_addr != fish_addr:
             self._projected_velocity_fish_addr = fish_addr
             self._projected_velocity = 0.0
+            self._projected_velocity_abs_ema = LATERAL_VELOCITY_EPS
+            self._projected_velocity_eps = LATERAL_VELOCITY_EPS
             return 0.0, "motion_warmup", DIRECTION_EPS
         if not motion_updated:
             return 0.0, "wait_fish_motion", DIRECTION_EPS
 
         self._projected_velocity = velocity_along
-        if velocity_along > LATERAL_VELOCITY_EPS:
+        self._projected_velocity_abs_ema = (
+            self._projected_velocity_abs_ema * (1.0 - PROJECTED_VELOCITY_EPS_WEIGHT)
+            + abs(velocity_along) * PROJECTED_VELOCITY_EPS_WEIGHT
+        )
+        self._projected_velocity_eps = max(
+            PROJECTED_VELOCITY_MIN_EPS,
+            min(PROJECTED_VELOCITY_MAX_EPS, self._projected_velocity_abs_ema),
+        )
+        if velocity_along > self._projected_velocity_eps:
             return -DIRECTION_MOVE, "reel_against_right_motion", DIRECTION_EPS
-        if velocity_along < -LATERAL_VELOCITY_EPS:
+        if velocity_along < -self._projected_velocity_eps:
             return DIRECTION_MOVE, "reel_against_left_motion", DIRECTION_EPS
         return 0.0, "wait_fish_motion", DIRECTION_EPS
+
+    @staticmethod
+    def _fish_forward_distance(
+        right: tuple[float, float],
+        player_pos: tuple[float, float, float],
+        fish_pos: tuple[float, float, float],
+    ) -> float:
+        forward = (-right[1], right[0])
+        return (fish_pos[0] - player_pos[0]) * forward[0] + (fish_pos[1] - player_pos[1]) * forward[1]
+
+    @staticmethod
+    def _orient_projected_velocity_to_fish_side(
+        velocity_along: float,
+        right: tuple[float, float],
+        player_pos: tuple[float, float, float],
+        fish_pos: tuple[float, float, float],
+    ) -> tuple[float, float, bool]:
+        fish_forward = MemoryReelingTracker._fish_forward_distance(right, player_pos, fish_pos)
+        fish_behind_player = fish_forward < -FISH_BEHIND_PLAYER_FORWARD_EPS
+        if fish_behind_player:
+            return -velocity_along, fish_forward, True
+        return velocity_along, fish_forward, False
 
     def _reject_current_fish(
         self,

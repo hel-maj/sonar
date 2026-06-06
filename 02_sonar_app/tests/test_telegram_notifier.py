@@ -655,11 +655,14 @@ def test_caught_fish_notification_sends_photo_with_caption(monkeypatch):
 
     monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
 
-    manager.notify_caught_fish("Рустер", 2.17, "Хороший улов", 10, None, SessionTotals(0, 1, 2.17, 0, 0, 100, 100), image_bytes=b"png")
+    manager.notify_caught_fish("Рустер", 2.17, "Хороший улов", 10, None, SessionTotals(0, 3, 5.5, 1, 2.0, 100, 100), image_bytes=b"png")
 
     photo_call = next(call for call in calls if call[0] == "sendPhoto")
     assert photo_call[1]["files"]["photo"][1] == b"png"
-    assert "Рустер" in photo_call[1]["data"]["caption"]
+    caption = photo_call[1]["data"]["caption"]
+    assert "Рустер" in caption
+    assert "📦 <b>Всего:</b> 5.5 кг · 3 выловов" in caption
+    assert "📦 <b>Всего оставлено:</b> 3.5 кг · 2 выловов" in caption
 
 
 def test_caught_fish_notification_does_not_promote_record_quality(monkeypatch):

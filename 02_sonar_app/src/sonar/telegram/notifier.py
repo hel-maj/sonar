@@ -1413,6 +1413,7 @@ class NotificationManager:
             lines.append(f"🌊 <b>Статус:</b> {_h(status)}")
         lines.append("")
         lines.append(f"📦 <b>Всего:</b> {_h(format_weight(totals.caught_kg))} · {totals.caught_count} выловов")
+        lines.append(f"📦 <b>Всего оставлено:</b> {_h(format_weight(totals.kept_kg))} · {totals.kept_count} выловов")
         lines.append(f"💰 <b>Доход:</b> от {_h(format_money(totals.earned_min))}")
         if xp_current is not None and xp_total is not None:
             lines.append(f"⭐ <b>Опыт:</b> {xp_current} / {xp_total}")

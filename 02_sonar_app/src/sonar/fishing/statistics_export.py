@@ -36,7 +36,7 @@ def write_stats_csv(path: Path, stats: FishingSessionStats, *, app_name: str, bu
         writer.writerow(["Общая статистика"])
         writer.writerow(["Время рыбалки", format_duration(totals.duration_seconds)])
         writer.writerow(["Поймано", format_catch_summary(totals.caught_count, totals.caught_kg)])
-        writer.writerow(["Отпущено", format_catch_summary(totals.released_count, totals.released_kg)])
+        writer.writerow(["Оставлено", format_catch_summary(totals.kept_count, totals.kept_kg)])
         writer.writerow(["Общий вес", format_weight(totals.kept_kg)])
         writer.writerow(["Доход", format_money_range(totals.earned_min, totals.earned_max)])
         writer.writerow(["Доход в час", format_money_range(totals.earned_per_hour_min, totals.earned_per_hour_max)])
@@ -47,13 +47,13 @@ def write_stats_csv(path: Path, stats: FishingSessionStats, *, app_name: str, bu
             writer.writerow([item.label, item.count, f"{item.percent:.1f}%"])
         writer.writerow([])
         writer.writerow(["Статистика по рыбе"])
-        writer.writerow(["Рыба", "Поймано", "Отпущено", "Цена", "Своя цена за 1000", "Доход"])
+        writer.writerow(["Рыба", "Поймано", "Оставлено", "Цена", "Своя цена за 1000", "Доход"])
         for row in rows:
             writer.writerow(
                 [
                     row.stat.name,
                     format_catch_summary(row.stat.caught_count, row.stat.caught_kg),
-                    format_catch_summary(row.stat.released_count, row.stat.released_kg),
+                    format_catch_summary(row.stat.kept_count, row.stat.kept_kg),
                     format_base_price(row.base_price),
                     f"{row.custom_price:g}" if row.custom_price is not None else "",
                     format_money_range(row.earned_min, row.earned_max),

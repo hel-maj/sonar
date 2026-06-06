@@ -83,6 +83,8 @@ def make_tracker(
     tracker._blocked_direction_offsets = set()
     tracker._projected_velocity_fish_addr = None
     tracker._projected_velocity = 0.0
+    tracker._projected_velocity_abs_ema = reeling_module.LATERAL_VELOCITY_EPS
+    tracker._projected_velocity_eps = reeling_module.LATERAL_VELOCITY_EPS
     tracker._stable_move_sign = None
     tracker._last_stable_move_at = 0.0
     tracker._pending_move_sign = None
@@ -597,6 +599,94 @@ def test_projected_left_motion_reels_right() -> None:
 
     assert move_val == 1.0
     assert source == "reel_against_left_motion"
+
+
+def test_projected_velocity_flips_when_fish_is_behind_player() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=None)
+    tracker._projected_velocity_fish_addr = FISH
+    velocity_along, fish_forward, fish_behind_player = (
+        MemoryReelingTracker._orient_projected_velocity_to_fish_side(
+            velocity_along=1.2,
+            right=(1.0, 0.0),
+            player_pos=(0.0, 0.0, 0.0),
+            fish_pos=(0.0, -10.0, 0.0),
+        )
+    )
+
+    move_val, source, _ = tracker._movement_from_projected_velocity(
+        velocity_along=velocity_along,
+        fish_addr=FISH,
+        using_stale_fish_pos=False,
+        motion_updated=True,
+    )
+
+    assert fish_forward < 0.0
+    assert fish_behind_player
+    assert move_val == 1.0
+    assert source == "reel_against_left_motion"
+
+
+def test_projected_velocity_keeps_front_rule_when_fish_is_side_on() -> None:
+    velocity_along, fish_forward, fish_behind_player = (
+        MemoryReelingTracker._orient_projected_velocity_to_fish_side(
+            velocity_along=1.2,
+            right=(1.0, 0.0),
+            player_pos=(0.0, 0.0, 0.0),
+            fish_pos=(10.0, 0.0, 0.0),
+        )
+    )
+
+    assert fish_forward == 0.0
+    assert not fish_behind_player
+    assert velocity_along == 1.2
+
+
+def test_projected_velocity_deadband_avoids_flip_for_barely_behind_side_on_fish() -> None:
+    velocity_along, fish_forward, fish_behind_player = (
+        MemoryReelingTracker._orient_projected_velocity_to_fish_side(
+            velocity_along=1.2,
+            right=(1.0, 0.0),
+            player_pos=(0.0, 0.0, 0.0),
+            fish_pos=(10.0, -0.5, 0.0),
+        )
+    )
+
+    assert fish_forward == -0.5
+    assert not fish_behind_player
+    assert velocity_along == 1.2
+
+
+def test_projected_velocity_threshold_adapts_to_slow_sustained_motion() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=None)
+    tracker._projected_velocity_fish_addr = FISH
+    tracker._projected_velocity_abs_ema = 0.42
+
+    move_val, source, _ = tracker._movement_from_projected_velocity(
+        velocity_along=0.50,
+        fish_addr=FISH,
+        using_stale_fish_pos=False,
+        motion_updated=True,
+    )
+
+    assert move_val == -1.0
+    assert source == "reel_against_right_motion"
+    assert tracker._projected_velocity_eps < reeling_module.LATERAL_VELOCITY_EPS
+
+
+def test_projected_velocity_threshold_filters_medium_motion_after_fast_fish() -> None:
+    tracker = make_tracker(entity_hash=FISH_MODEL_HASH, direction=None)
+    tracker._projected_velocity_fish_addr = FISH
+    tracker._projected_velocity_abs_ema = reeling_module.PROJECTED_VELOCITY_MAX_EPS
+
+    move_val, source, _ = tracker._movement_from_projected_velocity(
+        velocity_along=0.60,
+        fish_addr=FISH,
+        using_stale_fish_pos=False,
+        motion_updated=True,
+    )
+
+    assert move_val == 0.0
+    assert source == "wait_fish_motion"
 
 
 def test_duplicate_position_keeps_velocity_until_next_game_update() -> None:

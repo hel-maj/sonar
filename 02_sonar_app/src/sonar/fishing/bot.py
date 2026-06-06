@@ -28,7 +28,7 @@ from sonar.core.sounds import play_sound
 from sonar.core.events import UiEventMessage, event_bus
 from sonar.core.state import BotPhase, BotState
 from sonar.fishing.catch_screen import CatchScreenDetector, CatchScreenResult
-from sonar.fishing.constants import BOT_DELAYS, PROCESS_NAME, TRIGGER_ROIS_FHD, resolution_name
+from sonar.fishing.constants import BOT_DELAYS, PROCESS_NAME, frame_scale, resolution_name, template_scales_for_frame
 from sonar.fishing.casting_a_fishing_rod import GreenPixelMonitor, create_monitor_for_frame as create_casting_monitor
 from sonar.fishing.fish_names import fish_display_name, fish_id_from_display
 from sonar.fishing.garbage_disposal import GarbageDisposal
@@ -1567,24 +1567,54 @@ class FishingBot:
     def _has_pending_catch(self) -> bool:
         return bool(self._last_catch_result and self._last_catch_result.visible)
 
+    @staticmethod
+    def _catch_result_needs_refresh(result: CatchScreenResult) -> bool:
+        return result.visible and result.fish_id is None
+
+    @staticmethod
+    def _catch_text_score(result: CatchScreenResult) -> int:
+        return sum(1 for char in (result.fish_text or "") if char.isalnum())
+
+    @classmethod
+    def _is_better_catch_result(
+        cls,
+        candidate: CatchScreenResult,
+        current: CatchScreenResult | None,
+    ) -> bool:
+        if not candidate.visible:
+            return False
+        if current is None:
+            return True
+        if candidate.fish_id and not current.fish_id:
+            return True
+        if candidate.fish_id == current.fish_id and candidate.fish_confidence > current.fish_confidence:
+            return True
+        if not candidate.fish_id and not current.fish_id and cls._catch_text_score(candidate) > cls._catch_text_score(current):
+            return True
+        return candidate.weight_kg is not None and current.weight_kg is None
+
     def _current_catch_result(self, timeout: float = 0.0) -> CatchScreenResult | None:
-        if self._last_catch_result and self._last_catch_result.visible:
-            return self._last_catch_result
+        fallback = self._last_catch_result if self._last_catch_result and self._last_catch_result.visible else None
+        if fallback is not None and not self._catch_result_needs_refresh(fallback):
+            return fallback
         deadline = time.time() + timeout
-        while time.time() <= deadline and not self._stop_event.is_set():
+        while not self._stop_event.is_set():
             frame = self.capture.capture()
             if self.game_menu_detector.is_open(frame):
                 self._close_game_menu_if_open(frame)
-                return None
+                return fallback
             result = self.catch_detector.detect(frame)
             if result.visible:
-                self._last_catch_result = result
-                self._save_catch_panel_snapshot(frame, result)
-                return result
-            if timeout <= 0:
+                if self._is_better_catch_result(result, fallback):
+                    self._last_catch_result = result
+                    self._save_catch_panel_snapshot(frame, result)
+                    fallback = result
+                if not self._catch_result_needs_refresh(result):
+                    return result
+            if timeout <= 0 or time.time() >= deadline:
                 break
             self._sleep(CATCH_SCREEN_POLL_SECONDS)
-        return None
+        return fallback
 
     def _probe_catch_screen(self) -> bool:
         now = time.time()
@@ -2725,16 +2755,17 @@ class FishingBot:
         for name, filename, threshold in template_specs:
             template = load_template(self.trigger_monitor.resource_dir / "triger" / filename)
             matcher = TemplateMatcher(threshold)
+            template_resolution = "2k" if "2k" in filename else "fullhd"
             match = matcher.find_best_scaled(
                 frame,
                 template,
                 roi=roi,
                 name=name,
-                scales=self._storage_template_scales(width, height),
+                scales=self._storage_template_scales(width, height, template_resolution),
             )
             if match is None:
                 continue
-            if not self._is_storage_click_safe(match, anchor):
+            if not self._is_storage_click_safe(match, anchor, width, height):
                 self._log(f"Fish storage screenshot candidate rejected: {name} ({match.confidence:.2f})")
                 continue
             self._click_match(match)
@@ -2745,23 +2776,27 @@ class FishingBot:
         return False
 
     @staticmethod
-    def _is_storage_click_safe(match: TemplateMatch, anchor: TemplateMatch) -> bool:
-        return abs(match.x - anchor.x) <= 320 and abs(match.y - anchor.y) <= 420
+    def _is_storage_click_safe(match: TemplateMatch, anchor: TemplateMatch, width: int = 1920, height: int = 1080) -> bool:
+        scale = frame_scale(width, height)
+        return abs(match.x - anchor.x) <= int(round(320 * scale)) and abs(match.y - anchor.y) <= int(round(420 * scale))
 
     @staticmethod
     def _storage_selector_roi(anchor: TemplateMatch, width: int, height: int) -> Rect:
-        x = max(anchor.x - 420, 0)
-        y = max(anchor.y - 360, 0)
-        w = min(700, width - x)
-        h = min(520, height - y)
+        scale = frame_scale(width, height)
+        x = max(anchor.x - int(round(420 * scale)), 0)
+        y = max(anchor.y - int(round(360 * scale)), 0)
+        w = min(int(round(700 * scale)), width - x)
+        h = min(int(round(520 * scale)), height - y)
         return Rect(x, y, w, h)
 
     @staticmethod
-    def _storage_template_scales(width: int, height: int) -> tuple[float, ...]:
-        base = ((width / 1920) + (height / 1080)) / 2.0
-        values = {round(base * factor, 2) for factor in (0.70, 0.82, 0.92, 1.0, 1.08, 1.20, 1.38)}
-        values.add(1.0)
-        return tuple(sorted(value for value in values if 0.45 <= value <= 2.5))
+    def _storage_template_scales(width: int, height: int, template_resolution: str = "fullhd") -> tuple[float, ...]:
+        return template_scales_for_frame(
+            width,
+            height,
+            template_resolution,
+            factors=(0.70, 0.82, 0.92, 1.0, 1.08, 1.20, 1.38),
+        )
 
     @staticmethod
     def _best_storage_option(matches: list[TemplateMatch], anchor: TemplateMatch) -> TemplateMatch:

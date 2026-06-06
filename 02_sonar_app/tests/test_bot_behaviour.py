@@ -1642,6 +1642,44 @@ def test_catch_screen_text_overrides_reeling_image_guess():
     assert not any("Улов: рыба=Красный горбыль" in log for log in logs)
 
 
+def test_current_catch_result_refreshes_cached_unknown_fish():
+    bot = FishingBot.__new__(FishingBot)
+    stale = CatchScreenResult(
+        True,
+        fish_text="ин Ш",
+        fish_confidence=0.0,
+        weight_kg=3.53,
+        weight_text="3.537",
+    )
+    refreshed = CatchScreenResult(
+        True,
+        fish_id="marlin",
+        fish_confidence=0.95,
+        fish_text="Марлин",
+        weight_kg=3.53,
+        weight_text="3.53",
+    )
+    snapshots: list[CatchScreenResult] = []
+
+    class Detector:
+        def detect(self, frame):
+            return refreshed
+
+    bot._last_catch_result = stale
+    bot._stop_event = threading.Event()
+    bot.capture = DummyCapture()
+    bot.game_menu_detector = ClosedDetector()
+    bot.catch_detector = Detector()
+    bot._sleep = lambda _seconds: None
+    bot._save_catch_panel_snapshot = lambda _frame, result: snapshots.append(result)
+
+    result = bot._current_catch_result(timeout=0.1)
+
+    assert result is refreshed
+    assert bot._last_catch_result is refreshed
+    assert snapshots == [refreshed]
+
+
 def test_catch_snapshot_wrapper_accepts_crop_before_result_click(monkeypatch):
     bot = FishingBot.__new__(FishingBot)
     clicks: list[object] = []

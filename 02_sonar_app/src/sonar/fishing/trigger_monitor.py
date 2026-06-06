@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from sonar.fishing.constants import TRIGGER_ROIS_FHD, resolution_name
+from sonar.fishing.constants import frame_scale, resolution_name, template_scales_for_frame, trigger_roi_for_resolution
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
 
@@ -62,14 +62,24 @@ class TriggerMonitor:
             self.load_templates(res)
         detections: dict[str, TemplateMatch] = {}
         for name, info in self.templates.items():
-            roi_name = str(info["roi"])
-            if res == "2k" and f"{roi_name}_2k" in TRIGGER_ROIS_FHD:
-                roi_name = f"{roi_name}_2k"
-            roi = TRIGGER_ROIS_FHD.get(roi_name)
+            roi = trigger_roi_for_resolution(str(info["roi"]), width, height)
             matcher = self.matcher
             if info.get("threshold") is not None:
                 matcher = TemplateMatcher(float(info["threshold"]))
-            match = matcher.find_best(screenshot, info["image"], roi=roi, name=name)  # type: ignore[arg-type]
+            match = matcher.find_best_scaled(
+                screenshot,
+                info["image"],  # type: ignore[arg-type]
+                roi=roi,
+                name=name,
+                scales=self._template_scales(width, height, res),
+            )
             if match:
                 detections[name] = match
         return detections
+
+    @staticmethod
+    def _template_scales(width: int, height: int, template_resolution: str) -> tuple[float, ...]:
+        base = frame_scale(width, height, reference_resolution=template_resolution)
+        if abs(base - 1.0) <= 0.02:
+            return (1.0,)
+        return template_scales_for_frame(width, height, template_resolution)

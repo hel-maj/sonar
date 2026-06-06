@@ -14,6 +14,7 @@ from sonar.fishing.constants import (
     food_check_roi_for_resolution,
     inventory_roi_for_resolution,
     resolution_name,
+    template_scales_for_frame,
     thirst_check_roi_for_resolution,
 )
 from sonar.fishing.item_info import ItemInfo, ItemInfoDetector
@@ -80,6 +81,7 @@ class MealSystem:
     threshold: float = MEAL_MATCH_THRESHOLD
     input_controller: InputController = field(default_factory=InputController)
     templates: dict[str, np.ndarray] = field(default_factory=dict)
+    loaded_resolution: str | None = None
 
     def __post_init__(self) -> None:
         self.capture = WindowCapture(self.process_name)
@@ -98,9 +100,17 @@ class MealSystem:
     def load_templates(self, resolution: str) -> None:
         meal_dir = self.resource_dir / "meal"
         self.templates = {name: load_template(meal_dir / files[resolution]) for name, files in MEAL_FILES.items()}
+        self.loaded_resolution = resolution
 
     def find_template(self, screenshot: np.ndarray, template: np.ndarray, roi: Rect | None = None):
-        return self.matcher.find_best(screenshot, template, roi=roi)
+        height, width = screenshot.shape[:2]
+        template_resolution = self.loaded_resolution or resolution_name(width, height)
+        return self.matcher.find_best_scaled(
+            screenshot,
+            template,
+            roi=roi,
+            scales=template_scales_for_frame(width, height, template_resolution),
+        )
 
     def check_food_full(self, screenshot: np.ndarray) -> bool:
         height, width = screenshot.shape[:2]
@@ -269,7 +279,15 @@ class MealSystem:
             template = self.templates.get(name)
             if template is None:
                 continue
-            match = self.matcher.find_best(screenshot, template, roi=roi, name=name)
+            height, width = screenshot.shape[:2]
+            template_resolution = self.loaded_resolution or resolution_name(width, height)
+            match = self.matcher.find_best_scaled(
+                screenshot,
+                template,
+                roi=roi,
+                name=name,
+                scales=template_scales_for_frame(width, height, template_resolution),
+            )
             if match is not None:
                 return MealItemMatch(name, match, source)
         return None
