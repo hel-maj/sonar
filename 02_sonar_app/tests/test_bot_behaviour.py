@@ -94,7 +94,8 @@ class SequenceTriggerMonitor:
     def __init__(self, steps: list[dict[str, DummyMatch]]) -> None:
         self.steps = iter(steps)
 
-    def find_detections(self, frame) -> dict[str, DummyMatch]:
+    def find_detections(self, frame, names=None) -> dict[str, DummyMatch]:
+        del names
         return next(self.steps, {})
 
 
@@ -323,7 +324,8 @@ def test_storage_screenshot_click_uses_selector_anchor_when_start_is_temporarily
     class TriggerMonitor:
         resource_dir = tmp_path
 
-        def find_detections(self, _frame):
+        def find_detections(self, _frame, names=None):
+            del names
             return {}
 
     class Matcher:
@@ -392,6 +394,43 @@ def test_start_stage_uses_casting_preparation_instead_of_direct_press():
     bot._brain_loop()
 
     assert calls == ["casting"]
+
+
+def test_get_triggers_throttles_secondary_template_searches():
+    class Monitor:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, ...]] = []
+
+        def find_detections(self, _frame, names=None):
+            names_tuple = tuple(names or ())
+            self.calls.append(names_tuple)
+            if names_tuple == bot_module.FISHING_STAGE_TRIGGER_NAMES:
+                return {"start1": DummyMatch()}
+            if names_tuple == bot_module.SECONDARY_TRIGGER_NAMES:
+                return {"thirst": DummyMatch()}
+            return {}
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.capture = DummyCapture()
+    bot.trigger_monitor = Monitor()
+    bot.state = BotState()
+    bot._last_trigger_matches = {}
+    bot._last_triggers = {}
+    bot._last_secondary_trigger_at = 0.0
+    bot._log = lambda message: None
+
+    first = bot._get_triggers()
+    second = bot._get_triggers()
+
+    assert "start1" in first
+    assert "thirst" in first
+    assert "start1" in second
+    assert "thirst" not in second
+    assert bot.trigger_monitor.calls == [
+        bot_module.FISHING_STAGE_TRIGGER_NAMES,
+        bot_module.SECONDARY_TRIGGER_NAMES,
+        bot_module.FISHING_STAGE_TRIGGER_NAMES,
+    ]
 
 
 def test_kickstart_does_not_cast_after_pending_inventory_tasks():
@@ -767,7 +806,7 @@ def test_recover_does_not_move_character_forward():
     bot.input_controller = DummyInput()
     bot._stop_event = threading.Event()
     bot._last_triggers = {}
-    bot._refresh_triggers = lambda: None
+    bot._refresh_triggers = lambda *args, **kwargs: None
     bot._focus_game = lambda: None
     bot._wait_for_start_phase = lambda timeout: True
     bot._log = lambda _message: None
@@ -889,7 +928,7 @@ def test_return_to_fishing_waits_after_inventory_is_closed():
     bot._focus_game = lambda: None
     bot._close_game_menu_if_open = lambda: False
     bot._is_inventory_open = lambda: next(inventory_states)
-    bot._refresh_triggers = lambda: None
+    bot._refresh_triggers = lambda *args, **kwargs: None
     bot._sleep = lambda seconds: events.append(f"sleep:{seconds}")
     bot._log = lambda _message: None
 
@@ -1500,7 +1539,7 @@ def test_trunk_overweight_switches_to_player_storage_before_final_action():
     bot._last_catch_result = None
     bot._last_triggers = {}
     bot._focus_game = lambda: None
-    bot._refresh_triggers = lambda: setattr(bot, "_last_triggers", {})
+    bot._refresh_triggers = lambda *args, **kwargs: setattr(bot, "_last_triggers", {})
     bot._sleep = lambda seconds: None
     entry_reasons: list[str] = []
     bot._press_fishing_entry = lambda reason: entry_reasons.append(reason) or True
@@ -1872,7 +1911,7 @@ def test_run_reeling_module_refuses_to_start_when_current_stage_is_not_reeling()
     bot._stop_event = threading.Event()
     bot._has_pending_catch = lambda: False
     bot._probe_catch_screen = lambda: False
-    bot._refresh_triggers = lambda: None
+    bot._refresh_triggers = lambda *args, **kwargs: None
     bot._publish_stage = lambda label: None
     logs: list[str] = []
     bot._log = logs.append
