@@ -124,6 +124,9 @@ TACKLE_DEPLETION_CONFIRM_DELAY_SECONDS = 0.5
 TACKLE_DEPLETION_CONFIRM_ATTEMPTS = 2
 TACKLE_ACTIVE_STAGE_SCAN_INTERVAL_SECONDS = 6.0
 INVENTORY_OPEN_PAUSE_SECONDS = 1.0
+INVENTORY_STAGE_EXIT_SETTLE_SECONDS = 0.8
+INVENTORY_OPEN_RETRY_DELAY_SECONDS = 0.5
+INVENTORY_OPEN_CONFIRM_TIMEOUT_SECONDS = 4.0
 INVENTORY_CLOSE_PAUSE_SECONDS = 1.5
 REELING_PROBLEM_ACTIONS = frozenset({"target_search", "position_unreadable", "memory_unavailable", "control_error"})
 REELING_KNOWN_INTERRUPTION_TRIGGERS = frozenset(
@@ -275,6 +278,12 @@ class FishingBot:
     def estimated_player_status(self) -> PlayerStatus | None:
         return self._player_status_estimate.estimate()
 
+    def is_stopping(self) -> bool:
+        thread = getattr(self, "_brain_thread", None)
+        return self.state.phase == BotPhase.STOPPING or (
+            thread is not None and thread.is_alive() and not self.state.running
+        )
+
     def request_player_status_scan(self) -> tuple[bool, str]:
         if not self.state.running:
             return False, "Сканирование через инвентарь доступно во время работы бота"
@@ -352,7 +361,7 @@ class FishingBot:
     def start(self, *, skip_license_check: bool = False) -> bool:
         if self.state.running:
             return True
-        if self._brain_thread and self._brain_thread.is_alive():
+        if self.is_stopping():
             self.state.last_error = "Bot is still stopping"
             self._log(self.state.last_error)
             return False
@@ -826,9 +835,15 @@ class FishingBot:
                     else:
                         self._sleep(0.5)
                 else:
-                    self._sleep(0.25)
+                    self._recover_idle_without_tasks()
             except Exception as exc:
                 self._handle_brain_error(exc)
+
+    def _recover_idle_without_tasks(self) -> None:
+        if self._stop_event.is_set():
+            return
+        self._log("Свободно: задач нет, запускаю рыбалку")
+        self._do_casting()
 
     def _handle_brain_error(self, exc: Exception) -> None:
         self.state.last_error = str(exc)
@@ -1459,6 +1474,9 @@ class FishingBot:
         self._reset_active_tackle_scan("start2")
         self._log("Стадия: Подсечка")
         self._focus_game()
+        if getattr(self, "_player_status_scan_requested", False):
+            self._log("Показатели: прерываю ожидание подсечки для сканирования")
+            return False
         deadline = time.time() + 60.0
         last_debug_at = 0.0
         self.hooking_monitor = None
@@ -1478,6 +1496,9 @@ class FishingBot:
         next_stage_check_at = 0.0
         tackle_scanned = False
         while time.time() < deadline and not self._stop_event.is_set():
+            if getattr(self, "_player_status_scan_requested", False):
+                self._log("Показатели: прерываю ожидание подсечки для сканирования")
+                return False
             now = time.time()
             if now >= next_stage_check_at:
                 next_stage_check_at = now + HOOKING_STAGE_CHECK_INTERVAL_SECONDS
@@ -3038,18 +3059,33 @@ class FishingBot:
         if not self._exit_to_idle_before_inventory():
             self._log("Инвентарь: стадия изменилась перед открытием, повторю позже")
             return False
-        self.input_controller.press_key(self.settings.inventory_hotkey)
-        self._log(f"Инвентарь: нажата клавиша {self.settings.inventory_hotkey}")
-        self._sleep(1.0)
-        deadline = time.time() + 4.0
-        while time.time() < deadline and not self._stop_event.is_set():
-            if self._is_inventory_open():
+        for attempt in range(2):
+            self.input_controller.press_key(self.settings.inventory_hotkey)
+            self._log(f"Инвентарь: нажата клавиша {self.settings.inventory_hotkey}")
+            self._sleep(1.0)
+            if self._wait_for_inventory_open():
                 self._log("Стадия: Инвентарь открыт")
                 return True
-            self._sleep(0.12)
+            if attempt == 0 and not self._stop_event.is_set():
+                self._log("Инвентарь не открылся, повторяю через 0.5с")
+                self._sleep(INVENTORY_OPEN_RETRY_DELAY_SECONDS)
+                if self._is_inventory_open():
+                    self._log("Стадия: Инвентарь открыт")
+                    return True
+                if not self._exit_to_idle_before_inventory():
+                    self._log("Инвентарь: стадия изменилась перед повторным открытием, повторю позже")
+                    return False
         self._save_inventory_detection_debug()
         self._inventory_retry_after = time.time() + 8.0
         self._log("Инвентарь не открылся по хоткею")
+        return False
+
+    def _wait_for_inventory_open(self, timeout: float = INVENTORY_OPEN_CONFIRM_TIMEOUT_SECONDS) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline and not self._stop_event.is_set():
+            if self._is_inventory_open():
+                return True
+            self._sleep(0.12)
         return False
 
     def _return_to_fishing(self) -> None:
@@ -3102,7 +3138,8 @@ class FishingBot:
             if time.time() >= next_esc_at:
                 self.input_controller.press_key("esc")
                 self._log("Инвентарь: выхожу из текущей стадии через Esc")
-                self._sleep_random(2.0, 1.0)
+                self._sleep(INVENTORY_STAGE_EXIT_SETTLE_SECONDS)
+                self._sleep_random(1.2, 1.0)
                 next_esc_at = time.time() + 0.2
             self._sleep(0.12)
         self._log("Инвентарь: не удалось выйти в свободную стадию")

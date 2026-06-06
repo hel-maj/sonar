@@ -473,6 +473,41 @@ def test_kickstart_does_not_cast_after_pending_inventory_tasks():
     assert calls == ["inventory"]
 
 
+def test_idle_without_tasks_recovers_fishing_instead_of_sleeping_until_timeout():
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(auto_meal=True)
+    bot.state = BotState(running=True)
+    bot._stop_event = threading.Event()
+    bot._meal_search_disabled_until_restart = False
+    bot._kickstart_requested = False
+    bot.is_paused_for_chat = lambda: False
+    bot._publish_stage = lambda stage: None
+    bot._sleep = lambda seconds: None
+    bot._update_focus_state_notification = lambda: None
+    bot._get_triggers = lambda: {}
+    bot._detect_stage = lambda triggers: None
+    bot._publish_estimated_player_status_if_changed = lambda: None
+    bot._status_indicates_needs_meal = lambda stage: False
+    bot._status_timer_needs_meal = lambda: False
+    bot._stop_if_no_stage_timed_out = lambda stage, needs_meal: False
+    bot._close_game_menu_if_open = lambda: False
+    bot._has_pending_catch = lambda: False
+    bot._probe_catch_screen = lambda: False
+    bot._handle_player_status_scan_request = lambda stage: False
+    bot._should_handle_meal_now = lambda stage, needs_meal: False
+    calls: list[str] = []
+
+    def recover_idle() -> None:
+        calls.append("recover")
+        bot._stop_event.set()
+
+    bot._recover_idle_without_tasks = recover_idle
+
+    bot._brain_loop()
+
+    assert calls == ["recover"]
+
+
 def test_chat_pause_keeps_running_state_and_releases_keys():
     bot = FishingBot.__new__(FishingBot)
     bot.input_controller = DummyInput()
@@ -552,6 +587,21 @@ def test_player_status_scan_request_waits_while_stage_is_reeling():
 
     assert bot._handle_player_status_scan_request("ad") is False
     assert bot._player_status_scan_requested is True
+
+
+def test_hooking_wait_is_interrupted_by_player_status_scan_request():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot._stop_event = threading.Event()
+    bot._player_status_scan_requested = True
+    bot._log_messages = []
+    bot._log = bot._log_messages.append
+    bot._reset_active_tackle_scan = lambda _stage: None
+    bot._focus_game = lambda: None
+
+    assert bot._do_hooking() is False
+    assert bot.state.phase == BotPhase.HOOKING
+    assert any("прерываю ожидание подсечки" in message for message in bot._log_messages)
 
 
 def test_player_status_scan_request_is_queued_when_running():
@@ -845,6 +895,18 @@ def test_non_inventory_brain_error_still_uses_fishing_recovery():
     assert "recover" in calls
 
 
+def test_bot_is_stopping_while_worker_thread_is_still_alive_after_idle_phase():
+    class AliveThread:
+        def is_alive(self) -> bool:
+            return True
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=False, phase=BotPhase.IDLE)
+    bot._brain_thread = AliveThread()
+
+    assert bot.is_stopping() is True
+
+
 def test_inventory_open_waits_before_pressing_hotkey():
     events: list[str] = []
     inventory_states = iter([False, False, True])
@@ -889,6 +951,56 @@ def test_inventory_open_does_not_press_hotkey_when_stage_changes_during_pause():
 
     assert bot._open_inventory() is False
     assert events == ["sleep:1.0"]
+
+
+def test_inventory_open_retries_hotkey_after_short_delay():
+    events: list[str] = []
+    wait_results = [False, True]
+
+    class InputController:
+        def press_key(self, key: str) -> None:
+            events.append(f"key:{key}")
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings()
+    bot.input_controller = InputController()
+    bot._stop_event = threading.Event()
+    bot._focus_game = lambda: None
+    bot._close_game_menu_if_open = lambda: False
+    bot._is_inventory_open = lambda: False
+    bot._exit_to_idle_before_inventory = lambda: events.append("idle") or True
+    bot._sleep = lambda seconds: events.append(f"sleep:{seconds}")
+    bot._wait_for_inventory_open = lambda: wait_results.pop(0)
+    bot._log = lambda _message: None
+
+    assert bot._open_inventory() is True
+    assert events.count("key:i") == 2
+    assert "sleep:0.5" in events
+
+
+def test_exit_to_idle_waits_after_escape_before_rechecking_stage():
+    events: list[str] = []
+    trigger_steps = iter([{"start2": 1.0}, {}])
+
+    class InputController:
+        def press_key(self, key: str) -> None:
+            events.append(f"key:{key}")
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.input_controller = InputController()
+    bot.capture = DummyCapture()
+    bot.catch_detector = DummyCatchDetector()
+    bot._stop_event = threading.Event()
+    bot._last_triggers = {}
+    bot._refresh_triggers = lambda names=None: setattr(bot, "_last_triggers", next(trigger_steps))
+    bot._close_game_menu_if_open = lambda: False
+    bot._is_inventory_open = lambda: False
+    bot._sleep = lambda seconds: events.append(f"sleep:{seconds}")
+    bot._sleep_random = lambda minimum, extra: events.append(f"sleep_random:{minimum}:{extra}")
+    bot._log = lambda _message: None
+
+    assert bot._exit_to_idle_before_inventory(timeout=1.0) is True
+    assert events[:3] == ["key:esc", "sleep:0.8", "sleep_random:1.2:1.0"]
 
 
 def test_failed_inventory_tasks_are_retried_instead_of_casting():
