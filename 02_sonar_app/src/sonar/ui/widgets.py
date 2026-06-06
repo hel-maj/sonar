@@ -100,6 +100,13 @@ QLabel[badge="red"] {
     padding: 3px 8px;
     font-weight: 700;
 }
+QLabel[badge="orange"] {
+    color: #c77700;
+    background: #fff7e6;
+    border-radius: 7px;
+    padding: 3px 8px;
+    font-weight: 700;
+}
 QLabel[badge="gray"] {
     color: #697796;
     background: #f2f5fa;

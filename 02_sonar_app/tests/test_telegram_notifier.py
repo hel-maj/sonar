@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from io import BytesIO
@@ -113,6 +114,25 @@ def test_runtime_gate_blocks_network_and_incoming_callbacks(monkeypatch):
     assert calls == []
 
 
+def test_start_polling_registers_menu_command_for_admin_chat(monkeypatch):
+    calls: list[tuple[str, object]] = []
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+    monkeypatch.setattr(NotificationManager, "_poll_loop", lambda self: None)
+
+    manager.start_polling()
+
+    command_calls = [call for call in calls if call[0] == "setMyCommands"]
+    assert len(command_calls) == 2
+    assert command_calls[0][1]["json"]["commands"][0]["command"] == "menu"
+    assert command_calls[1][1]["json"]["scope"] == {"type": "chat", "chat_id": 1}
+
+
 def test_disabled_setting_blocks_direct_telegram_api_calls(monkeypatch):
     calls: list[tuple[str, object]] = []
     manager = NotificationManager(settings=TelegramSettings(enabled=False, bot_token="token", admin_ids=[1]))
@@ -210,6 +230,74 @@ def test_app_lifecycle_notification_sends_started_before_menu():
     assert "Sonar запущен" in messages[0]
     assert "Меню" in messages[1]
     assert "Sonar выключен" in messages[-1]
+
+
+def test_fishing_start_stop_notifications_include_menu_button(monkeypatch):
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1], notify_start_stop=True)
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    totals = SessionTotals(0, 0, 0.0, 0, 0.0, 0, 0)
+    manager.notify_fishing_started(totals, has_stats=False)
+    manager.notify_fishing_stopped(totals)
+
+    send_messages = [call for call in calls if call[0] == "sendMessage"]
+    assert len(send_messages) == 2
+    for _method, kwargs in send_messages:
+        keyboard = kwargs["json"]["reply_markup"]["inline_keyboard"]
+        assert keyboard == [[{"text": "📋 Меню", "callback_data": "menu:main:new"}]]
+
+
+def test_fishing_stop_photo_notification_includes_menu_button(monkeypatch):
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1], notify_start_stop=True)
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager.notify_fishing_stopped(SessionTotals(0, 0, 0.0, 0, 0.0, 0, 0), image_bytes=b"png")
+
+    photo_call = next(call for call in calls if call[0] == "sendPhoto")
+    reply_markup = json.loads(photo_call[1]["data"]["reply_markup"])
+    assert reply_markup == {"inline_keyboard": [[{"text": "📋 Меню", "callback_data": "menu:main:new"}]]}
+
+
+def test_notification_menu_button_sends_new_menu_message(monkeypatch):
+    manager = NotificationManager(settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]))
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._handle_update(
+        {
+            "update_id": 1,
+            "callback_query": {
+                "id": "cb",
+                "data": "menu:main:new",
+                "message": {"chat": {"id": 1}, "message_id": 10},
+            },
+        }
+    )
+
+    methods = [method for method, _kwargs in calls]
+    assert "sendMessage" in methods
+    assert "editMessageText" not in methods
 
 
 def test_stream_menu_shows_active_link_and_area_switch(monkeypatch):
@@ -662,7 +750,7 @@ def test_caught_fish_notification_sends_photo_with_caption(monkeypatch):
     caption = photo_call[1]["data"]["caption"]
     assert "Рустер" in caption
     assert "📦 <b>Всего:</b> 5.5 кг · 3 выловов" in caption
-    assert "📦 <b>Всего оставлено:</b> 3.5 кг · 2 выловов" in caption
+    assert "📦 <b>Оставлено:</b> 3.5 кг · 2 выловов" in caption
 
 
 def test_caught_fish_notification_does_not_promote_record_quality(monkeypatch):
@@ -969,6 +1057,42 @@ def test_player_status_scan_button_requests_inventory_scan(monkeypatch):
 
     sent_text = [call[1]["json"]["text"] for call in calls if call[0] == "sendMessage"][-1]
     assert "Сканирование показателей добавлено в очередь" in sent_text
+
+    manager.notify_player_status_scan_result(
+        PlayerStatus(
+            food=72,
+            water=64,
+            health=98,
+            inventory_weight=39.5,
+            inventory_weight_max=40.0,
+            source="screenshot",
+        )
+    )
+
+    result_text = [call[1]["json"]["text"] for call in calls if call[0] == "sendMessage"][-1]
+    assert "Показатели просканированы" in result_text
+    assert "Еда" in result_text
+    assert "39.5 / 40" in result_text
+
+
+def test_player_status_scan_failure_is_reported_to_requesting_chat(monkeypatch):
+    manager = NotificationManager(
+        settings=TelegramSettings(enabled=True, bot_token="token", admin_ids=[1]),
+        player_status_scan_callback=lambda: (True, "Сканирование показателей добавлено в очередь"),
+    )
+    calls = []
+
+    def fake_post(self, method, **kwargs):
+        calls.append((method, kwargs))
+        return Response()
+
+    monkeypatch.setattr(NotificationManager, "_api_post", fake_post)
+
+    manager._request_player_status_scan(1)
+    manager.notify_player_status_scan_result(None)
+
+    result_text = [call[1]["json"]["text"] for call in calls if call[0] == "sendMessage"][-1]
+    assert "Данные не прочитаны" in result_text
 
 
 def test_low_inventory_space_notification_respects_setting(monkeypatch):

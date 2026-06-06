@@ -3063,6 +3063,10 @@ class MainWindow(QMainWindow):
 
     def start_bot(self) -> None:
         try:
+            if self._bot_is_stopping():
+                self._log_bot_still_stopping()
+                self._refresh_status_label()
+                return
             if self.bot.state.running:
                 return
             key = self._current_license_key()
@@ -3080,6 +3084,10 @@ class MainWindow(QMainWindow):
 
     def _start_bot_now(self) -> None:
         try:
+            if self._bot_is_stopping():
+                self._log_bot_still_stopping()
+                self._refresh_status_label()
+                return
             if not self._can_start_fishing():
                 self._select_page(self.license_tab)
                 self.status_label.setText("Бот недоступен")
@@ -3095,6 +3103,9 @@ class MainWindow(QMainWindow):
             self.append_log(f"Ошибка запуска: {exc}")
 
     def _start_bot_from_remote(self) -> bool:
+        if self._bot_is_stopping():
+            self._log_bot_still_stopping()
+            return False
         if self.bot.state.running:
             return True
         key = self._current_license_key()
@@ -3113,6 +3124,10 @@ class MainWindow(QMainWindow):
     def stop_bot(self) -> None:
         try:
             self._pending_bot_start_after_license = False
+            if self._bot_is_stopping():
+                self._log_bot_still_stopping()
+                self._refresh_status_label()
+                return
             self.bot.stop_async()
         except Exception as exc:
             self.append_log(f"Ошибка остановки: {exc}")
@@ -3120,10 +3135,39 @@ class MainWindow(QMainWindow):
             self._refresh_status_label()
 
     def toggle_bot(self) -> None:
+        if self._bot_is_stopping():
+            self._log_bot_still_stopping()
+            self._refresh_status_label()
+            return
         if self.bot.state.running:
             self.stop_bot()
         else:
             self.start_bot()
+
+    def _bot_is_stopping(self) -> bool:
+        bot = getattr(self, "bot", None)
+        if bot is None:
+            return False
+        is_stopping = getattr(bot, "is_stopping", None)
+        if callable(is_stopping):
+            return bool(is_stopping())
+        state = getattr(bot, "state", None)
+        thread = getattr(bot, "_brain_thread", None)
+        return getattr(state, "phase", None) == BotPhase.STOPPING or (
+            thread is not None and thread.is_alive() and not getattr(state, "running", False)
+        )
+
+    def _log_bot_still_stopping(self) -> None:
+        message = "Bot is still stopping"
+        try:
+            self.bot.state.last_error = message
+        except Exception:
+            pass
+        log = getattr(getattr(self, "bot", None), "_log", None)
+        if callable(log):
+            log(message)
+            return
+        self.log_bridge.message.emit(message)
 
     @staticmethod
     def _load_win32api() -> ModuleType | None:
@@ -3177,6 +3221,12 @@ class MainWindow(QMainWindow):
         if self._hotkey_suppressed_until_release:
             if not is_down:
                 self._hotkey_suppressed_until_release = False
+            self._hotkey_down = is_down
+            return
+        if self._bot_is_stopping():
+            if is_down and not self._hotkey_down:
+                self._log_bot_still_stopping()
+                self._refresh_status_label()
             self._hotkey_down = is_down
             return
         if is_down and not self._hotkey_down:
@@ -3555,7 +3605,7 @@ class MainWindow(QMainWindow):
         fishing_allowed = self._can_use_feature(FEATURE_FISHING)
         start_allowed = self._can_start_fishing()
         running = bool(start_allowed and self.bot.state.running)
-        stopping = self.bot.state.phase == BotPhase.STOPPING
+        stopping = self._bot_is_stopping()
         self._last_bot_running = running
         if not active_license:
             title = "Лицензия не активна"
@@ -3567,7 +3617,7 @@ class MainWindow(QMainWindow):
             title = "Просмотр"
             description = "Запуск бота недоступен для этой подписки"
         elif stopping:
-            title = "Останавливаем"
+            title = "Остановка"
             description = "Завершаем текущие операции"
         elif running:
             title = "Работает"
@@ -3584,7 +3634,10 @@ class MainWindow(QMainWindow):
         for button in getattr(self, "_stop_buttons", []):
             button.setEnabled(running and not stopping)
         for badge in getattr(self, "_ready_badges", []):
-            if running:
+            if stopping:
+                badge.setText("Остановка")
+                badge.set_tone("orange")
+            elif running:
                 badge.setText("Активен")
                 badge.set_tone("green")
             elif start_allowed:

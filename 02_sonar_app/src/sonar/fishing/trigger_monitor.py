@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import cv2
 import numpy as np
 
-from sonar.fishing.constants import frame_scale, resolution_name, template_scales_for_frame, trigger_roi_for_resolution
+from sonar.fishing.constants import (
+    frame_scale,
+    reference_size_for_resolution,
+    resolution_name,
+    template_scales_for_frame,
+    trigger_roi_for_resolution,
+)
 from sonar.paths import FISHING_RESOURCE_DIR
 from sonar.vision.matching import TemplateMatch, TemplateMatcher, load_template
 
@@ -52,30 +60,62 @@ class TriggerMonitor:
                 }
         self.loaded_resolution = resolution
 
-    def detect(self, screenshot: np.ndarray) -> dict[str, float]:
-        return {name: match.confidence for name, match in self.find_detections(screenshot).items()}
+    def detect(self, screenshot: np.ndarray, names: Iterable[str] | None = None) -> dict[str, float]:
+        return {name: match.confidence for name, match in self.find_detections(screenshot, names=names).items()}
 
-    def find_detections(self, screenshot: np.ndarray) -> dict[str, TemplateMatch]:
+    def find_detections(self, screenshot: np.ndarray, names: Iterable[str] | None = None) -> dict[str, TemplateMatch]:
         height, width = screenshot.shape[:2]
         res = resolution_name(width, height)
         if not self.templates or self.loaded_resolution != res:
             self.load_templates(res)
+        search_frame, scale_x, scale_y = self._normalized_search_frame(screenshot, res)
+        search_height, search_width = search_frame.shape[:2]
+        wanted = set(names) if names is not None else None
+        scales = self._template_scales(search_width, search_height, res)
         detections: dict[str, TemplateMatch] = {}
         for name, info in self.templates.items():
-            roi = trigger_roi_for_resolution(str(info["roi"]), width, height)
+            if wanted is not None and name not in wanted:
+                continue
+            roi = trigger_roi_for_resolution(str(info["roi"]), search_width, search_height)
             matcher = self.matcher
             if info.get("threshold") is not None:
                 matcher = TemplateMatcher(float(info["threshold"]))
             match = matcher.find_best_scaled(
-                screenshot,
+                search_frame,
                 info["image"],  # type: ignore[arg-type]
                 roi=roi,
                 name=name,
-                scales=self._template_scales(width, height, res),
+                scales=scales,
             )
             if match:
-                detections[name] = match
+                detections[name] = self._scale_match(match, scale_x, scale_y)
         return detections
+
+    @staticmethod
+    def _normalized_search_frame(screenshot: np.ndarray, resolution: str) -> tuple[np.ndarray, float, float]:
+        height, width = screenshot.shape[:2]
+        reference_width, reference_height = reference_size_for_resolution(resolution)
+        if width <= int(reference_width * 1.12) and height <= int(reference_height * 1.12):
+            return screenshot, 1.0, 1.0
+        aspect = width / max(1, height)
+        reference_aspect = reference_width / reference_height
+        if abs(aspect - reference_aspect) / reference_aspect > 0.025:
+            return screenshot, 1.0, 1.0
+        resized = cv2.resize(screenshot, (reference_width, reference_height), interpolation=cv2.INTER_AREA)
+        return resized, width / reference_width, height / reference_height
+
+    @staticmethod
+    def _scale_match(match: TemplateMatch, scale_x: float, scale_y: float) -> TemplateMatch:
+        if scale_x == 1.0 and scale_y == 1.0:
+            return match
+        return TemplateMatch(
+            x=int(round(match.x * scale_x)),
+            y=int(round(match.y * scale_y)),
+            confidence=match.confidence,
+            width=max(1, int(round(match.width * scale_x))),
+            height=max(1, int(round(match.height * scale_y))),
+            name=match.name,
+        )
 
     @staticmethod
     def _template_scales(width: int, height: int, template_resolution: str) -> tuple[float, ...]:

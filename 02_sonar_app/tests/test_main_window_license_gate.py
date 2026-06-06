@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from sonar.license.client import LicenseStatus
 from sonar.license.context import LicenseContext
 from sonar.license.features import FEATURE_FISHING, FEATURE_FISHING_BOT, FEATURE_STREAM_CHAT, FEATURE_TELEGRAM
+from sonar.core.state import BotPhase
 from sonar.streaming.chat import ChatActionResult, ChatDetection
 from sonar.license.startup_block import StartupBlockStatus
 from sonar.ui.main_window import MainWindow, startup_block_allows_launch
@@ -123,6 +124,7 @@ def test_stop_button_cancels_pending_start_and_requests_async_cleanup():
     events: list[str] = []
     window = SimpleNamespace(
         _pending_bot_start_after_license=True,
+        _bot_is_stopping=lambda: False,
         bot=SimpleNamespace(stop_async=lambda: events.append("stop_async")),
         append_log=lambda message: events.append(message),
         _refresh_status_label=lambda: events.append("refresh"),
@@ -132,6 +134,84 @@ def test_stop_button_cancels_pending_start_and_requests_async_cleanup():
 
     assert window._pending_bot_start_after_license is False
     assert events == ["stop_async", "refresh"]
+
+
+def test_status_label_disables_controls_and_shows_stopping_badge():
+    class Label:
+        def __init__(self) -> None:
+            self.text = ""
+
+        def setText(self, text: str) -> None:
+            self.text = text
+
+    class Button:
+        def __init__(self) -> None:
+            self.enabled = True
+
+        def setEnabled(self, enabled: bool) -> None:
+            self.enabled = enabled
+
+    class Badge(Label):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tone = ""
+
+        def set_tone(self, tone: str) -> None:
+            self.tone = tone
+
+    status = Label()
+    description = Label()
+    start_buttons = [Button(), Button()]
+    stop_buttons = [Button(), Button()]
+    badge = Badge()
+    window = SimpleNamespace(
+        bot=SimpleNamespace(
+            state=SimpleNamespace(running=False, phase=BotPhase.IDLE),
+            is_stopping=lambda: True,
+        ),
+        _has_active_license=lambda: True,
+        _can_use_feature=lambda feature: True,
+        _can_start_fishing=lambda: True,
+        _bot_is_stopping=lambda: True,
+        _license_checking=False,
+        _status_labels=[status],
+        _status_description_labels=[description],
+        _start_buttons=start_buttons,
+        _stop_buttons=stop_buttons,
+        _ready_badges=[badge],
+        _hotkey_badges=[],
+        _last_bot_running=False,
+        _refresh_system_state=lambda: None,
+    )
+
+    MainWindow._refresh_status_label(window)
+
+    assert status.text == "Остановка"
+    assert all(not button.enabled for button in start_buttons)
+    assert all(not button.enabled for button in stop_buttons)
+    assert badge.text == "Остановка"
+    assert badge.tone == "orange"
+
+
+def test_hotkey_logs_and_does_not_toggle_while_bot_is_stopping():
+    events: list[str] = []
+    window = SimpleNamespace(
+        _win32api=SimpleNamespace(GetAsyncKeyState=lambda _vk: 0x8000),
+        _hotkey_capture_is_active=lambda: False,
+        _can_start_fishing=lambda: True,
+        _current_hotkey_vks=lambda: (1,),
+        _hotkey_suppressed_until_release=False,
+        _hotkey_down=False,
+        _bot_is_stopping=lambda: True,
+        _log_bot_still_stopping=lambda: events.append("still stopping"),
+        _refresh_status_label=lambda: events.append("refresh"),
+        toggle_bot=lambda: events.append("toggle"),
+    )
+
+    MainWindow._poll_hotkey_impl(window)
+
+    assert events == ["still stopping", "refresh"]
+    assert window._hotkey_down is True
 
 
 def test_intro_license_allows_fishing_page_but_not_bot_start():

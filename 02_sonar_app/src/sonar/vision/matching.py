@@ -105,11 +105,29 @@ class TemplateMatcher:
         scales: tuple[float, ...] = (1.0,),
     ) -> list[TemplateMatch]:
         matches: list[TemplateMatch] = []
+        search_area, offset_x, offset_y = self._search_area(screenshot, roi)
+        if search_area.size == 0:
+            return []
+        search_gray = ensure_gray(search_area)
         for scale in self._prioritize_scales(scales):
             scaled = resize_template(template, scale)
             if scaled is None:
                 continue
-            matches.extend(self.find_all(screenshot, scaled, roi=roi, name=name))
+            template_gray = ensure_gray(scaled)
+            result = cv2.matchTemplate(search_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+            ys, xs = np.where(result >= self.threshold)
+            h, w = scaled.shape[:2]
+            matches.extend(
+                TemplateMatch(
+                    x=offset_x + int(x) + w // 2,
+                    y=offset_y + int(y) + h // 2,
+                    confidence=float(result[y, x]),
+                    width=w,
+                    height=h,
+                    name=name,
+                )
+                for y, x in zip(ys, xs)
+            )
         if not matches:
             return []
         min_distance = max(1, max(max(match.width, match.height) for match in matches) // 2)
@@ -124,11 +142,28 @@ class TemplateMatcher:
         scales: tuple[float, ...] = (1.0,),
     ) -> TemplateMatch | None:
         best: TemplateMatch | None = None
+        search_area, offset_x, offset_y = self._search_area(screenshot, roi)
+        if search_area.size == 0:
+            return None
+        search_gray = ensure_gray(search_area)
         for scale in self._prioritize_scales(scales):
             scaled = resize_template(template, scale)
             if scaled is None:
                 continue
-            match = self.find_best(screenshot, scaled, roi=roi, name=name)
+            template_gray = ensure_gray(scaled)
+            result = cv2.matchTemplate(search_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+            if max_val < self.threshold:
+                continue
+            h, w = scaled.shape[:2]
+            match = TemplateMatch(
+                x=offset_x + max_loc[0] + w // 2,
+                y=offset_y + max_loc[1] + h // 2,
+                confidence=float(max_val),
+                width=w,
+                height=h,
+                name=name,
+            )
             if match and (best is None or match.confidence > best.confidence):
                 best = match
                 if match.confidence >= 0.98:

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from sonar.fishing.constants import PROCESS_NAME
+from sonar.vision.geometry import Rect
 
 
 @dataclass(slots=True)
@@ -90,6 +91,46 @@ class WindowCapture:
             mem_dc.BitBlt((0, 0), (width, height), src_dc, (screen_left, screen_top), win32con.SRCCOPY)
             bits = bitmap.GetBitmapBits(True)
             frame = np.frombuffer(bits, dtype=np.uint8).reshape((height, width, 4))
+            return frame[:, :, :3].copy()
+        finally:
+            mem_dc.SelectObject(old_bitmap)
+            win32gui.DeleteObject(bitmap.GetHandle())
+            mem_dc.DeleteDC()
+            src_dc.DeleteDC()
+            win32gui.ReleaseDC(0, screen_dc)
+
+    def capture_region(self, roi: Rect) -> np.ndarray:
+        import win32gui
+        import win32ui
+        import win32con
+
+        hwnd = self._require_window()
+        try:
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        except Exception as exc:
+            self.hwnd = None
+            raise RuntimeError("РћРєРЅРѕ РёРіСЂС‹ РЅРµРґРѕСЃС‚СѓРїРЅРѕ") from exc
+        client_width = right - left
+        client_height = bottom - top
+        clamped = roi.clamp(client_width, client_height)
+        if clamped.width <= 0 or clamped.height <= 0:
+            return np.zeros((0, 0, 3), dtype=np.uint8)
+        try:
+            screen_left, screen_top = win32gui.ClientToScreen(hwnd, (left + clamped.x, top + clamped.y))
+        except Exception as exc:
+            self.hwnd = None
+            raise RuntimeError("РћРєРЅРѕ РёРіСЂС‹ РЅРµРґРѕСЃС‚СѓРїРЅРѕ") from exc
+
+        screen_dc = win32gui.GetDC(0)
+        src_dc = win32ui.CreateDCFromHandle(screen_dc)
+        mem_dc = src_dc.CreateCompatibleDC()
+        bitmap = win32ui.CreateBitmap()
+        bitmap.CreateCompatibleBitmap(src_dc, clamped.width, clamped.height)
+        old_bitmap = mem_dc.SelectObject(bitmap)
+        try:
+            mem_dc.BitBlt((0, 0), (clamped.width, clamped.height), src_dc, (screen_left, screen_top), win32con.SRCCOPY)
+            bits = bitmap.GetBitmapBits(True)
+            frame = np.frombuffer(bits, dtype=np.uint8).reshape((clamped.height, clamped.width, 4))
             return frame[:, :, :3].copy()
         finally:
             mem_dc.SelectObject(old_bitmap)

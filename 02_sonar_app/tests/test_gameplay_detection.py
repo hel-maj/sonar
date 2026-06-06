@@ -45,6 +45,9 @@ SUPPLIED_4K_FIXTURES = (
     "20260605174836_1.jpg",
     "20260605174838_1.jpg",
     "20260605174840_1.jpg",
+    "20260606055849_1.jpg",
+    "20260606055858_1.jpg",
+    "20260606060136_1.jpg",
 )
 
 
@@ -314,6 +317,9 @@ def test_supplied_4k_gameplay_fixture_is_readable(fixture: str):
         ("20260605174442_1.jpg", "start2"),
         ("20260605174527_1.jpg", "ad"),
         ("20260605174738_1.jpg", "start2"),
+        ("20260606055849_1.jpg", "start1"),
+        ("20260606055858_1.jpg", "start1"),
+        ("20260606060136_1.jpg", "start2"),
     ],
 )
 def test_4k_fishing_stages_are_detected(fixture: str, expected_stage: str):
@@ -340,6 +346,17 @@ def test_4k_storage_selector_state_is_detected(fixture: str, storage: str):
 
 def test_4k_hook_trigger_presses_space():
     frame = load_4k_frame("20260605174738_1.jpg")
+    input_controller = DummyInput()
+
+    result = create_monitor_for_frame(frame, input_controller).check_and_act(frame)
+
+    assert result.red_detected is True
+    assert result.pressed is True
+    assert input_controller.keys == ["space"]
+
+
+def test_supplied_4k_hook_trigger_presses_space():
+    frame = load_4k_frame("20260606060136_1.jpg")
     input_controller = DummyInput()
 
     result = create_monitor_for_frame(frame, input_controller).check_and_act(frame)
