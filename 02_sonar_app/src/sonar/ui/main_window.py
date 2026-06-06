@@ -71,6 +71,7 @@ from sonar.license.features import (
     FEATURE_FISHING_TACKLE,
     FEATURE_OVERVIEW,
     FEATURE_OVERVIEW_SESSION_STATS,
+    FEATURE_SETTINGS,
     FEATURE_STATISTICS,
     FEATURE_STREAM,
     FEATURE_STREAM_CHAT,
@@ -651,7 +652,7 @@ class MainWindow(QMainWindow):
         self._register_page(self.overview_tab, "Обзор", ui_icon("menu.svg"), licensed=True, feature_key=FEATURE_OVERVIEW)
         self._register_page(self.license_tab, "Лицензия", ui_icon("id_card.svg"), licensed=False)
         self._register_page(self.fishing_tab, "Рыбалка", ui_icon("fishing_rod.svg"), licensed=True, feature_key=FEATURE_FISHING)
-        self._register_page(self.settings_tab, "Настройки", ui_icon("settings.svg"), licensed=False)
+        self._register_page(self.settings_tab, "Настройки", ui_icon("settings.svg"), licensed=True, feature_key=FEATURE_SETTINGS)
         self._register_page(self.statistics_tab, "Статистика", ui_icon("chart.svg"), licensed=True, feature_key=FEATURE_STATISTICS)
         self._register_page(self.stream_tab, "Стрим", ui_icon("stream.svg"), licensed=True, feature_key=FEATURE_STREAM)
         self._register_page(self.telegram_tab, "Telegram", ui_icon("telegram_outline.svg"), licensed=True, feature_key=FEATURE_TELEGRAM)
@@ -1359,11 +1360,21 @@ class MainWindow(QMainWindow):
         fish_note.setProperty("muted", True)
         fish_layout.addWidget(fish_title)
         fish_layout.addWidget(fish_note)
+        fish_actions = QHBoxLayout()
+        fish_actions.setSpacing(7)
+        self.select_all_fish_button = ActionButton("Выбрать все", size="xs")
+        self.clear_all_fish_button = ActionButton("Снять выбор со всех", size="xs")
+        self.select_all_fish_button.clicked.connect(lambda: self._set_all_fish_keep_checks(True))
+        self.clear_all_fish_button.clicked.connect(lambda: self._set_all_fish_keep_checks(False))
+        fish_actions.addWidget(self.select_all_fish_button)
+        fish_actions.addWidget(self.clear_all_fish_button)
+        fish_actions.addStretch(1)
+        fish_layout.addLayout(fish_actions)
         fish_scroll = ContainedScrollArea()
         fish_scroll.setObjectName("fishKeepScroll")
         fish_scroll.setWidgetResizable(True)
         fish_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        fish_scroll.setFixedHeight(195)
+        fish_scroll.setFixedHeight(293)
         fish_widget = QWidget()
         fish_widget.setObjectName("fishKeepList")
         fish_grid = QGridLayout(fish_widget)
@@ -2343,6 +2354,11 @@ class MainWindow(QMainWindow):
             self.leader_depleted_action_combo.setEnabled(not self.fish_without_leader_check.isChecked())
         if hasattr(self, "net_depleted_action_combo"):
             self.net_depleted_action_combo.setEnabled(not self.fish_without_net_check.isChecked())
+
+    def _set_all_fish_keep_checks(self, checked: bool) -> None:
+        for checkbox in self.fish_checks.values():
+            checkbox.setChecked(checked)
+        self._refresh_settings_dirty_state()
 
     def _apply_telegram_settings_to_ui(self, telegram) -> None:
         widgets = (

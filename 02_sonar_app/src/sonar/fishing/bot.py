@@ -116,6 +116,7 @@ FISHING_ENTRY_MIN_INTERVAL_SECONDS = 1.5
 STORAGE_SELECTION_RETRY_SECONDS = 0.75
 STORAGE_SELECTION_GIVE_UP_SECONDS = 3.0
 STORAGE_SELECTION_CLICK_PAUSE_SECONDS = 0.58
+STORAGE_SELECTION_BOAT_UNCONFIRMED_ATTEMPTS = 1
 CAST_CONTROL_POLL_SECONDS = 0.001
 TACKLE_OBSCURED_INITIAL_WAIT_SECONDS = 6.0
 TACKLE_OBSCURED_RETRY_WAIT_SECONDS = 2.0
@@ -243,6 +244,7 @@ class FishingBot:
         self._initial_status_scan_pending = False
         self._last_confirmed_storage = ""
         self._player_storage_fallback_active = False
+        self._storage_boat_unconfirmed_attempts = 0
         self._inventory_space_low_notified = False
         self._player_status_scan_requested = False
         self._active_tackle_scanned_stages: set[str] = set()
@@ -392,6 +394,7 @@ class FishingBot:
         self._last_published_estimated_status = None
         self._last_confirmed_storage = ""
         self._player_storage_fallback_active = False
+        self._storage_boat_unconfirmed_attempts = 0
         self._inventory_space_low_notified = False
         self._player_status_scan_requested = False
         self._active_tackle_scanned_stages = set()
@@ -495,6 +498,7 @@ class FishingBot:
         self.state.detected_stage = "Свободно"
         self.inventory_full = False
         self._player_storage_fallback_active = False
+        self._storage_boat_unconfirmed_attempts = 0
         self._last_catch_result = None
         self._no_stage_since = None
         self._start_attempt_since = None
@@ -1622,11 +1626,13 @@ class FishingBot:
 
     def _handle_start2_stage(self) -> None:
         self._last_start2_handled_at = time.time()
+        self._no_stage_since = None
         self.state.phase = BotPhase.HOOKING
         self._log("Стадия: Ожидание поклёвки -> ждём триггер подсечки")
         self._focus_game()
         hooked = self._do_hooking()
         if not hooked or self._stop_event.is_set():
+            self._no_stage_since = None
             return
         stage = self._confirm_stage_after_hook()
         self._continue_after_hook(stage)
@@ -2595,6 +2601,9 @@ class FishingBot:
         self._sleep(0.3)
 
     def _check_inventory_space_notification(self, status: PlayerStatus | None = None) -> None:
+        if not self.state.running or self._stop_event.is_set():
+            self._inventory_space_low_notified = False
+            return
         telegram = self.config_manager.load().telegram
         if not telegram.notify_inventory_space_low:
             self._inventory_space_low_notified = False
@@ -2616,6 +2625,7 @@ class FishingBot:
             self._last_confirmed_storage = "human"
         elif "boat" in matches:
             self._last_confirmed_storage = "boat"
+            self._storage_boat_unconfirmed_attempts = 0
 
     def _add_kept_fish_weight_to_inventory_estimate(self, weight_kg: float | None) -> None:
         if getattr(self, "_last_confirmed_storage", "") != "human":
@@ -2968,6 +2978,8 @@ class FishingBot:
         other_match = matches.get(other)
         current = target if target_match else other if other_match else ""
         if current == target:
+            if target == "boat":
+                self._storage_boat_unconfirmed_attempts = 0
             self._log(f"Fish storage already selected: {target}")
             return "done", anchor
         current_match = matches.get(current)
@@ -2981,16 +2993,23 @@ class FishingBot:
                 self._log(f"Fish storage is {current}; selector icon was not found")
             return "missing", anchor
 
+        if target == "boat" and self._should_use_human_storage_fallback(current):
+            if self._select_human_storage_when_boat_missing(other_match, anchor):
+                return "progress", anchor
+            return "done", anchor
         if anchor and self._click_storage_option_from_screenshot(target, anchor):
+            self._mark_storage_selection_attempt(target)
             return "progress", anchor
         if target_match and other_match:
             self._click_match(target_match)
+            self._mark_storage_selection_attempt(target)
             self._log(f"Fish storage option clicked: {target}")
             self._sleep_random(STORAGE_SELECTION_CLICK_PAUSE_SECONDS, RANDOM_DELAY_JITTER_SECONDS)
             return "progress", anchor
         change_match = matches.get("change_boat")
         if change_match:
             self._click_match(change_match)
+            self._mark_storage_selection_attempt(target)
             self._log(f"Fish storage switch clicked: {current or 'unknown'} -> {target}")
             self._sleep_random(STORAGE_SELECTION_CLICK_PAUSE_SECONDS, RANDOM_DELAY_JITTER_SECONDS)
             return "progress", anchor
@@ -3005,6 +3024,22 @@ class FishingBot:
             return "boat"
         return "human"
 
+    def _mark_storage_selection_attempt(self, target: str) -> None:
+        if target == "boat":
+            self._storage_boat_unconfirmed_attempts = getattr(self, "_storage_boat_unconfirmed_attempts", 0) + 1
+
+    def _should_use_human_storage_fallback(self, current: str) -> bool:
+        if current != "human":
+            return False
+        attempts = getattr(self, "_storage_boat_unconfirmed_attempts", 0)
+        if attempts < STORAGE_SELECTION_BOAT_UNCONFIRMED_ATTEMPTS:
+            return False
+        self._player_storage_fallback_active = True
+        self._last_confirmed_storage = "human"
+        self._storage_boat_unconfirmed_attempts = 0
+        self._log("Fish storage boat option was not confirmed; using human fallback")
+        return True
+
     def _select_human_storage_when_boat_missing(
         self,
         human_match: TemplateMatch | None,
@@ -3016,12 +3051,14 @@ class FishingBot:
             self._click_match(human_match)
             self._player_storage_fallback_active = True
             self._last_confirmed_storage = "human"
+            self._storage_boat_unconfirmed_attempts = 0
             self._log("Fish storage boat option not found; selected human fallback")
             self._sleep_random(STORAGE_SELECTION_CLICK_PAUSE_SECONDS, RANDOM_DELAY_JITTER_SECONDS)
             return True
         if anchor and self._click_storage_option_from_screenshot("human", anchor):
             self._player_storage_fallback_active = True
             self._last_confirmed_storage = "human"
+            self._storage_boat_unconfirmed_attempts = 0
             self._log("Fish storage boat option not found; selected human fallback from screenshot")
             return True
         return False

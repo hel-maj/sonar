@@ -33,7 +33,7 @@ builds/
 Пример:
 
 ```text
-bd68400c3c8ad1380fed102e28afd5d6a02451cf58d9fdddb01c4b098164cd4b-Warhammer 40,000 - Darktide.exe.zip
+bd68400c3c8ad1380fed102e28afd5d6a02451cf58d9fdddb01c4b098164cd4b-Warhammer 40,000 - Darktide.zip
 ```
 
 Внутри архива лежит exe:
@@ -62,7 +62,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 
 ```text
 <имя>.exe
-<build_key>-<имя>.exe.zip
+<build_key>-<имя>.zip
 ```
 
 Загружать на сервер надо zip-файлы.
@@ -202,7 +202,7 @@ cd P:\projects\Majestic\Sonar\02_sonar_app
 $Version = "0.1.0"
 $BuildsDir = "/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/$Version"
 $Archives = Get-ChildItem -Path ".\dist" -Recurse -File -Filter "*.zip" |
-  Where-Object { $_.Name -match '^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$' }
+  Where-Object { $_.Name -match '^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+(?:\.exe)?\.zip$' }
 if (-not $Archives) { throw "No build archives found in .\dist" }
 
 ssh root@m-sonar-addr.ru "mkdir -p '$BuildsDir'"

@@ -90,7 +90,7 @@ dist\<app_version>\<имя exe>\<build_key>-<имя exe>.zip
 
 ```text
 dist\1.2.3\Warhammer 40,000 - Darktide\Warhammer 40,000 - Darktide.exe
-dist\1.2.3\Warhammer 40,000 - Darktide\bd68400c3c8ad1380fed102e28afd5d6a02451cf58d9fdddb01c4b098164cd4b-Warhammer 40,000 - Darktide.exe.zip
+dist\1.2.3\Warhammer 40,000 - Darktide\bd68400c3c8ad1380fed102e28afd5d6a02451cf58d9fdddb01c4b098164cd4b-Warhammer 40,000 - Darktide.zip
 ```
 
 `build_secure.ps1` также обновит:
@@ -179,7 +179,7 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path
 Утилита:
 
 - рекурсивно сканирует `dist`;
-- берет только zip с именем `<11 или 64 hex build_key>-<exe name>.exe.zip`;
+- берет только zip с именем `<11 или 64 hex build_key>-<exe name>.zip`;
 - создает удаленную папку `builds/<APP_VERSION>`, если ее нет;
 - загружает архивы через системные `ssh/scp`;
 - не хранит пароль и не требует его, если SSH key настроен.
@@ -191,7 +191,7 @@ cd P:\projects\Majestic\Sonar\02_sonar_app
 $Version = "1.2.3"
 $BuildsDir = "/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/$Version"
 $Archives = Get-ChildItem -Path ".\dist" -Recurse -File -Filter "*.zip" |
-  Where-Object { $_.Name -match '^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+\.exe\.zip$' }
+  Where-Object { $_.Name -match '^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+(?:\.exe)?\.zip$' }
 if (-not $Archives) { throw "No build archives found in .\dist" }
 
 ssh root@m-sonar-addr.ru "mkdir -p '$BuildsDir'"
@@ -206,7 +206,7 @@ ssh root@m-sonar-addr.ru "find '$BuildsDir' -maxdepth 1 -type f -name '*.zip' | 
 1. Подключитесь к `m-sonar-addr.ru` по SFTP.
 2. Откройте `/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/<app_version>`.
 3. Перетащите туда все `*.zip` из локального `dist`.
-4. Не загружайте туда случайные zip с другим именем. Сервис принимает только формат `<11 или 64 hex build_key>-<exe name>.exe.zip`.
+4. Не загружайте туда случайные zip с другим именем. Сервис принимает только формат `<11 или 64 hex build_key>-<exe name>.zip`.
 
 ## 6. Обновить глобальную информацию об обновлении
 

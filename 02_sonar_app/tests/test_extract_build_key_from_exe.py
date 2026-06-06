@@ -68,7 +68,7 @@ def test_extract_build_key_from_zip_name_without_reading_exe(tmp_path):
     extractor = _load_extractor()
     key = "c" * 64
     false_key = "f" * 64
-    archive_path = tmp_path / f"{key}-Game.exe.zip"
+    archive_path = tmp_path / f"{key}-Game.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("Game.exe", false_key.encode("ascii"))
 
@@ -81,7 +81,7 @@ def test_extract_build_key_from_zip_name_without_reading_exe(tmp_path):
 def test_extract_short_build_key_from_zip_name(tmp_path):
     extractor = _load_extractor()
     key = "a1b2c3d4e5f"
-    archive_path = tmp_path / f"{key}-Game.exe.zip"
+    archive_path = tmp_path / f"{key}-Game.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("Game.exe", b"payload")
 

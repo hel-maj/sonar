@@ -133,7 +133,8 @@ function New-BuildArchive {
         [string]$OutputDir
     )
 
-    $ArchiveName = "{0}-{1}.zip" -f ([string]$Branding.build_key), $ExeName
+    $ArchiveStem = [System.IO.Path]::GetFileNameWithoutExtension($ExeName)
+    $ArchiveName = "{0}-{1}.zip" -f ([string]$Branding.build_key), $ArchiveStem
     $ArchivePath = Join-Path $OutputDir $ArchiveName
     if (Test-Path $ArchivePath) {
         Remove-Item -LiteralPath $ArchivePath -Force

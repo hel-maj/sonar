@@ -118,6 +118,13 @@ class TelegramSettings:
     inventory_space_low_threshold_kg: float = 1.0
     notify_bait_tired: bool = True
     notify_focus_lost: bool = False
+    sound_catch: bool = True
+    sound_start_stop: bool = True
+    sound_meal: bool = True
+    sound_inventory_full: bool = True
+    sound_inventory_space_low: bool = True
+    sound_bait_tired: bool = True
+    sound_focus_lost: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TelegramSettings":
@@ -142,6 +149,13 @@ class TelegramSettings:
             inventory_space_low_threshold_kg=cls._threshold_kg(data.get("inventory_space_low_threshold_kg", 1.0)),
             notify_bait_tired=bool(data.get("notify_bait_tired", True)),
             notify_focus_lost=bool(data.get("notify_focus_lost", False)),
+            sound_catch=bool(data.get("sound_catch", True)),
+            sound_start_stop=bool(data.get("sound_start_stop", True)),
+            sound_meal=bool(data.get("sound_meal", True)),
+            sound_inventory_full=bool(data.get("sound_inventory_full", True)),
+            sound_inventory_space_low=bool(data.get("sound_inventory_space_low", True)),
+            sound_bait_tired=bool(data.get("sound_bait_tired", True)),
+            sound_focus_lost=bool(data.get("sound_focus_lost", True)),
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -22,15 +22,24 @@ def _load_uploads():
 def test_iter_build_archives_accepts_only_named_build_zips(tmp_path):
     uploads = _load_uploads()
     key = "a" * 11
-    valid = tmp_path / f"{key}-Game.exe.zip"
+    valid = tmp_path / f"{key}-Game.zip"
     invalid = tmp_path / "Game.zip"
-    nested = tmp_path / "nested" / f"{key}-Nested.exe.zip"
+    nested = tmp_path / "nested" / f"{key}-Nested.zip"
     nested.parent.mkdir()
     valid.write_bytes(b"zip")
     invalid.write_bytes(b"zip")
     nested.write_bytes(b"zip")
 
     assert uploads.iter_build_archives(tmp_path) == [valid, nested]
+
+
+def test_iter_build_archives_keeps_old_exe_zip_compatibility(tmp_path):
+    uploads = _load_uploads()
+    key = "b" * 11
+    archive = tmp_path / f"{key}-Old Game.exe.zip"
+    archive.write_bytes(b"zip")
+
+    assert uploads.iter_build_archives(tmp_path) == [archive]
 
 
 def test_ssh_command_uses_key_and_batch_mode():
@@ -54,7 +63,7 @@ def test_ssh_command_uses_key_and_batch_mode():
 
 def test_scp_command_uploads_to_remote_builds_dir():
     uploads = _load_uploads()
-    archive = Path("dist") / f"{'b' * 64}-Game.exe.zip"
+    archive = Path("dist") / f"{'b' * 64}-Game.zip"
     args = SimpleNamespace(
         port=22,
         key=None,
@@ -79,7 +88,7 @@ def test_scp_command_uploads_to_remote_builds_dir():
 
 def test_scp_command_can_upload_to_version_dir():
     uploads = _load_uploads()
-    archive = Path("dist") / "0.1.0" / "Game" / f"{'b' * 64}-Game.exe.zip"
+    archive = Path("dist") / "0.1.0" / "Game" / f"{'b' * 64}-Game.zip"
     args = SimpleNamespace(
         port=22,
         key=None,
@@ -116,7 +125,7 @@ def test_default_upload_host_can_come_from_dotenv(tmp_path, monkeypatch):
 def test_upload_archives_dry_run_does_not_report_uploaded(tmp_path, capsys):
     uploads = _load_uploads()
     key = "c" * 64
-    archive = tmp_path / f"{key}-Game.exe.zip"
+    archive = tmp_path / f"{key}-Game.zip"
     archive.write_bytes(b"zip")
     args = SimpleNamespace(
         source=tmp_path,
@@ -142,7 +151,7 @@ def test_upload_archives_dry_run_does_not_report_uploaded(tmp_path, capsys):
 def test_upload_archives_can_replace_version_folder(tmp_path, capsys):
     uploads = _load_uploads()
     key = "c" * 64
-    archive = tmp_path / f"{key}-Game.exe.zip"
+    archive = tmp_path / f"{key}-Game.zip"
     archive.write_bytes(b"zip")
     args = SimpleNamespace(
         source=tmp_path,
@@ -169,8 +178,8 @@ def test_upload_archives_scans_matching_version_subfolder(tmp_path, capsys):
     version_dir = tmp_path / "0.2.0"
     old_dir.mkdir()
     version_dir.mkdir()
-    (old_dir / f"{'a' * 64}-Old.exe.zip").write_bytes(b"old")
-    (version_dir / f"{'b' * 64}-New.exe.zip").write_bytes(b"new")
+    (old_dir / f"{'a' * 64}-Old.zip").write_bytes(b"old")
+    (version_dir / f"{'b' * 64}-New.zip").write_bytes(b"new")
     args = SimpleNamespace(
         source=tmp_path,
         port=22,
@@ -189,13 +198,13 @@ def test_upload_archives_scans_matching_version_subfolder(tmp_path, capsys):
 
     assert "Found 1 build archive(s)" in output
     assert str(version_dir) in output
-    assert "Old.exe.zip" not in output
+    assert "Old.zip" not in output
 
 
 def test_upload_archives_requires_host(tmp_path, capsys):
     uploads = _load_uploads()
     key = "d" * 64
-    archive = tmp_path / f"{key}-Game.exe.zip"
+    archive = tmp_path / f"{key}-Game.zip"
     archive.write_bytes(b"zip")
     args = SimpleNamespace(
         source=tmp_path,
