@@ -12,7 +12,7 @@ from pathlib import Path
 from types import ModuleType
 
 from PySide6.QtCore import QEvent, QEventLoop, QObject, QRegularExpression, QRectF, QSize, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QFontDatabase, QIcon, QImage, QPainter, QPen, QPixmap, QRegularExpressionValidator
+from PySide6.QtGui import QColor, QCursor, QFont, QFontDatabase, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap, QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -123,6 +123,7 @@ UI_ICON_DIR = RESOURCE_DIR / "ui_icons"
 FISH_ICON_DIR = RESOURCE_DIR / "fishing" / "fish"
 FONT_DIR = RESOURCE_DIR / "fonts"
 FISH_KEEP_COLUMNS = 2
+FISHING_PREVIEW_IMAGE_RADIUS = 8
 
 
 RECENT_EVENT_LIMIT = 400
@@ -174,6 +175,29 @@ def fish_ui_pixmap(fish_id: str, size: QSize) -> QPixmap:
     if image.isNull():
         return QPixmap()
     return QPixmap.fromImage(image).scaled(size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+
+def rounded_scaled_pixmap(image: QImage, size: QSize, radius: int) -> QPixmap:
+    source = QPixmap.fromImage(image).scaled(
+        size,
+        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    if source.isNull():
+        return source
+    result = QPixmap(size)
+    result.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(result)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(result.rect()), radius, radius)
+    painter.setClipPath(path)
+    x = (size.width() - source.width()) // 2
+    y = (size.height() - source.height()) // 2
+    painter.drawPixmap(x, y, source)
+    painter.end()
+    return result
 
 
 def catch_size_chart_color(key: str) -> str:
@@ -3496,11 +3520,7 @@ class MainWindow(QMainWindow):
                 label.setPixmap(QPixmap())
                 label.setText("Скриншот игры появится после захвата")
                 continue
-            pixmap = QPixmap.fromImage(qimage).scaled(
-                label.size(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+            pixmap = rounded_scaled_pixmap(qimage, label.size(), FISHING_PREVIEW_IMAGE_RADIUS)
             label.setText("")
             label.setPixmap(pixmap)
 
