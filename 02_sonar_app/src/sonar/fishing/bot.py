@@ -273,6 +273,7 @@ class FishingBot:
         self._remember_player_status(status)
         estimated = self.estimated_player_status() or status
         self._publish_player_status(estimated)
+        self._sync_next_meal_check_from_status(estimated, log=False)
         return estimated
 
     def estimated_player_status(self) -> PlayerStatus | None:
@@ -600,8 +601,7 @@ class FishingBot:
                 continue
 
             if frame is not None:
-                self._last_trigger_matches = self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES)
-                self._last_triggers = {name: match.confidence for name, match in self._last_trigger_matches.items()}
+                self._remember_trigger_matches(self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES))
             else:
                 self._refresh_triggers(names=FISHING_STAGE_TRIGGER_NAMES)
             stage = self._detect_stage(self._last_triggers)
@@ -691,13 +691,11 @@ class FishingBot:
     def _get_triggers(self) -> dict[str, float]:
         try:
             frame = self.capture.capture()
-            self._last_trigger_matches = self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES)
-            self._last_triggers = {name: match.confidence for name, match in self._last_trigger_matches.items()}
+            self._remember_trigger_matches(self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES))
             now = time.time()
             if now - getattr(self, "_last_secondary_trigger_at", 0.0) >= SECONDARY_TRIGGER_REFRESH_SECONDS:
                 secondary_matches = self.trigger_monitor.find_detections(frame, names=SECONDARY_TRIGGER_NAMES)
-                self._last_trigger_matches.update(secondary_matches)
-                self._last_triggers.update({name: match.confidence for name, match in secondary_matches.items()})
+                self._merge_trigger_matches(secondary_matches)
                 self._last_secondary_trigger_at = now
         except Exception as exc:
             self.state.last_error = str(exc)
@@ -707,8 +705,7 @@ class FishingBot:
     def _refresh_triggers(self, names: tuple[str, ...] | None = None) -> None:
         try:
             frame = self.capture.capture()
-            self._last_trigger_matches = self.trigger_monitor.find_detections(frame, names=names)
-            self._last_triggers = {name: match.confidence for name, match in self._last_trigger_matches.items()}
+            self._remember_trigger_matches(self.trigger_monitor.find_detections(frame, names=names))
         except Exception as exc:
             self.state.last_error = str(exc)
             self._log(f"Trigger refresh error: {exc}")
@@ -893,8 +890,28 @@ class FishingBot:
             return False
         if now - self._no_stage_since < AUTO_STOP_TIMEOUT_SECONDS:
             return False
+        if not self._confirm_no_stage_before_autostop():
+            return False
         self._log(f"Автостоп: {STOP_REASON_NO_STAGE}")
         self._stop_from_brain(STOP_REASON_NO_STAGE)
+        return True
+
+    def _confirm_no_stage_before_autostop(self) -> bool:
+        try:
+            frame = self.capture.capture()
+            matches = self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES)
+        except Exception as exc:
+            self.state.last_error = str(exc)
+            self._log(f"Auto-stop confirmation error: {exc}")
+            return True
+        self._remember_trigger_matches(matches)
+        stage = self._detect_stage(self._last_triggers)
+        if stage is not None:
+            self._publish_stage(self._stage_label(stage))
+            return False
+        if self._has_pending_catch() or self._probe_catch_screen():
+            self._no_stage_since = None
+            return False
         return True
 
     def _run_casting_module(self) -> None:
@@ -922,19 +939,43 @@ class FishingBot:
             return False
         return time.time() >= self._inventory_retry_after > 0.0
 
-    def _schedule_next_meal_check_from_estimate(self) -> None:
+    def _sync_next_meal_check_from_status(self, status: PlayerStatus | None, *, log: bool = False) -> None:
+        if not self.settings.auto_meal or getattr(self, "_meal_search_disabled_until_restart", False):
+            return
+        if status is None or status.food is None or status.water is None:
+            return
+        if self._status_needs_meal_for_scan(status):
+            self._inventory_retry_after = 0.0
+            if log:
+                self._log("Питание: показатели ниже порога, проверка нужна сейчас")
+            return
+        self._schedule_next_meal_check_from_estimate(log=log)
+
+    def _schedule_next_meal_check_from_estimate(self, *, log: bool = True) -> None:
         estimate = getattr(self, "_player_status_estimate", None)
-        wait_seconds = None
+        waits = None
         if estimate is not None:
-            wait_seconds = estimate.seconds_until_below(
+            waits = estimate.seconds_until_below_breakdown(
                 food_threshold=self._meal_food_threshold(),
                 water_threshold=self._meal_water_threshold(),
             )
-        if wait_seconds is None:
+        if waits is None:
             self._inventory_retry_after = time.time() + MEAL_MISSING_RETRY_SECONDS
+            if log:
+                self._log(
+                    "Питание: еда или вода не прочитаны, повторная проверка через "
+                    f"{self._format_seconds(MEAL_MISSING_RETRY_SECONDS)}"
+                )
             return
+        food_wait, water_wait = waits
+        wait_seconds = min(food_wait, water_wait)
         self._inventory_retry_after = time.time() + max(0.0, wait_seconds)
-        self._log(f"Питание: следующая проверка через {self._format_seconds(wait_seconds)}")
+        if log:
+            self._log(
+                "Питание: следующая проверка через "
+                f"{self._format_seconds(wait_seconds)} "
+                f"(еда {self._format_seconds(food_wait)}, вода {self._format_seconds(water_wait)})"
+            )
 
     def _meal_food_threshold(self) -> int:
         return min(100, self.settings.restore_food_from + MEAL_STATUS_THRESHOLD_TOLERANCE)
@@ -1028,16 +1069,15 @@ class FishingBot:
                         confidence=catch_result.fish_confidence,
                     )
                     break
-                self._last_trigger_matches = self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES)
+                self._remember_trigger_matches(self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES))
                 if now - last_interrupt_trigger_check_at >= SECONDARY_TRIGGER_REFRESH_SECONDS:
                     last_interrupt_trigger_check_at = now
-                    self._last_trigger_matches.update(
+                    self._merge_trigger_matches(
                         self.trigger_monitor.find_detections(
                             frame,
                             names=("changed_bait", "gear", "pereves", "thirst", "hunger"),
                         )
                     )
-                self._last_triggers = {name: match.confidence for name, match in self._last_trigger_matches.items()}
                 current_stage = self._detect_stage(self._last_triggers)
                 if current_stage == "ad":
                     seen_ad_stage = True
@@ -1258,8 +1298,7 @@ class FishingBot:
             self._save_catch_panel_snapshot(frame, catch_result)
             return "пойманная рыба"
         matches = self.trigger_monitor.find_detections(frame, names=tuple(REELING_KNOWN_INTERRUPTION_TRIGGERS))
-        self._last_trigger_matches = matches
-        self._last_triggers = {name: match.confidence for name, match in matches.items()}
+        self._remember_trigger_matches(matches)
         stage = self._detect_stage(self._last_triggers)
         if stage is not None:
             self._publish_stage(self._stage_label(stage))
@@ -1534,8 +1573,7 @@ class FishingBot:
                 ):
                     trigger_names = HOOKING_STAGE_TRIGGER_NAMES + HOOKING_MEAL_TRIGGER_NAMES
                 stage_frame = self.capture.capture()
-                self._last_trigger_matches = self.trigger_monitor.find_detections(stage_frame, names=trigger_names)
-                self._last_triggers = {name: match.confidence for name, match in self._last_trigger_matches.items()}
+                self._remember_trigger_matches(self.trigger_monitor.find_detections(stage_frame, names=trigger_names))
                 if "start2" in self._last_triggers or "wait_tension" in self._last_triggers:
                     last_stage_seen_at = now
                 if not tackle_scanned:
@@ -2047,6 +2085,7 @@ class FishingBot:
             self._remember_player_status(status, inventory_scan=True)
             estimated = self.estimated_player_status() or status
             self._publish_player_status(estimated)
+            self._sync_next_meal_check_from_status(estimated, log=True)
             result = estimated
             if estimated is None or not estimated.has_any_value():
                 self._log("Показатели: не удалось прочитать еду, воду или вес")
@@ -2660,8 +2699,7 @@ class FishingBot:
             matches = self.trigger_monitor.find_detections(frame, names=PREPARE_START_TRIGGER_NAMES)
             if "start" in matches:
                 matches.update(self.trigger_monitor.find_detections(frame, names=PREPARE_START_CONTEXT_TRIGGER_NAMES))
-            self._last_trigger_matches = matches
-            self._last_triggers = {name: match.confidence for name, match in matches.items()}
+            self._remember_trigger_matches(matches)
             self._mark_storage_from_matches(matches)
             if time.time() - last_log_at > 1.0:
                 self._log(f"Pre-cast detections: {self._format_precise_triggers(matches)}")
@@ -3204,6 +3242,20 @@ class FishingBot:
     @staticmethod
     def _is_fishing_stage_active(triggers: dict[str, float]) -> bool:
         return any(name in triggers for name in ("start", "start1", "start2", "wait_tension", "ad"))
+
+    def _remember_trigger_matches(self, matches: dict[str, TemplateMatch]) -> None:
+        self._last_trigger_matches = matches
+        self._last_triggers = {name: match.confidence for name, match in matches.items()}
+        self._reset_no_stage_timer_if_stage_visible(self._last_triggers)
+
+    def _merge_trigger_matches(self, matches: dict[str, TemplateMatch]) -> None:
+        self._last_trigger_matches.update(matches)
+        self._last_triggers.update({name: match.confidence for name, match in matches.items()})
+        self._reset_no_stage_timer_if_stage_visible({name: match.confidence for name, match in matches.items()})
+
+    def _reset_no_stage_timer_if_stage_visible(self, triggers: dict[str, float]) -> None:
+        if self._is_fishing_stage_active(triggers):
+            self._no_stage_since = None
 
     def _try_recover(self, max_retries: int = 3) -> bool:
         self.state.phase = BotPhase.RECOVERY

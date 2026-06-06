@@ -694,10 +694,41 @@ def test_auto_stop_when_no_stage_is_visible_for_timeout():
     reasons: list[str] = []
     bot._log = logs.append
     bot._stop_from_brain = reasons.append
+    bot._confirm_no_stage_before_autostop = lambda: True
 
     assert bot._stop_if_no_stage_timed_out(None, needs_meal=False) is True
     assert reasons == [bot_module.STOP_REASON_NO_STAGE]
     assert any(bot_module.STOP_REASON_NO_STAGE in message for message in logs)
+
+
+def test_auto_stop_is_cancelled_when_final_stage_check_sees_stage():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot.capture = DummyCapture()
+    bot.trigger_monitor = SequenceTriggerMonitor([{"start1": DummyMatch()}])
+    bot._no_stage_since = time.time() - bot_module.AUTO_STOP_TIMEOUT_SECONDS - 1.0
+    bot._last_trigger_matches = {}
+    bot._last_triggers = {}
+    bot._last_stage_label = ""
+    bot._has_pending_catch = lambda: False
+    bot._probe_catch_screen = lambda: False
+    logs: list[str] = []
+    reasons: list[str] = []
+    bot._log = logs.append
+    bot._stop_from_brain = reasons.append
+
+    assert bot._stop_if_no_stage_timed_out(None, needs_meal=False) is False
+    assert bot._no_stage_since is None
+    assert reasons == []
+
+
+def test_trigger_match_with_fishing_stage_resets_no_stage_timer():
+    bot = FishingBot.__new__(FishingBot)
+    bot._no_stage_since = 1.0
+
+    bot._remember_trigger_matches({"start1": DummyMatch()})
+
+    assert bot._no_stage_since is None
 
 
 def test_meal_can_interrupt_non_reeling_stages_when_retry_is_due():
@@ -2169,6 +2200,58 @@ def test_status_timer_is_disabled_when_auto_meal_is_off():
     bot._inventory_retry_after = time.time() - 1.0
 
     assert bot._status_timer_needs_meal() is False
+
+
+def test_player_status_estimate_uses_shorter_food_or_water_timer(monkeypatch):
+    current_time = 1000.0
+    monkeypatch.setattr(bot_module.time, "time", lambda: current_time)
+    estimate = bot_module.PlayerStatusEstimate()
+    estimate.update(
+        PlayerStatus(food=100, water=100, health=100, source="screenshot"),
+        trusted_core=True,
+    )
+
+    food_wait, water_wait = estimate.seconds_until_below_breakdown(food_threshold=50, water_threshold=80)
+
+    assert food_wait == 7800.0
+    assert water_wait == 1980.0
+    assert estimate.seconds_until_below(food_threshold=50, water_threshold=80) == 1980.0
+
+
+def test_player_status_estimate_does_not_schedule_long_timer_from_partial_status(monkeypatch):
+    current_time = 1000.0
+    monkeypatch.setattr(bot_module.time, "time", lambda: current_time)
+    estimate = bot_module.PlayerStatusEstimate()
+    estimate.update(
+        PlayerStatus(food=100, water=None, health=100, source="screenshot"),
+        trusted_core=True,
+    )
+
+    assert estimate.seconds_until_below_breakdown(food_threshold=50, water_threshold=80) is None
+    assert estimate.seconds_until_below(food_threshold=50, water_threshold=80) is None
+
+
+def test_detect_player_status_reschedules_inventory_retry_from_fresh_status(monkeypatch):
+    current_time = 1000.0
+    monkeypatch.setattr(bot_module.time, "time", lambda: current_time)
+
+    class MealSystem:
+        def detect_player_status(self, _frame, *, allow_screenshot_fallback: bool = False):
+            del allow_screenshot_fallback
+            return PlayerStatus(food=100, water=100, health=100, source="screenshot")
+
+    bot = FishingBot.__new__(FishingBot)
+    bot.settings = FishingSettings(auto_meal=True, restore_food_from=50, restore_water_from=80)
+    bot.meal_system = MealSystem()
+    bot._meal_search_disabled_until_restart = False
+    bot._player_status_estimate = bot_module.PlayerStatusEstimate()
+    bot._inventory_retry_after = current_time + 60.0
+    bot._check_inventory_space_notification = lambda status=None: None
+    bot._publish_player_status = lambda status: None
+
+    bot.detect_player_status()
+
+    assert bot._inventory_retry_after == current_time + 1800.0
 
 
 def test_kept_fish_weight_is_added_only_for_confirmed_human_storage():

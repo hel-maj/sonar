@@ -14,8 +14,15 @@ from sonar.fishing.constants import resolution_name
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gameplay"
+FIXTURES_2K = Path(__file__).parent / "fixtures" / "gameplay_2k"
 FIXTURES_4K = Path(__file__).parent / "fixtures" / "gameplay_4k"
 TACKLE_FIXTURES = Path(__file__).parent / "fixtures" / "tackle"
+SUPPLIED_2K_FIXTURES = (
+    "20260606103749_1.jpg",
+    "20260606103751_1.jpg",
+    "20260606103758_1.jpg",
+    "20260606104047_1.jpg",
+)
 SUPPLIED_4K_FIXTURES = (
     "20260605174240_1.jpg",
     "20260605174254_1.jpg",
@@ -66,6 +73,14 @@ def load_4k_frame(name: str):
     return frame
 
 
+def load_2k_frame(name: str):
+    path = FIXTURES_2K / name
+    frame = cv2.imread(str(path))
+    assert frame is not None, f"Fixture is not readable: {path}"
+    assert frame.shape[:2] == (1440, 2560)
+    return frame
+
+
 def load_tackle_frame(name: str):
     path = TACKLE_FIXTURES / name
     frame = cv2.imread(str(path))
@@ -79,6 +94,10 @@ def detections(name: str) -> dict[str, float]:
 
 def detections_4k(name: str) -> dict[str, float]:
     return TriggerMonitor().detect(load_4k_frame(name))
+
+
+def detections_2k(name: str) -> dict[str, float]:
+    return TriggerMonitor().detect(load_2k_frame(name))
 
 
 def stage_from_detections(matches: dict[str, float]) -> str | None:
@@ -306,6 +325,16 @@ def test_inventory_and_backpack_regions_do_not_overlap():
 @pytest.mark.parametrize("fixture", SUPPLIED_4K_FIXTURES)
 def test_supplied_4k_gameplay_fixture_is_readable(fixture: str):
     load_4k_frame(fixture)
+
+
+@pytest.mark.parametrize("fixture", SUPPLIED_2K_FIXTURES)
+def test_supplied_2k_gameplay_fixture_is_readable(fixture: str):
+    load_2k_frame(fixture)
+
+
+@pytest.mark.parametrize("fixture", SUPPLIED_2K_FIXTURES)
+def test_supplied_2k_casting_stage_is_detected(fixture: str):
+    assert stage_from_detections(detections_2k(fixture)) == "start1"
 
 
 @pytest.mark.parametrize(

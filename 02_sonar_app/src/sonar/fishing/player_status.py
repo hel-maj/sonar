@@ -178,18 +178,36 @@ class PlayerStatusEstimate:
             source="estimate",
         )
 
-    def seconds_until_below(self, *, food_threshold: int, water_threshold: int) -> float | None:
+    def seconds_until_below_breakdown(self, *, food_threshold: int, water_threshold: int) -> tuple[float, float] | None:
         if self.status is None:
-            return 0.0
-        now = time.time()
-        waits = [
-            self._seconds_until_value_below(self.status.food, self.scanned_at, FOOD_DECAY_SECONDS, food_threshold, now),
-            self._seconds_until_value_below(self.status.water, self.scanned_at, WATER_DECAY_SECONDS, water_threshold, now),
-        ]
-        waits = [wait for wait in waits if wait is not None]
-        if not waits:
             return None
-        return max(0.0, min(waits))
+        now = time.time()
+        food_wait = self._seconds_until_value_below(
+            self.status.food,
+            self.scanned_at,
+            FOOD_DECAY_SECONDS,
+            food_threshold,
+            now,
+        )
+        water_wait = self._seconds_until_value_below(
+            self.status.water,
+            self.scanned_at,
+            WATER_DECAY_SECONDS,
+            water_threshold,
+            now,
+        )
+        if food_wait is None or water_wait is None:
+            return None
+        return max(0.0, food_wait), max(0.0, water_wait)
+
+    def seconds_until_below(self, *, food_threshold: int, water_threshold: int) -> float | None:
+        waits = self.seconds_until_below_breakdown(
+            food_threshold=food_threshold,
+            water_threshold=water_threshold,
+        )
+        if waits is None:
+            return None
+        return min(waits)
 
     @staticmethod
     def _decayed_percent(value: int | None, elapsed: float, period_seconds: float) -> int | None:
