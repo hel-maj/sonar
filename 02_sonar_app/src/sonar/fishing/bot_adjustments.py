@@ -146,8 +146,7 @@ def _prepare_fishing_start(self, timeout: float = 12.0) -> str | None:
     while time.time() < deadline and not self._stop_event.is_set():
         frame = self.capture.capture()
         matches = self.trigger_monitor.find_detections(frame)
-        self._last_trigger_matches = matches
-        self._last_triggers = {name: match.confidence for name, match in matches.items()}
+        self._remember_trigger_matches(matches)
         self._mark_storage_from_matches(matches)
         if matches and time.time() - last_log_at > 1.0:
             self._log(f"Pre-cast detections: {self._format_precise_triggers(matches)}")

@@ -694,10 +694,41 @@ def test_auto_stop_when_no_stage_is_visible_for_timeout():
     reasons: list[str] = []
     bot._log = logs.append
     bot._stop_from_brain = reasons.append
+    bot._confirm_no_stage_before_autostop = lambda: True
 
     assert bot._stop_if_no_stage_timed_out(None, needs_meal=False) is True
     assert reasons == [bot_module.STOP_REASON_NO_STAGE]
     assert any(bot_module.STOP_REASON_NO_STAGE in message for message in logs)
+
+
+def test_auto_stop_is_cancelled_when_final_stage_check_sees_stage():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot.capture = DummyCapture()
+    bot.trigger_monitor = SequenceTriggerMonitor([{"start1": DummyMatch()}])
+    bot._no_stage_since = time.time() - bot_module.AUTO_STOP_TIMEOUT_SECONDS - 1.0
+    bot._last_trigger_matches = {}
+    bot._last_triggers = {}
+    bot._last_stage_label = ""
+    bot._has_pending_catch = lambda: False
+    bot._probe_catch_screen = lambda: False
+    logs: list[str] = []
+    reasons: list[str] = []
+    bot._log = logs.append
+    bot._stop_from_brain = reasons.append
+
+    assert bot._stop_if_no_stage_timed_out(None, needs_meal=False) is False
+    assert bot._no_stage_since is None
+    assert reasons == []
+
+
+def test_trigger_match_with_fishing_stage_resets_no_stage_timer():
+    bot = FishingBot.__new__(FishingBot)
+    bot._no_stage_since = 1.0
+
+    bot._remember_trigger_matches({"start1": DummyMatch()})
+
+    assert bot._no_stage_since is None
 
 
 def test_meal_can_interrupt_non_reeling_stages_when_retry_is_due():
