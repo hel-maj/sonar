@@ -76,6 +76,8 @@ RESERVED_WINDOWS_NAMES = {
     *(f"COM{index}" for index in range(1, 10)),
     *(f"LPT{index}" for index in range(1, 10)),
 }
+BUILD_ARCHIVE_NAME_RE = re.compile(r"^(?:[0-9a-f]{11}|[0-9a-f]{64})-(.+?)(?:\.exe)?\.zip$", re.IGNORECASE)
+VERSION_DIR_RE = re.compile(r"^v?[0-9]+(?:\.[0-9]+){0,3}$")
 DEFAULT_LICENSE_SERVER_URL = "https://updates.example.invalid"
 DEFAULT_STARTUP_BLOCK_URL = "https://m-sonar-addr.ru/api/startup-block"
 DEFAULT_STARTUP_BLOCK_PUBLIC_KEY = "8fdff2bf7962162273a0e97a1ed1c3375c9fd8d174f531143dc6866f49007874"
@@ -175,8 +177,65 @@ RUNTIME_LITERAL_VALUES = {
 }
 
 
+MOJIBAKE_MARKERS = (
+    "вЂ",
+    "в„",
+    "В®",
+    "В©",
+    "Рђ",
+    "РЃ",
+    "Р°",
+    "Рё",
+    "РЅ",
+    "Рѕ",
+    "Рќ",
+    "Рћ",
+    "РЎ",
+    "Р”",
+    "РІ",
+    "С‚",
+    "СЊ",
+    "СЃ",
+    "С‡",
+    "С‚Р”РІ",
+    "тДв",
+    "â",
+    "Â",
+    "Ã",
+    "Ð",
+    "Ñ",
+)
+MOJIBAKE_ENCODINGS = ("cp1251", "cp866", "latin1")
+
+
+def mojibake_score(value: str) -> int:
+    return sum(value.count(marker) for marker in MOJIBAKE_MARKERS)
+
+
+def repair_mojibake(value: str) -> str:
+    current = value
+    current_score = mojibake_score(current)
+    for _ in range(3):
+        best = current
+        best_score = current_score
+        for encoding in MOJIBAKE_ENCODINGS:
+            try:
+                candidate = current.encode(encoding).decode("utf-8")
+            except UnicodeError:
+                continue
+            candidate_score = mojibake_score(candidate)
+            if candidate_score < best_score:
+                best = candidate
+                best_score = candidate_score
+        if best == current:
+            break
+        current = best
+        current_score = best_score
+    return current
+
+
 def sanitize_windows_stem(value: str) -> str:
-    normalized = unicodedata.normalize("NFKC", value)
+    normalized = unicodedata.normalize("NFC", repair_mojibake(value))
     normalized = re.sub(r"\s+", " ", normalized)
     cleaned = "".join("_" if character in INVALID_FILENAME_CHARS or ord(character) < 32 else character for character in normalized)
     cleaned = cleaned.strip(" .")
@@ -189,6 +248,10 @@ def sanitize_windows_stem(value: str) -> str:
     return cleaned
 
 
+def write_metadata_json(path: Path, metadata: dict[str, Any]) -> None:
+    path.write_text(json.dumps(metadata, ensure_ascii=True, indent=2), encoding="utf-8")
+
+
 def load_history(path: Path) -> list[str]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -199,6 +262,7 @@ def load_history(path: Path) -> list[str]:
 
 
 def save_history(path: Path, used: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"used": used}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -207,27 +271,143 @@ def assert_png_loads(path: Path) -> None:
         image.verify()
 
 
-def choose_icon(icons_dir: Path, history_file: Path, rng: random.Random, *, use_history: bool) -> Path:
-    icons = sorted(path for path in icons_dir.glob("*.png") if path.is_file())
-    if not icons:
-        raise SystemExit(f"No PNG icons found in {icons_dir}")
-
-    history = load_history(history_file) if use_history else []
-    shuffled = icons[:]
-    rng.shuffle(shuffled)
-    for icon_path in shuffled:
+def readable_icons(icons_dir: Path) -> list[Path]:
+    icons: list[Path] = []
+    for icon_path in sorted(path for path in icons_dir.glob("*.png") if path.is_file()):
         try:
             assert_png_loads(icon_path)
         except Exception:
             continue
-        if not use_history:
-            return icon_path
-        if icon_path.name not in history:
-            history.append(icon_path.name)
+        icons.append(icon_path)
+    if not icons:
+        raise SystemExit(f"No readable PNG icons found in {icons_dir}")
+    return icons
+
+
+def app_name_from_icon(icon_path: Path) -> str:
+    return sanitize_windows_stem(icon_path.stem)
+
+
+def remember_icon(history_file: Path, icon_name: str, *, use_history: bool) -> None:
+    if not use_history:
+        return
+    history = load_history(history_file)
+    if icon_name not in history:
+        history.append(icon_name)
         save_history(history_file, history)
+
+
+def choose_icon(
+    icons_dir: Path,
+    history_file: Path,
+    rng: random.Random,
+    *,
+    use_history: bool,
+    icon_name: str = "",
+) -> Path:
+    icons = readable_icons(icons_dir)
+    if icon_name:
+        requested = next((path for path in icons if path.name == icon_name), None)
+        if requested is None:
+            raise SystemExit(f"Planned icon {icon_name!r} was not found in {icons_dir}")
+        remember_icon(history_file, requested.name, use_history=use_history)
+        return requested
+
+    history = load_history(history_file) if use_history else []
+    history_names = {str(item) for item in history}
+    shuffled = icons[:]
+    rng.shuffle(shuffled)
+    for icon_path in shuffled:
+        if use_history and icon_path.name in history_names:
+            continue
+        remember_icon(history_file, icon_path.name, use_history=use_history)
         return icon_path
 
-    raise SystemExit(f"No readable PNG icons found in {icons_dir}")
+    rng.shuffle(shuffled)
+    icon_path = shuffled[0]
+    remember_icon(history_file, icon_path.name, use_history=use_history)
+    return icon_path
+
+
+def archive_build_name(path: Path) -> str:
+    match = BUILD_ARCHIVE_NAME_RE.match(path.name)
+    if not match:
+        return ""
+    return sanitize_windows_stem(match.group(1))
+
+
+def existing_build_names(builds_dir: Path | None) -> set[str]:
+    if builds_dir is None or not builds_dir.exists():
+        return set()
+    names: set[str] = set()
+    for archive in builds_dir.rglob("*.zip"):
+        name = archive_build_name(archive)
+        if name:
+            names.add(name.casefold())
+    for executable in builds_dir.rglob("*.exe"):
+        names.add(sanitize_windows_stem(executable.stem).casefold())
+    return names
+
+
+def icon_groups_by_name(icons_dir: Path) -> dict[str, list[Path]]:
+    groups: dict[str, list[Path]] = {}
+    for icon_path in readable_icons(icons_dir):
+        groups.setdefault(app_name_from_icon(icon_path), []).append(icon_path)
+    return groups
+
+
+def build_name_plan(
+    icons_dir: Path,
+    history_file: Path,
+    count: int,
+    rng: random.Random,
+    *,
+    existing_dir: Path | None = None,
+    use_history: bool = True,
+) -> list[dict[str, str]]:
+    if count < 1:
+        raise SystemExit("Plan count must be greater than zero")
+    groups = icon_groups_by_name(icons_dir)
+    all_names = sorted(groups)
+    existing_names = existing_build_names(existing_dir)
+    history_names = {app_name_from_icon(Path(item)).casefold() for item in load_history(history_file)} if use_history else set()
+    cycle_used: set[str] = set()
+    plan: list[dict[str, str]] = []
+
+    def candidates(*, block_existing: bool, block_history: bool) -> list[str]:
+        blocked = set(cycle_used)
+        if block_existing:
+            blocked.update(existing_names)
+        if block_history:
+            blocked.update(history_names)
+        return [name for name in all_names if name.casefold() not in blocked]
+
+    while len(plan) < count:
+        batch = candidates(block_existing=True, block_history=True)
+        if not batch:
+            batch = candidates(block_existing=True, block_history=False)
+        if not batch:
+            cycle_used.clear()
+            batch = candidates(block_existing=True, block_history=True)
+        if not batch:
+            batch = candidates(block_existing=True, block_history=False)
+        if not batch:
+            batch = candidates(block_existing=False, block_history=True)
+        if not batch:
+            batch = candidates(block_existing=False, block_history=False)
+        if not batch:
+            raise SystemExit(f"No PNG icons found in {icons_dir}")
+
+        rng.shuffle(batch)
+        for app_name in batch:
+            icons = groups[app_name][:]
+            rng.shuffle(icons)
+            icon_path = icons[0]
+            plan.append({"icon_name": icon_path.name, "app_name": app_name, "exe_name": f"{app_name}.exe"})
+            cycle_used.add(app_name.casefold())
+            if len(plan) >= count:
+                break
+    return plan
 
 
 def square_icon_image(path: Path) -> Image.Image:
@@ -363,8 +543,14 @@ def prepare_build(args: argparse.Namespace) -> dict[str, Any]:
     resources_dir = source_root / "sonar" / "resources"
     obfuscation_seed = args.seed or secrets.token_hex(16)
     rng = random.Random(obfuscation_seed)
-    icon_png = choose_icon(args.icons_dir.resolve(), args.history_file.resolve(), rng, use_history=not bool(args.seed))
-    app_name = sanitize_windows_stem(icon_png.stem)
+    icon_png = choose_icon(
+        args.icons_dir.resolve(),
+        args.history_file.resolve(),
+        rng,
+        use_history=not bool(args.seed),
+        icon_name=(getattr(args, "icon_name", "") or ""),
+    )
+    app_name = app_name_from_icon(icon_png)
     build_hash = random_hex(rng, 16)
     build_key = args.build_key or random_hex_chars(rng, BUILD_KEY_LENGTH)
     icon_ico = resources_dir / "app.ico"
@@ -396,6 +582,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--icons-dir", required=True, type=Path)
     parser.add_argument("--metadata-out", required=True, type=Path)
     parser.add_argument("--history-file", type=Path)
+    parser.add_argument("--icon-name", default="", help="Planned PNG icon file name for this build.")
+    parser.add_argument("--plan-count", type=int, default=0, help="Create a shuffled build name plan instead of preparing one build.")
+    parser.add_argument("--plan-out", type=Path, help="Path for the planned build name array JSON.")
+    parser.add_argument("--existing-builds-dir", type=Path, help="Existing builds folder used to avoid already occupied names.")
     parser.add_argument("--seed", default="", help="Deterministic obfuscation seed for reproducible release builds.")
     parser.add_argument("--build-key", default="", help="Existing build key for a reproducible rebuild.")
     parser.add_argument("--license-server-url", default="", help="Public neutral license/update base URL for this build.")
@@ -410,9 +600,26 @@ def main() -> int:
     args = parser.parse_args()
     if args.history_file is None:
         args.history_file = args.icons_dir / ".build_history.json"
+    if args.plan_count:
+        if args.plan_out is None:
+            parser.error("--plan-out is required with --plan-count")
+        rng = random.Random(args.seed or secrets.token_hex(16))
+        plan = build_name_plan(
+            args.icons_dir.resolve(),
+            args.history_file.resolve(),
+            args.plan_count,
+            rng,
+            existing_dir=args.existing_builds_dir.resolve() if args.existing_builds_dir else None,
+            use_history=not bool(args.seed),
+        )
+        args.plan_out.parent.mkdir(parents=True, exist_ok=True)
+        args.plan_out.write_text(json.dumps(plan, ensure_ascii=True, indent=2), encoding="utf-8")
+        print(json.dumps(plan, ensure_ascii=True))
+        return 0
+
     metadata = prepare_build(args)
     args.metadata_out.parent.mkdir(parents=True, exist_ok=True)
-    args.metadata_out.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_metadata_json(args.metadata_out, metadata)
     print(json.dumps(metadata, ensure_ascii=True))
     return 0
 

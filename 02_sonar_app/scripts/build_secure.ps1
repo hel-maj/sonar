@@ -82,6 +82,19 @@ function Invoke-Python {
     & $PythonExe @PythonArgs @Arguments
 }
 
+function Read-Utf8Text {
+    param([string]$Path)
+    return Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+}
+
+function Write-Utf8Text {
+    param(
+        [string]$Path,
+        [string]$Value
+    )
+    Set-Content -LiteralPath $Path -Value $Value -Encoding UTF8
+}
+
 function Update-BuildKeyMap {
     param(
         [object]$Branding,
@@ -100,7 +113,7 @@ function Update-BuildKeyMap {
     $BuildKeys = @{}
     if (Test-Path $BuildMapPath) {
         try {
-            $Existing = Get-Content -LiteralPath $BuildMapPath -Raw | ConvertFrom-Json
+            $Existing = Read-Utf8Text $BuildMapPath | ConvertFrom-Json
             if ($Existing.build_keys) {
                 foreach ($Property in $Existing.build_keys.PSObject.Properties) {
                     $BuildKeys[$Property.Name] = $Property.Value
@@ -122,7 +135,7 @@ function Update-BuildKeyMap {
         icon_png = [string]$Branding.icon_png
         created_at = (Get-Date).ToUniversalTime().ToString("o")
     }
-    ([ordered]@{ build_keys = $BuildKeys } | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $BuildMapPath -Encoding UTF8
+    Write-Utf8Text -Path $BuildMapPath -Value ([ordered]@{ build_keys = $BuildKeys } | ConvertTo-Json -Depth 8)
 }
 
 function New-BuildArchive {
@@ -170,6 +183,30 @@ if (-not $SkipInstall) {
 Invoke-Python @((Join-Path $Root "scripts\prepare_streaming_binaries.py"))
 if ($LASTEXITCODE -ne 0) { throw "Failed to prepare streaming binaries" }
 
+$BuildNamePlanPath = Join-Path ([System.IO.Path]::GetTempPath()) ("build_name_plan_{0}.json" -f ([guid]::NewGuid().ToString("N")))
+$BuildNamePlanArgs = @(
+    (Join-Path $Root "scripts\prepare_build_branding.py"),
+    "--source-root", (Join-Path $Root "src"),
+    "--icons-dir", "$IconAssets",
+    "--metadata-out", $BuildNamePlanPath,
+    "--plan-count", "$Count",
+    "--plan-out", "$BuildNamePlanPath",
+    "--existing-builds-dir", "$DistRoot"
+)
+if ($ObfuscationSeed) {
+    $BuildNamePlanArgs += @("--seed", "$ObfuscationSeed")
+}
+Invoke-Python $BuildNamePlanArgs
+if ($LASTEXITCODE -ne 0) { throw "Build name planning failed" }
+$BuildNamePlanRaw = Read-Utf8Text $BuildNamePlanPath | ConvertFrom-Json
+$BuildNamePlan = [System.Collections.Generic.List[object]]::new()
+foreach ($PlanItem in $BuildNamePlanRaw) {
+    [void]$BuildNamePlan.Add($PlanItem)
+}
+if ($BuildNamePlan.Count -lt $Count) {
+    throw "Build name plan contains $($BuildNamePlan.Count) entries, expected $Count"
+}
+
 if (Test-Path $BuildParent) {
     Remove-Item -LiteralPath $BuildParent -Recurse -Force
 }
@@ -178,6 +215,7 @@ if (Test-Path $DistRoot) {
 }
 New-Item -ItemType Directory -Path $DistRoot | Out-Null
 
+try {
 for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     $BuildRoot = Join-Path $BuildParent ("secure_{0}" -f $BuildIndex)
     $SecureSrc = Join-Path $BuildRoot "src"
@@ -193,6 +231,11 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
         "--icons-dir", "$IconAssets",
         "--metadata-out", "$BrandingInfoPath"
     )
+    $PlannedBuild = $BuildNamePlan[$BuildIndex - 1]
+    $PlannedIconName = [string]$PlannedBuild.icon_name
+    if ($PlannedIconName) {
+        $BrandingArgs += @("--icon-name", "$PlannedIconName")
+    }
     if ($BuildKey) {
         $BrandingArgs += @("--build-key", "$BuildKey")
     }
@@ -220,7 +263,7 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     )
     if ($LASTEXITCODE -ne 0) { throw "Release source preparation failed" }
 
-    $Branding = Get-Content -LiteralPath $BrandingInfoPath -Raw | ConvertFrom-Json
+    $Branding = Read-Utf8Text $BrandingInfoPath | ConvertFrom-Json
     $ObfuscationInfoPath = Join-Path $BuildRoot "obfuscation.json"
     Invoke-Python @(
         (Join-Path $Root "scripts\obfuscate_release_sources.py"),
@@ -230,7 +273,7 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     )
     if ($LASTEXITCODE -ne 0) { throw "Release source obfuscation failed" }
 
-    $VersionContent = Get-Content -LiteralPath (Join-Path $SecureSrc "sonar\version.py") -Raw
+    $VersionContent = Read-Utf8Text (Join-Path $SecureSrc "sonar\version.py")
     if ($VersionContent -match 'APP_VERSION\s*=\s*"([0-9]+(?:\.[0-9]+){0,3})"') {
         $AppVersion = $Matches[1]
     } else {
@@ -248,9 +291,7 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     $OutputStem = [System.IO.Path]::GetFileNameWithoutExtension($OutputExeName)
     $AppDist = Join-Path $VersionDistRoot $OutputStem
     if (Test-Path $AppDist) {
-        $OutputStem = "{0}_{1}" -f $OutputStem, ([string]$Branding.build_hash).Substring(0, 8)
-        $OutputExeName = "{0}.exe" -f $OutputStem
-        $AppDist = Join-Path $VersionDistRoot $OutputStem
+        $AppDist = Join-Path $VersionDistRoot ("{0}-{1}" -f ([string]$Branding.build_key), $OutputStem)
     }
     New-Item -ItemType Directory -Path $AppDist -Force | Out-Null
 
@@ -264,6 +305,7 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     Invoke-Python @(
         "-m", "nuitka",
         "--mode=onefile",
+        "--onefile-tempdir-spec={PROGRAM_DIR}/.runtime/onefile_{PID}_{TIME}",
         "--assume-yes-for-downloads",
         "--enable-plugin=pyside6",
         "--deployment",
@@ -307,6 +349,11 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     Write-Host "Build key map: $BuildMapPath"
     Write-Host "Icon source: $($Branding.icon_png)"
     Write-Host "Salt bytes: $($Branding.salt_bytes)"
+}
+} finally {
+    if (Test-Path $BuildNamePlanPath) {
+        Remove-Item -LiteralPath $BuildNamePlanPath -Force
+    }
 }
 
 if (Test-Path $BuildParent) {

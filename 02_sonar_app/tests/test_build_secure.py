@@ -143,6 +143,28 @@ def test_release_obfuscator_renames_private_identifiers_deterministically(tmp_pa
     assert "def _reflected" in (first / "sonar" / "reflect.py").read_text(encoding="utf-8")
 
 
+
+
+def test_branding_repairs_common_mojibake_names():
+    branding = _load_branding()
+
+    assert branding.sanitize_windows_stem("STAR WARSС‚Р”РІ - The Old RepublicС‚Р”РІ") == "STAR WARS™ - The Old Republic™"
+    assert branding.sanitize_windows_stem("Tom ClancyвЂ™s The DivisionВ® 2") == "Tom Clancy’s The Division® 2"
+    assert branding.sanitize_windows_stem("DARK SOULSтДв III") == "DARK SOULS™ III"
+
+
+def test_branding_json_is_ascii_safe_for_powershell(tmp_path):
+    branding = _load_branding()
+    path = tmp_path / "branding.json"
+    metadata = {"app_name": "STAR WARS™ - The Old Republic™", "exe_name": "STAR WARS™ - The Old Republic™.exe"}
+
+    branding.write_metadata_json(path, metadata)
+
+    raw = path.read_text(encoding="utf-8")
+    assert raw.encode("ascii")
+    assert "\\u2122" in raw
+
+
 def test_branding_accepts_neutral_license_server_override():
     branding = _load_branding()
 
@@ -258,6 +280,113 @@ def test_branding_generates_short_build_key(tmp_path):
 
     assert len(result["build_key"]) == 11
     assert all(character in "0123456789abcdef" for character in result["build_key"])
+
+
+def test_build_name_plan_avoids_existing_build_names(tmp_path):
+    branding = _load_branding()
+    icons = tmp_path / "icons"
+    dist = tmp_path / "dist"
+    icons.mkdir()
+    (dist / "1.0.0" / "A").mkdir(parents=True)
+    for name, color in (("A.png", (255, 0, 0, 255)), ("B.png", (0, 255, 0, 255)), ("C.png", (0, 0, 255, 255))):
+        Image.new("RGBA", (16, 16), color).save(icons / name)
+    (dist / "1.0.0" / "A" / "aaaaaaaaaaa-A.zip").write_bytes(b"zip")
+
+    plan = branding.build_name_plan(
+        icons,
+        icons / ".build_history.json",
+        2,
+        branding.random.Random("fixed-seed"),
+        existing_dir=dist,
+    )
+
+    assert {item["app_name"] for item in plan} == {"B", "C"}
+
+
+def test_build_name_plan_cycles_without_duplicates_until_names_are_exhausted(tmp_path):
+    branding = _load_branding()
+    icons = tmp_path / "icons"
+    icons.mkdir()
+    for name, color in (("A.png", (255, 0, 0, 255)), ("B.png", (0, 255, 0, 255)), ("C.png", (0, 0, 255, 255))):
+        Image.new("RGBA", (16, 16), color).save(icons / name)
+
+    plan = branding.build_name_plan(
+        icons,
+        icons / ".build_history.json",
+        5,
+        branding.random.Random("fixed-seed"),
+    )
+    names = [item["app_name"] for item in plan]
+
+    assert len(set(names[:3])) == 3
+    assert len(set(names[3:])) == 2
+
+
+def test_build_name_plan_allows_new_cycle_when_all_names_exist_in_builds_folder(tmp_path):
+    branding = _load_branding()
+    icons = tmp_path / "icons"
+    dist = tmp_path / "dist"
+    icons.mkdir()
+    dist.mkdir()
+    for name, color in (("A.png", (255, 0, 0, 255)), ("B.png", (0, 255, 0, 255)), ("C.png", (0, 0, 255, 255))):
+        Image.new("RGBA", (16, 16), color).save(icons / name)
+        (dist / f"aaaaaaaaaaa-{name.removesuffix('.png')}.zip").write_bytes(b"zip")
+
+    plan = branding.build_name_plan(
+        icons,
+        icons / ".build_history.json",
+        4,
+        branding.random.Random("fixed-seed"),
+        existing_dir=dist,
+    )
+    names = [item["app_name"] for item in plan]
+
+    assert set(names[:3]) == {"A", "B", "C"}
+    assert names[3] in {"A", "B", "C"}
+
+
+def test_branding_uses_planned_icon_and_records_history(tmp_path):
+    branding = _load_branding()
+    icons = tmp_path / "icons"
+    icons.mkdir()
+    Image.new("RGBA", (16, 16), (255, 0, 0, 255)).save(icons / "A.png")
+    Image.new("RGBA", (16, 16), (0, 255, 0, 255)).save(icons / "B.png")
+    history_file = icons / ".build_history.json"
+
+    result = branding.prepare_build(
+        SimpleNamespace(
+            source_root=_make_branding_source(tmp_path / "build"),
+            icons_dir=icons,
+            metadata_out=tmp_path / "build.json",
+            history_file=history_file,
+            icon_name="B.png",
+            seed="",
+            build_key="fixed-key",
+            license_server_url="",
+            license_account_id="",
+            startup_block_url="",
+            startup_block_public_key="",
+        )
+    )
+
+    assert result["app_name"] == "B"
+    assert Path(result["icon_png"]).name == "B.png"
+    assert "B.png" in branding.load_history(history_file)
+
+
+def test_secure_build_plans_names_before_loop_and_keeps_exe_name_clean():
+    script = (ROOT / "scripts" / "build_secure.ps1").read_text(encoding="utf-8")
+
+    assert "--plan-count" in script
+    assert "--existing-builds-dir" in script
+    assert "--icon-name" in script
+    assert "Build name planning failed" in script
+    assert "$BuildNamePlanRaw = Read-Utf8Text $BuildNamePlanPath | ConvertFrom-Json" in script
+    assert "foreach ($PlanItem in $BuildNamePlanRaw)" in script
+    assert "$PlannedBuild = $BuildNamePlan[$BuildIndex - 1]" in script
+    assert "Build name plan contains" in script
+    assert "build_hash).Substring" not in script
+    assert '"{0}-{1}" -f ([string]$Branding.build_key), $OutputStem' in script
 
 
 def test_package_data_includes_uninstall_helpers():

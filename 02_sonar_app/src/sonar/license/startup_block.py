@@ -8,6 +8,7 @@ from typing import Any
 import requests
 
 from sonar.build_metadata import APP_BUILD_HASH, APP_BUILD_KEY, APP_NAME
+from sonar.license.http_headers import ascii_header_token
 from sonar.license.secrets import decrypt_startup_block_public_key, decrypt_startup_block_url
 from sonar.security.ed25519 import ed25519_verify
 
@@ -40,6 +41,7 @@ class StartupBlockClient:
         self.build_key = build_key.strip()
         self.build_hash = build_hash.strip()
         self.app_name = app_name.strip() or "Sonar"
+        self.header_app_name = ascii_header_token(self.app_name)
         self.timeout = timeout
         self.session = session or requests.Session()
 
@@ -63,7 +65,7 @@ class StartupBlockClient:
                     "Accept": "application/json",
                     "Cache-Control": "no-store",
                     "Content-Type": "application/json",
-                    "User-Agent": f"{self.app_name}/1.0 SonarStartupBlock/{self.build_hash or 'dev'}",
+                    "User-Agent": f"{self.header_app_name}/1.0 SonarStartupBlock/{self.build_hash or 'dev'}",
                     "X-Sonar-Build-Hash": self.build_hash,
                     "X-Sonar-Build-Key": self.build_key,
                 },

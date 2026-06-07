@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,10 +71,14 @@ def resolve_packaged_executable_path(
 
 def schedule_self_uninstall(*, pid: int | None = None) -> Path:
     availability = get_uninstall_availability()
-    if not availability.enabled:
+    if not availability.enabled or availability.executable_path is None:
         raise RuntimeError(availability.reason)
 
-    script_path = create_uninstall_script(availability.target_dir, pid=pid or os.getpid())
+    script_path = create_uninstall_script(
+        availability.target_dir,
+        executable_path=availability.executable_path,
+        pid=pid or os.getpid(),
+    )
 
     creationflags = 0
     if os.name == "nt":
@@ -90,14 +93,19 @@ def schedule_self_uninstall(*, pid: int | None = None) -> Path:
     return script_path
 
 
-def create_uninstall_script(target_dir: Path, *, pid: int) -> Path:
-    temp_dir = Path(tempfile.gettempdir())
+def create_uninstall_script(target_dir: Path, *, pid: int, executable_path: Path | None = None) -> Path:
+    target_dir = target_dir.resolve()
+    executable_path = executable_path.resolve() if executable_path is not None else _find_executable_in_dir(target_dir)
+    if executable_path is None:
+        raise FileNotFoundError("Не найден exe для удаления.")
+
     uninstall_id = uuid.uuid4().hex
-    script_path = temp_dir / f"sonar_uninstall_{uninstall_id}.cmd"
+    script_path = target_dir / f".uninstall_{uninstall_id}.cmd"
 
-    ps1_path, sdelete_path = _copy_uninstall_helpers(temp_dir, uninstall_id)
+    ps1_path, sdelete_path = _copy_uninstall_helpers(target_dir, uninstall_id)
 
-    target = _batch_literal(target_dir.resolve())
+    target = _batch_literal(target_dir)
+    executable = _batch_literal(executable_path)
     ps1_full = _batch_literal(ps1_path)
     sdelete_full = _batch_literal(sdelete_path)
 
@@ -106,6 +114,7 @@ chcp 65001 >nul
 setlocal EnableDelayedExpansion
 
 set "TARGET={target}"
+set "EXE={executable}"
 set "PID={int(pid)}"
 set "PS1={ps1_full}"
 set "SDELETE={sdelete_full}"
@@ -119,7 +128,7 @@ if not errorlevel 1 (
 
 echo [SECURE UNINSTALL] Starting targeted wipe...
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" "%TARGET%" "%SDELETE%" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" "%TARGET%" "%SDELETE%" "%EXE%" >nul 2>&1
 
 del "%~f0" /f /q >nul 2>&1
 del "%PS1%" /f /q >nul 2>&1
@@ -131,7 +140,7 @@ exit
     return script_path
 
 
-def _copy_uninstall_helpers(temp_dir: Path, uninstall_id: str) -> tuple[Path, Path]:
+def _copy_uninstall_helpers(target_dir: Path, uninstall_id: str) -> tuple[Path, Path]:
     package_dir = Path(__file__).resolve().parent
     source_ps1 = package_dir / "secure_wipe.ps1"
     source_sdelete = package_dir / "sdelete.exe"
@@ -140,11 +149,18 @@ def _copy_uninstall_helpers(temp_dir: Path, uninstall_id: str) -> tuple[Path, Pa
     if not source_sdelete.exists():
         raise FileNotFoundError(f"Не найден sdelete.exe: {source_sdelete}")
 
-    temp_ps1 = temp_dir / f"sonar_secure_wipe_{uninstall_id}.ps1"
-    temp_sdelete = temp_dir / f"sonar_sdelete_{uninstall_id}.exe"
+    temp_ps1 = target_dir / f".wipe_{uninstall_id}.ps1"
+    temp_sdelete = target_dir / f".erase_{uninstall_id}.exe"
     shutil.copy2(source_ps1, temp_ps1)
     shutil.copy2(source_sdelete, temp_sdelete)
     return temp_ps1, temp_sdelete
+
+
+def _find_executable_in_dir(target_dir: Path) -> Path | None:
+    executables = [path for path in target_dir.glob("*.exe") if path.name.lower() not in PYTHON_EXECUTABLE_NAMES]
+    if len(executables) != 1:
+        return None
+    return executables[0].resolve()
 
 
 def _target_safety_error(target_dir: Path, *, project_dir: Path | None) -> str:

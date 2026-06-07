@@ -7,7 +7,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -22,14 +21,14 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from sonar.core.logging import debug_log
-from sonar.paths import CONFIG_DIR, PROJECT_DIR, RESOURCE_DIR
+from sonar.paths import CONFIG_DIR, LOG_DIR, PROJECT_DIR, RESOURCE_DIR
 from sonar.security.runtime import decrypt_json_literal, decrypt_text_literal
 from sonar.streaming.chat import CHAT_COMMANDS, ChatActionResult, ChatCommand, ChatDetection, ChatTab
 from sonar.vision.geometry import Rect
 
 
 VIEWER_TIMEOUT_SECONDS = 300.0
-STREAM_TEMP_PREFIX = "sonar-stream-"
+STREAM_RUNTIME_PREFIX = "stream-"
 CLOUDFLARED_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
 TUNNELMOLE_URL_RE = re.compile(r"https?://[a-z0-9-]+\.tunnelmole\.(?:net|com)", re.IGNORECASE)
 CLOUDFLARED_REGISTERED_RE = re.compile(r"\bRegistered tunnel connection\b", re.IGNORECASE)
@@ -37,6 +36,7 @@ ARGOTUNNEL_DNS_ERROR_RE = re.compile(r"\bFailed to initialize DNS local resolver
 STREAMING_RESOURCE_DIR = RESOURCE_DIR / "streaming"
 CHAT_ICON_DIR = RESOURCE_DIR / "chat_icons"
 STREAMING_CACHE_DIR = CONFIG_DIR / "streaming"
+STREAMING_RUNTIME_DIR = STREAMING_CACHE_DIR / "runtime"
 LEGACY_STREAMING_CACHE_DIR = PROJECT_DIR / "02_sonar_app" / "config" / "streaming"
 FFMPEG_DOWNLOAD_URL = decrypt_text_literal("ffmpeg_download_url")
 CLOUDFLARED_DOWNLOAD_URL = decrypt_text_literal("cloudflared_download_url")
@@ -60,7 +60,7 @@ CHAT_MEMORY_LATEST_STALE_GRACE_SECONDS = 1.0
 CHAT_CONFIRM_SCAN_INTERVAL_SECONDS = 1.0
 CHAT_CONFIRM_SCAN_TIMEOUT_SECONDS = 10.0
 CHAT_CONFIRM_RETENTION_SECONDS = 120.0
-CHAT_MEMORY_OUT_DIR = PROJECT_DIR / "logs" / "chat_memory"
+CHAT_MEMORY_OUT_DIR = LOG_DIR / "chat_memory"
 CHAT_MEMORY_LATEST_JSON = CHAT_MEMORY_OUT_DIR / "chat_history_latest.json"
 
 
@@ -1346,7 +1346,7 @@ class StreamingService:
         self.license_role_callback = license_role_callback
         self.clock = clock
         self.popen_factory = popen_factory
-        self.temp_root = temp_root or Path(tempfile.gettempdir())
+        self.temp_root = temp_root or STREAMING_RUNTIME_DIR
         self.viewer_timeout_seconds = viewer_timeout_seconds
         self._lock = threading.RLock()
         self._quality = "720p"
@@ -1374,7 +1374,7 @@ class StreamingService:
         self._chat_action_lock = threading.Lock()
         self._started_at: float | None = None
         self._last_viewer_activity_at: float | None = None
-        self._runtime_dir = self.temp_root / f"{STREAM_TEMP_PREFIX}runtime-{uuid.uuid4().hex}"
+        self._runtime_dir = self.temp_root / f"{STREAM_RUNTIME_PREFIX}runtime-{uuid.uuid4().hex}"
         self._ffmpeg_binary: Path | None = None
         self._cloudflared_binary: Path | None = None
         self._binary_prepare_error = ""
@@ -1969,7 +1969,7 @@ class StreamingService:
 
     def cleanup_orphaned_runtime_dirs(self) -> None:
         try:
-            for child in self.temp_root.glob(f"{STREAM_TEMP_PREFIX}*"):
+            for child in self.temp_root.glob(f"{STREAM_RUNTIME_PREFIX}*"):
                 if child.is_dir():
                     shutil.rmtree(child, ignore_errors=True)
         except OSError as exc:
@@ -1996,7 +1996,7 @@ class StreamingService:
         self._public_url = None
         self._tunnel_provider = ""
         self._cloudflared_start_attempts = 0
-        self._temp_dir = self.temp_root / f"{STREAM_TEMP_PREFIX}{uuid.uuid4().hex}"
+        self._temp_dir = self.temp_root / f"{STREAM_RUNTIME_PREFIX}{uuid.uuid4().hex}"
         self._hls_dir = self._temp_dir / "hls"
         self._hls_dir.mkdir(parents=True, exist_ok=True)
         self._log(f"Stream link: new runtime temp_dir={self._temp_dir} hls_dir={self._hls_dir}")
