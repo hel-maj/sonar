@@ -93,6 +93,7 @@ from sonar.ui.widgets import (
     ActionButton,
     Badge,
     Card,
+    ClickableLabel,
     ContainedScrollArea,
     ElidedLabel,
     ExternalLinkLabel,
@@ -656,7 +657,7 @@ class MainWindow(QMainWindow):
         self._register_page(self.statistics_tab, "Статистика", ui_icon("chart.svg"), licensed=True, feature_key=FEATURE_STATISTICS)
         self._register_page(self.stream_tab, "Стрим", ui_icon("stream.svg"), licensed=True, feature_key=FEATURE_STREAM)
         self._register_page(self.telegram_tab, "Telegram", ui_icon("telegram_outline.svg"), licensed=True, feature_key=FEATURE_TELEGRAM)
-        self._register_page(self.about_tab, "О приложении", ui_icon("info.svg"), licensed=False)
+        self._register_page(self.about_tab, "О программе", ui_icon("info.svg"), licensed=False)
         self._select_page(self.license_tab)
         self._apply_license_gate()
 
@@ -739,8 +740,14 @@ class MainWindow(QMainWindow):
         self.sidebar_version_label = QLabel("")
         self.sidebar_version_label.setProperty("muted", True)
         self.sidebar_version_label.setStyleSheet("font-size: 11px;")
-        self.sidebar_update_label = QLabel("")
-        self.sidebar_update_label.setStyleSheet("font-size: 11px; color: #e54848; font-weight: 800;")
+        self.sidebar_update_label = ClickableLabel("")
+        self.sidebar_update_label.setMinimumWidth(0)
+        self.sidebar_update_label.setWordWrap(True)
+        self.sidebar_update_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.sidebar_update_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.sidebar_update_label.setStyleSheet("font-size: 11px; color: #e54848; font-weight: 800; text-decoration: underline;")
+        self.sidebar_update_label.setToolTip("Открыть вкладку «О программе»")
+        self.sidebar_update_label.clicked.connect(lambda: self._select_page(self.about_tab))
         self.sidebar_update_label.hide()
         layout.addWidget(self.sidebar_version_label)
         layout.addWidget(self.sidebar_update_label)
@@ -2269,7 +2276,7 @@ class MainWindow(QMainWindow):
         return page
 
     def _build_about_tab(self) -> QWidget:
-        page, layout = self._page("О приложении", "Версия приложения, состояние обновления и сведения о билде.")
+        page, layout = self._page("О программе", "Версия приложения, состояние обновления и сведения о билде.")
         top = QHBoxLayout()
         top.setSpacing(12)
 

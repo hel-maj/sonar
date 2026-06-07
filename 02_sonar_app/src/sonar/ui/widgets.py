@@ -609,6 +609,21 @@ class Badge(QLabel):
         self.style().polish(self)
 
 
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class ElidedLabel(QLabel):
     def __init__(self, text: str = "", parent: QWidget | None = None, *, tooltip_delay_ms: int = 500) -> None:
         super().__init__(parent)

@@ -249,6 +249,21 @@ class FakeSession:
         return FakeResponse({"data": {"id": "machine-id", "attributes": {}}})
 
 
+
+
+def test_keygen_headers_use_ascii_name_but_metadata_keeps_branding():
+    session = FakeSession()
+    app_name = "STAR WARS™ - The Old Republic™"
+    client = KeygenLicenseClient("https://keygen.example", "account", build_hash="hash-123", app_name=app_name, session=session)
+
+    client.activate_machine("LICENSE-KEY", "license-id", "fingerprint")
+
+    call = session.calls[0]
+    assert call["headers"]["User-Agent"].encode("ascii")
+    assert "STAR WARS" in call["headers"]["User-Agent"]
+    assert call["json"]["data"]["attributes"]["metadata"]["app_name"] == app_name
+
+
 def test_keygen_validation_sends_build_hash():
     session = FakeSession()
     client = KeygenLicenseClient("https://keygen.example", "account", build_hash="hash-123", app_name="Build Name", session=session)

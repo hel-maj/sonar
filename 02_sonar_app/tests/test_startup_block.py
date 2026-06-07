@@ -76,6 +76,32 @@ class FakeSession:
         return FakeResponse(self.body)
 
 
+
+
+def test_startup_block_headers_use_ascii_name_but_payload_keeps_branding():
+    seed = bytes(range(32))
+    public_key = ed25519_public_key_from_seed(seed)
+    message = b'{"blocked":false,"download_url":""}'
+    session = FakeSession({"blocked": False, "download_url": "", "signature": encode_base64url(ed25519_sign(seed, message))})
+    app_name = "Tom Clancy’s The Division® 2"
+    client = StartupBlockClient(
+        check_url="https://checks.example/api/startup-block",
+        public_key=public_key,
+        build_key="build-key",
+        build_hash="build-hash",
+        app_name=app_name,
+        session=session,
+    )
+
+    status = client.check(license_key="LICENSE-KEY")
+
+    assert status.checked is True
+    call = session.calls[0]
+    assert call["json"]["app_name"] == app_name
+    assert call["headers"]["User-Agent"].encode("ascii")
+    assert "Tom Clancys" in call["headers"]["User-Agent"]
+
+
 def test_startup_block_client_sends_build_and_license_keys():
     seed = bytes(range(32))
     public_key = ed25519_public_key_from_seed(seed)

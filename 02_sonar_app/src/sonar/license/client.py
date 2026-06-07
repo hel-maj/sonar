@@ -12,6 +12,7 @@ import requests
 
 from sonar.build_metadata import APP_BUILD_HASH, APP_BUILD_KEY, APP_NAME
 from sonar.license.features import entitlements_from_metadata
+from sonar.license.http_headers import ascii_header_token
 from sonar.security.runtime import decrypt_json_literal
 
 
@@ -71,6 +72,7 @@ class KeygenLicenseClient:
         self.build_hash = build_hash.strip() or "dev"
         self.build_key = build_key.strip() or "dev"
         self.app_name = app_name.strip() or "Sonar"
+        self.header_app_name = ascii_header_token(self.app_name)
         self.timeout = timeout
         self.session = session or requests.Session()
 
@@ -184,7 +186,7 @@ class KeygenLicenseClient:
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         headers = {
             **JSON_API_HEADERS,
-            "User-Agent": f"{self.app_name}/1.0 SonarBuild/{self.build_hash}",
+            "User-Agent": f"{self.header_app_name}/1.0 SonarBuild/{self.build_hash}",
             "X-Sonar-Build-Hash": self.build_hash,
             "X-Sonar-Build-Key": self.build_key,
         }
@@ -415,7 +417,7 @@ def _detect_local_ip() -> str:
 
 
 def _detect_public_ip() -> str:
-    headers = {"User-Agent": f"{APP_NAME}/1.0"}
+    headers = {"User-Agent": f"{ascii_header_token(APP_NAME)}/1.0"}
     for url in decrypt_json_literal("public_ip_services"):
         try:
             response = requests.get(url, headers=headers, timeout=PUBLIC_IP_TIMEOUT)

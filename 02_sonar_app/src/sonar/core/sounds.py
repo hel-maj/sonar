@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import tempfile
 import wave
 from pathlib import Path
 
-from sonar.paths import RESOURCE_DIR
+from sonar.paths import CONFIG_DIR, RESOURCE_DIR
 
 
 def play_sound(name: str, *, volume: float = 1.0) -> None:
@@ -22,7 +21,7 @@ def play_sound(name: str, *, volume: float = 1.0) -> None:
 
 def _volume_adjusted_wav(path: Path, volume: float) -> Path | None:
     volume = max(0.0, min(1.0, volume))
-    cache_dir = Path(tempfile.gettempdir()) / "sonar_sound_cache"
+    cache_dir = CONFIG_DIR / "cache" / "sounds"
     cache_path = cache_dir / f"{path.stem}_volume_{int(volume * 1000):03d}{path.suffix}"
     try:
         if cache_path.exists() and cache_path.stat().st_mtime >= path.stat().st_mtime:

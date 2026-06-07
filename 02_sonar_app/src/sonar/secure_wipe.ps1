@@ -1,6 +1,7 @@
 param(
     [string]$TargetDir,
-    [string]$SDeletePath
+    [string]$SDeletePath,
+    [string]$ExecutablePath
 )
 
 if (-not (Test-Path $TargetDir)) { exit 0 }
@@ -15,21 +16,39 @@ function Secure-Delete-File {
     } catch { }
 }
 
-# Secure delete файлов
-Get-ChildItem -Path $TargetDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-    Secure-Delete-File $_
+function Secure-Delete-Path {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    try {
+        $Item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if ($null -eq $Item) { return }
+        if ($Item.PSIsContainer) {
+            Get-ChildItem -LiteralPath $Item.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                Secure-Delete-File $_
+            }
+            Remove-Item -LiteralPath $Item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            Secure-Delete-File $Item
+        }
+    } catch { }
 }
 
-# Удаление папки
-Remove-Item -Path $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+# Только файлы и папки, которые приложение создаёт само
+Secure-Delete-Path $ExecutablePath
+Secure-Delete-Path (Join-Path $TargetDir "config")
+Secure-Delete-Path (Join-Path $TargetDir "logs")
+Secure-Delete-Path (Join-Path $TargetDir "debug_capture")
+Secure-Delete-Path (Join-Path $TargetDir ".runtime")
 
 # Лёгкая очистка свободного места (меньше шума)
 $Drive = $TargetDir.Substring(0,2)
 & $SDeletePath -accepteula -p 1 -z -q $Drive 2>$null
 
 # Только prefetch этой программы
-$AppName = Split-Path $TargetDir -Leaf
-Get-ChildItem "$env:SystemRoot\Prefetch\*$AppName*.pf" -ErrorAction SilentlyContinue |
-    Remove-Item -Force -ErrorAction SilentlyContinue
+$AppName = [System.IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
+if ($AppName) {
+    Get-ChildItem -Path "$env:SystemRoot\Prefetch" -Filter "$AppName*.pf" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host "[SECURE WIPE] Completed"
