@@ -31,3 +31,5 @@ assets/game_icons/.build_history.json
 .vscode/
 .DS_Store
 Thumbs.db
+
+.dist
