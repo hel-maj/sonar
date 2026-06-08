@@ -8,7 +8,7 @@ from sonar.license.features import FEATURE_FISHING, FEATURE_FISHING_BOT, FEATURE
 from sonar.core.state import BotPhase
 from sonar.streaming.chat import ChatActionResult, ChatDetection
 from sonar.license.startup_block import StartupBlockStatus
-from sonar.ui.main_window import MainWindow, startup_block_allows_launch
+from sonar.ui.main_window import MainWindow, startup_block_allows_launch, startup_block_blocks_running_app
 
 
 class DummyStack:
@@ -230,3 +230,9 @@ def test_startup_block_check_is_required_for_launch():
     assert startup_block_allows_launch(StartupBlockStatus(checked=True, blocked=False)) is True
     assert startup_block_allows_launch(StartupBlockStatus(checked=False, blocked=False, error="request failed")) is False
     assert startup_block_allows_launch(StartupBlockStatus(checked=True, blocked=True, download_url="https://example.test")) is False
+
+
+def test_runtime_startup_block_ignores_network_errors():
+    assert startup_block_blocks_running_app(StartupBlockStatus(checked=False, blocked=False, error="request failed")) is False
+    assert startup_block_blocks_running_app(StartupBlockStatus(checked=True, blocked=False)) is False
+    assert startup_block_blocks_running_app(StartupBlockStatus(checked=True, blocked=True, download_url="https://example.test")) is True

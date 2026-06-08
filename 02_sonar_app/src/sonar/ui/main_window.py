@@ -81,7 +81,7 @@ from sonar.license.features import (
     subscription_product_name,
 )
 from sonar.license.manager import LicenseManager
-from sonar.license.startup_block import StartupBlockClient, StartupBlockStatus
+from sonar.license.startup_block import StartupBlockClient, StartupBlockStatus, startup_block_blocks_running_app
 from sonar.paths import APP_DIR, CONFIG_DIR, RESOURCE_DIR
 from sonar.self_uninstall import get_uninstall_availability, schedule_self_uninstall
 from sonar.streaming import StreamingService
@@ -2753,7 +2753,7 @@ class MainWindow(QMainWindow):
         self._startup_block_checking = False
         if not isinstance(status, StartupBlockStatus):
             status = StartupBlockStatus(error="Startup block check did not return a valid result")
-        if not startup_block_allows_launch(status):
+        if startup_block_blocks_running_app(status):
             self._enter_startup_blocked_state(_startup_block_download_url(status, self.license_status))
 
     def _enter_startup_blocked_state(self, download_url: str) -> None:

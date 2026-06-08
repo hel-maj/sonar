@@ -1,0 +1,26 @@
+{
+  "target": {
+    "use_original_update_rpf": true,
+    "rpf_archive_relative_path": "update/update.rpf",
+    "weather_xml_inside_rpf": "common/data/levels/gta5/weather.xml",
+    "backup_dir_name": "backups",
+    "extra_game_paths": [],
+    "allow_binary_patch_rpf": true
+  },
+  "values": {
+    "default": {
+      "RippleBumpiness": "0.420000",
+      "OceanBumpiness": "0.250000",
+      "OceanWaveMinAmplitude": "0.000000",
+      "OceanWaveMaxAmplitude": "0.000000",
+      "ShoreWaveMaxAmplitude": "0.000000"
+    },
+    "no_waves": {
+      "RippleBumpiness": "0.000000",
+      "OceanBumpiness": "0.000000",
+      "OceanWaveMinAmplitude": "0.000000",
+      "OceanWaveMaxAmplitude": "0.000000",
+      "ShoreWaveMaxAmplitude": "0.000000"
+    }
+  }
+}
