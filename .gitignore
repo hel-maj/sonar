@@ -69,6 +69,7 @@ dist/
 /02_sonar_app/src/sonar/resources/streaming/*.zip
 /02_sonar_app/build_logs/
 /02_sonar_app/builds/
+/02_sonar_app/nuitka-crash-report.xml
 
 # Memory/chat extraction artifacts
 **/process_memory_dump_*/

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from sonar.license.startup_block import (
     StartupBlockClient,
+    StartupBlockStatus,
     encode_base64url,
     parse_signed_startup_block_response,
+    startup_block_blocks_running_app,
 )
 from sonar.security.ed25519 import ed25519_public_key_from_seed, ed25519_sign, ed25519_verify
 
@@ -125,3 +127,10 @@ def test_startup_block_client_sends_build_and_license_keys():
     assert call["json"]["build_key"] == "build-key"
     assert call["json"]["license_key"] == "LICENSE-KEY"
     assert call["headers"]["X-Sonar-Build-Key"] == "build-key"
+
+
+def test_running_app_blocks_only_on_signed_block_status():
+    assert startup_block_blocks_running_app(StartupBlockStatus(checked=False, error="network failed")) is False
+    assert startup_block_blocks_running_app(StartupBlockStatus(checked=True, blocked=False)) is False
+    assert startup_block_blocks_running_app(StartupBlockStatus(checked=True, blocked=True, download_url="https://example.test")) is True
+

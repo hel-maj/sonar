@@ -142,5 +142,9 @@ def decode_base64url(value: str) -> bytes:
         raise ValueError("Invalid base64url value") from exc
 
 
+def startup_block_blocks_running_app(status: StartupBlockStatus) -> bool:
+    return bool(status.checked and status.blocked and not status.error)
+
+
 def encode_base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")

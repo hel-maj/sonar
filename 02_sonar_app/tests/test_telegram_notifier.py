@@ -785,8 +785,11 @@ def test_caught_fish_notification_sends_photo_with_caption(monkeypatch):
     assert photo_call[1]["files"]["photo"][1] == b"png"
     caption = photo_call[1]["data"]["caption"]
     assert "Рустер" in caption
-    assert "📦 <b>Всего:</b> 5.5 кг · 3 выловов" in caption
-    assert "📦 <b>Оставлено:</b> 3.5 кг · 2 выловов" in caption
+    kept_line = "📦 <b>Оставлено:</b> 3.5 кг · 2 выловов"
+    total_line = "📦 <b>Всего:</b> 5.5 кг · 3 выловов"
+    assert kept_line in caption
+    assert total_line in caption
+    assert caption.index(kept_line) < caption.index(total_line)
 
 
 def test_caught_fish_notification_does_not_promote_record_quality(monkeypatch):
