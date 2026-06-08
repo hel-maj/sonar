@@ -1,4 +1,3 @@
 @echo off
-cd /d "%~dp0"
-python gta5_waves.py
+py -3 "%~dp0gta5_waves.py"
 pause

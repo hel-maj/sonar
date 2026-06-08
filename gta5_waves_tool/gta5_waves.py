@@ -6,8 +6,6 @@ import mmap
 import os
 import re
 import shutil
-import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,14 +15,6 @@ try:
   import winreg
 except ImportError:
   winreg = None
-
-PARAMS = [
-  'RippleBumpiness',
-  'OceanBumpiness',
-  'OceanWaveMinAmplitude',
-  'OceanWaveMaxAmplitude',
-  'ShoreWaveMaxAmplitude',
-]
 
 APP_ID_GTAV = '271590'
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -37,40 +27,51 @@ class GameInstall:
   source: str
 
 
+@dataclass(frozen=True)
+class Modification:
+  weather: str
+  param: str
+  start: int
+  old: bytes
+  target: bytes
+
+
 def main() -> None:
   print('GTA V Waves Tool')
   print('================')
-
-  config = load_config()
-  installs = find_game_installs(config)
-
-  if len(installs) == 0:
-    print('GTA V не найдена автоматически.')
-    print('Добавь путь в config.json -> target.extra_game_paths и запусти снова.')
-    wait_enter()
-    return
-
-  game = choose_game(installs)
-  target_values = choose_action(config)
-
-  if target_values is None:
-    print('Выход.')
-    return
-
-  rpf_path = get_rpf_path(game.path, config)
-
-  if not rpf_path.exists():
-    print(f'Не найден архив: {rpf_path}')
-    wait_enter()
-    return
-
-  if not is_admin():
-    print('Предупреждение: скрипт запущен без прав администратора.')
-    print('Если GTA V лежит в Program Files или доступ запрещён, запусти run.bat от имени администратора.')
-    print('')
+  print('Патчит оригинальный update/update.rpf. Закрой GTA V и OpenIV перед запуском.')
+  print('')
 
   try:
-    patch_rpf(rpf_path, target_values, config)
+    config = load_config()
+    installs = find_game_installs(config)
+
+    if len(installs) == 0:
+      print('GTA V не найдена автоматически.')
+      print('Добавь путь в config.json -> target.extra_game_paths и запусти снова.')
+      wait_enter()
+      return
+
+    game = choose_game(installs)
+    preset_name = choose_action()
+
+    if preset_name is None:
+      print('Выход.')
+      return
+
+    rpf_path = get_rpf_path(game.path, config)
+
+    if not rpf_path.exists():
+      print(f'Не найден архив: {rpf_path}')
+      wait_enter()
+      return
+
+    if not is_admin():
+      print('Предупреждение: скрипт запущен без прав администратора.')
+      print('Если GTA V лежит в Program Files или доступ запрещён, запусти run.bat от имени администратора.')
+      print('')
+
+    patch_rpf(rpf_path, preset_name, config)
   except PermissionError:
     print('Нет доступа к update.rpf. Запусти скрипт от имени администратора и закрой GTA/OpenIV.')
   except RuntimeError as error:
@@ -96,26 +97,55 @@ def validate_config(config: dict) -> None:
   if 'target' not in config:
     raise ValueError('В config.json нет блока target.')
 
-  if 'values' not in config:
+  parameters = config.get('parameters')
+
+  if not isinstance(parameters, list) or len(parameters) == 0:
+    raise ValueError('В config.json должен быть непустой массив parameters.')
+
+  values = config.get('values')
+
+  if not isinstance(values, dict):
     raise ValueError('В config.json нет блока values.')
 
   for preset_name in ['default', 'no_waves']:
-    if preset_name not in config['values']:
+    preset = values.get(preset_name)
+
+    if not isinstance(preset, dict):
       raise ValueError(f'В config.json нет values.{preset_name}.')
 
-    for param in PARAMS:
-      if param not in config['values'][preset_name]:
-        raise ValueError(f'В config.json нет values.{preset_name}.{param}.')
+    for weather_name, weather_values in preset.items():
+      if not isinstance(weather_values, dict):
+        raise ValueError(f'Некорректный блок values.{preset_name}.{weather_name}.')
 
-      value = str(config['values'][preset_name][param])
+      for param in parameters:
+        if param not in weather_values:
+          raise ValueError(f'В config.json нет values.{preset_name}.{weather_name}.{param}.')
 
-      if not re.fullmatch(r'-?\d+\.\d+', value):
-        raise ValueError(f'Некорректное значение {preset_name}.{param}: {value}')
+        value = str(weather_values[param])
+
+        if not re.fullmatch(r'-?\d+\.\d+', value):
+          raise ValueError(f'Некорректное значение {preset_name}.{weather_name}.{param}: {value}')
+
+  default = values['default']
+  no_waves = values['no_waves']
+
+  for weather_name, weather_values in default.items():
+    if weather_name not in no_waves:
+      raise ValueError(f'В config.json нет values.no_waves.{weather_name}.')
+
+    for param in parameters:
+      default_value = str(weather_values[param])
+      no_waves_value = str(no_waves[weather_name][param])
+
+      if len(default_value) != len(no_waves_value):
+        raise ValueError(
+          f'Длины значений должны совпадать для безопасного патча: {weather_name}.{param}: '
+          f'{default_value} -> {no_waves_value}'
+        )
 
 
 def find_game_installs(config: dict) -> list[GameInstall]:
   installs: list[GameInstall] = []
-
   installs.extend(find_steam_installs())
   installs.extend(find_epic_installs())
   installs.extend(find_rockstar_installs())
@@ -124,7 +154,10 @@ def find_game_installs(config: dict) -> list[GameInstall]:
   unique: dict[str, GameInstall] = {}
 
   for install in installs:
-    normalized = str(install.path.resolve()).lower()
+    try:
+      normalized = str(install.path.resolve()).lower()
+    except OSError:
+      normalized = str(install.path).lower()
 
     if normalized not in unique and is_gtav_dir(install.path):
       unique[normalized] = install
@@ -133,13 +166,10 @@ def find_game_installs(config: dict) -> list[GameInstall]:
 
 
 def find_steam_installs() -> list[GameInstall]:
-  steam_roots = get_steam_roots()
   installs: list[GameInstall] = []
 
-  for steam_root in steam_roots:
-    libraries = get_steam_libraries(steam_root)
-
-    for library in libraries:
+  for steam_root in get_steam_roots():
+    for library in get_steam_libraries(steam_root):
       manifest_path = library / 'steamapps' / f'appmanifest_{APP_ID_GTAV}.acf'
       install_dir = parse_steam_install_dir(manifest_path)
 
@@ -196,8 +226,7 @@ def get_steam_libraries(steam_root: Path) -> list[Path]:
     return dedupe_paths(libraries)
 
   for match in re.finditer(r'"path"\s+"([^\"]+)"', text):
-    raw_path = match.group(1).replace('\\\\', '\\')
-    libraries.append(Path(raw_path))
+    libraries.append(Path(match.group(1).replace('\\\\', '\\')))
 
   return dedupe_paths(libraries)
 
@@ -364,7 +393,7 @@ def choose_game(installs: list[GameInstall]) -> GameInstall:
     print('Некорректный выбор.')
 
 
-def choose_action(config: dict) -> dict[str, str] | None:
+def choose_action() -> str | None:
   print('Что сделать?')
   print('1. Удалить волны')
   print('2. Вернуть волны')
@@ -374,10 +403,10 @@ def choose_action(config: dict) -> dict[str, str] | None:
     answer = input('Выбери действие: ').strip()
 
     if answer == '1':
-      return normalize_values(config['values']['no_waves'])
+      return 'no_waves'
 
     if answer == '2':
-      return normalize_values(config['values']['default'])
+      return 'default'
 
     if answer == '3':
       return None
@@ -385,92 +414,130 @@ def choose_action(config: dict) -> dict[str, str] | None:
     print('Некорректный выбор.')
 
 
-def normalize_values(values: dict) -> dict[str, str]:
-  return {param: str(values[param]) for param in PARAMS}
-
-
 def get_rpf_path(game_path: Path, config: dict) -> Path:
-  target = config.get('target', {})
-  relative_path = target.get('rpf_archive_relative_path', 'update/update.rpf')
+  relative_path = config.get('target', {}).get('rpf_archive_relative_path', 'update/update.rpf')
   return game_path / Path(str(relative_path))
 
 
-def patch_rpf(rpf_path: Path, values: dict[str, str], config: dict) -> None:
+def patch_rpf(rpf_path: Path, preset_name: str, config: dict) -> None:
   if not config.get('target', {}).get('allow_binary_patch_rpf', True):
     raise RuntimeError('В config.json отключён allow_binary_patch_rpf.')
 
   print(f'Архив: {rpf_path}')
-  print('Ищу XML-параметры внутри update.rpf...')
+  print(f'Режим: {preset_name}')
+  print('Ищу WeatherTypes внутри update.rpf...')
 
-  modifications = collect_modifications(rpf_path, values)
+  modifications, found_weather = collect_modifications(rpf_path, preset_name, config)
 
-  if len(modifications) == 0:
+  if len(found_weather) == 0:
     raise RuntimeError(
-      'Не нашёл XML-теги с параметрами волн внутри update.rpf.\n'
+      'Не нашёл блок <WeatherTypes> внутри update.rpf.\n'
       'Вероятно, weather.xml хранится в RPF в сжатом/зашифрованном виде.\n'
       'Скрипт ничего не изменил. В этом случае нужна замена через OpenIV/OIV/RPF-инструмент.'
     )
 
+  missing_weather = sorted(set(config['values'][preset_name]) - found_weather)
+
+  if len(modifications) == 0:
+    print('Изменений не требуется: значения уже совпадают с выбранным режимом.')
+    print_missing_weather(missing_weather)
+    return
+
   create_backup(rpf_path, config)
   apply_modifications(rpf_path, modifications)
-
-  print('')
-  print('Готово. Изменённые параметры:')
-
-  counts: dict[str, int] = {}
-
-  for modification in modifications:
-    counts[modification['param']] = counts.get(modification['param'], 0) + 1
-
-  for param in PARAMS:
-    count = counts.get(param, 0)
-    print(f'- {param}: {count}')
-
-  missing = [param for param in PARAMS if counts.get(param, 0) == 0]
-
-  if len(missing) > 0:
-    print('')
-    print('Не найдены параметры:')
-
-    for param in missing:
-      print(f'- {param}')
+  print_report(modifications, missing_weather)
 
 
-def collect_modifications(rpf_path: Path, values: dict[str, str]) -> list[dict[str, object]]:
-  modifications: list[dict[str, object]] = []
+def collect_modifications(rpf_path: Path, preset_name: str, config: dict) -> tuple[list[Modification], set[str]]:
+  modifications: list[Modification] = []
+  found_weather: set[str] = set()
+  preset = config['values'][preset_name]
+  parameters = [str(param) for param in config['parameters']]
+  weather_start_token = b'<WeatherTypes>'
+  weather_end_token = b'</WeatherTypes>'
 
   with rpf_path.open('rb') as file:
     with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
-      for param in PARAMS:
-        target = values[param].encode('ascii')
-        pattern = re.compile(rb'<' + re.escape(param.encode('ascii')) + rb'\s+value="([^"]+)"\s*/>')
+      search_from = 0
 
-        for match in pattern.finditer(mapped):
-          start, end = match.span(1)
-          current = mapped[start:end]
+      while True:
+        section_start = mapped.find(weather_start_token, search_from)
 
-          if len(current) != len(target):
-            raise RuntimeError(
-              f'Найден {param}, но длина значения отличается: {current.decode("ascii", errors="replace")} -> {values[param]}.\n'
-              'In-place замена безопасна только при одинаковой длине значений. Сделай значение формата 0.000000.'
-            )
+        if section_start == -1:
+          break
 
-          if current != target:
-            modifications.append({
-              'param': param,
-              'start': start,
-              'target': target,
-              'old': current,
-            })
+        section_end = mapped.find(weather_end_token, section_start)
 
-  return modifications
+        if section_end == -1:
+          break
+
+        section_end += len(weather_end_token)
+        section = mapped[section_start:section_end]
+        collect_section_modifications(section, section_start, preset, parameters, modifications, found_weather)
+        search_from = section_end
+
+  return modifications, found_weather
+
+
+def collect_section_modifications(
+  section: bytes,
+  section_offset: int,
+  preset: dict,
+  parameters: list[str],
+  modifications: list[Modification],
+  found_weather: set[str],
+) -> None:
+  for item_match in re.finditer(rb'<Item>.*?</Item>', section, re.DOTALL):
+    item = item_match.group(0)
+    item_offset = section_offset + item_match.start()
+    name_match = re.search(rb'<Name>\s*([^<]+?)\s*</Name>', item)
+
+    if name_match is None:
+      continue
+
+    weather_name = name_match.group(1).decode('ascii', errors='ignore').strip()
+
+    if weather_name not in preset:
+      continue
+
+    found_weather.add(weather_name)
+    weather_values = preset[weather_name]
+
+    for param in parameters:
+      target_value = str(weather_values[param])
+      target = target_value.encode('ascii')
+      pattern = re.compile(rb'<' + re.escape(param.encode('ascii')) + rb'\s+value="([^"]+)"\s*/>')
+      value_match = pattern.search(item)
+
+      if value_match is None:
+        continue
+
+      current = value_match.group(1)
+
+      if current == target:
+        continue
+
+      if len(current) != len(target):
+        raise RuntimeError(
+          f'Найдено значение другой длины: {weather_name}.{param}: '
+          f'{current.decode("ascii", errors="replace")} -> {target_value}.\n'
+          'Direct patch безопасен только при одинаковой длине значения.\n'
+          'Скорее всего, файл уже меняли полной заменой через OpenIV. Вернуть такие значения чистым Python без RPF-инструмента нельзя.'
+        )
+
+      modifications.append(Modification(
+        weather=weather_name,
+        param=param,
+        start=item_offset + value_match.start(1),
+        old=current,
+        target=target,
+      ))
 
 
 def create_backup(rpf_path: Path, config: dict) -> None:
   backup_dir_name = str(config.get('target', {}).get('backup_dir_name', 'backups'))
   backup_dir = SCRIPT_DIR / backup_dir_name
   backup_dir.mkdir(parents=True, exist_ok=True)
-
   marker = backup_dir / backup_marker_name(rpf_path)
 
   if marker.exists():
@@ -479,7 +546,6 @@ def create_backup(rpf_path: Path, config: dict) -> None:
 
   timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
   backup_path = backup_dir / f'update_{timestamp}.rpf'
-
   print(f'Создаю бэкап: {backup_path}')
   shutil.copy2(rpf_path, backup_path)
   marker.write_text(str(backup_path), encoding='utf-8')
@@ -491,19 +557,44 @@ def backup_marker_name(rpf_path: Path) -> str:
   return f'{safe}.backup.txt'
 
 
-def apply_modifications(rpf_path: Path, modifications: list[dict[str, object]]) -> None:
+def apply_modifications(rpf_path: Path, modifications: list[Modification]) -> None:
   with rpf_path.open('r+b') as file:
     with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_WRITE) as mapped:
       for modification in modifications:
-        start = int(modification['start'])
-        target = modification['target']
-
-        if not isinstance(target, bytes):
-          raise TypeError('target должен быть bytes')
-
-        mapped[start:start + len(target)] = target
+        mapped[modification.start:modification.start + len(modification.target)] = modification.target
 
       mapped.flush()
+
+
+def print_report(modifications: list[Modification], missing_weather: list[str]) -> None:
+  print('')
+  print('Готово. Изменённые параметры:')
+  counts: dict[tuple[str, str], int] = {}
+
+  for modification in modifications:
+    key = (modification.weather, modification.param)
+    counts[key] = counts.get(key, 0) + 1
+
+  weather_names = sorted({modification.weather for modification in modifications})
+
+  for weather_name in weather_names:
+    changed = [param for current_weather, param in counts if current_weather == weather_name]
+    print(f'- {weather_name}: {", ".join(changed)}')
+
+  print_missing_weather(missing_weather)
+
+
+def print_missing_weather(missing_weather: list[str]) -> None:
+  if len(missing_weather) == 0:
+    return
+
+  print('')
+  print('В RPF не найдены погодные блоки из config.json:')
+
+  for weather_name in missing_weather:
+    print(f'- {weather_name}')
+
+  print('Это не ошибка, если твой weather.xml уже был урезан модом.')
 
 
 def is_admin() -> bool:

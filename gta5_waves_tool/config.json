@@ -1,26 +1,260 @@
 {
   "target": {
-    "use_original_update_rpf": true,
     "rpf_archive_relative_path": "update/update.rpf",
     "weather_xml_inside_rpf": "common/data/levels/gta5/weather.xml",
     "backup_dir_name": "backups",
     "extra_game_paths": [],
     "allow_binary_patch_rpf": true
   },
+  "parameters": [
+    "RippleBumpiness",
+    "OceanBumpiness",
+    "OceanWaveMinAmplitude",
+    "OceanWaveMaxAmplitude",
+    "ShoreWaveMaxAmplitude"
+  ],
   "values": {
     "default": {
-      "RippleBumpiness": "0.420000",
-      "OceanBumpiness": "0.250000",
-      "OceanWaveMinAmplitude": "0.000000",
-      "OceanWaveMaxAmplitude": "0.000000",
-      "ShoreWaveMaxAmplitude": "0.000000"
+      "EXTRASUNNY": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.000000",
+        "OceanWaveMaxAmplitude": "18.00000",
+        "ShoreWaveMaxAmplitude": "1.5000000"
+      },
+      "CLEAR": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.000000",
+        "OceanWaveMaxAmplitude": "18.00000",
+        "ShoreWaveMaxAmplitude": "1.5000000"
+      },
+      "CLOUDS": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.000000",
+        "OceanWaveMaxAmplitude": "18.00000",
+        "ShoreWaveMaxAmplitude": "1.5000000"
+      },
+      "SMOG": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.000000",
+        "OceanWaveMaxAmplitude": "18.00000",
+        "ShoreWaveMaxAmplitude": "1.5000000"
+      },
+      "FOGGY": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.000000",
+        "OceanWaveMaxAmplitude": "18.00000",
+        "ShoreWaveMaxAmplitude": "1.5000000"
+      },
+      "OVERCAST": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.000000",
+        "OceanWaveMaxAmplitude": "18.00000",
+        "ShoreWaveMaxAmplitude": "1.5000000"
+      },
+      "RAIN": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.760000",
+        "OceanWaveMaxAmplitude": "14.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      },
+      "THUNDER": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.760000",
+        "OceanWaveMaxAmplitude": "14.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      },
+      "CLEARING": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.000000",
+        "OceanWaveMaxAmplitude": "18.00000",
+        "ShoreWaveMaxAmplitude": "1.5000000"
+      },
+      "NEUTRAL": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.000000",
+        "OceanWaveMaxAmplitude": "18.00000",
+        "ShoreWaveMaxAmplitude": "1.5000000"
+      },
+      "SNOW": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      },
+      "BLIZZARD": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      },
+      "SNOWLIGHT": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      },
+      "XMAS": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      },
+      "HALLOWEEN": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.760000",
+        "OceanWaveMaxAmplitude": "14.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      },
+      "RAIN_HALLOWEEN": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "3.760000",
+        "OceanWaveMaxAmplitude": "14.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      },
+      "SNOW_HALLOWEEN": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.500000",
+        "ShoreWaveMaxAmplitude": "1.500000"
+      }
     },
     "no_waves": {
-      "RippleBumpiness": "0.000000",
-      "OceanBumpiness": "0.000000",
-      "OceanWaveMinAmplitude": "0.000000",
-      "OceanWaveMaxAmplitude": "0.000000",
-      "ShoreWaveMaxAmplitude": "0.000000"
+      "EXTRASUNNY": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.00000",
+        "ShoreWaveMaxAmplitude": "0.0000000"
+      },
+      "CLEAR": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.00000",
+        "ShoreWaveMaxAmplitude": "0.0000000"
+      },
+      "CLOUDS": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.00000",
+        "ShoreWaveMaxAmplitude": "0.0000000"
+      },
+      "SMOG": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.00000",
+        "ShoreWaveMaxAmplitude": "0.0000000"
+      },
+      "FOGGY": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.00000",
+        "ShoreWaveMaxAmplitude": "0.0000000"
+      },
+      "OVERCAST": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.00000",
+        "ShoreWaveMaxAmplitude": "0.0000000"
+      },
+      "RAIN": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      },
+      "THUNDER": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      },
+      "CLEARING": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.00000",
+        "ShoreWaveMaxAmplitude": "0.0000000"
+      },
+      "NEUTRAL": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.00000",
+        "ShoreWaveMaxAmplitude": "0.0000000"
+      },
+      "SNOW": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      },
+      "BLIZZARD": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      },
+      "SNOWLIGHT": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      },
+      "XMAS": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      },
+      "HALLOWEEN": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      },
+      "RAIN_HALLOWEEN": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "00.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      },
+      "SNOW_HALLOWEEN": {
+        "RippleBumpiness": "0.420000",
+        "OceanBumpiness": "0.250000",
+        "OceanWaveMinAmplitude": "0.000000",
+        "OceanWaveMaxAmplitude": "0.000000",
+        "ShoreWaveMaxAmplitude": "0.000000"
+      }
     }
   }
 }
