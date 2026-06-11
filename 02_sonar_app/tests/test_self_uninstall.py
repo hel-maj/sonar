@@ -28,6 +28,22 @@ def test_uninstall_enabled_for_frozen_exe_folder(tmp_path):
     assert availability.executable_path == exe.resolve()
 
 
+def test_uninstall_allows_git_folder_without_source_tree(tmp_path):
+    exe = tmp_path / "Sonar.exe"
+    exe.write_text("", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+
+    availability = get_uninstall_availability(
+        argv0=exe,
+        app_dir=tmp_path,
+        is_frozen=True,
+        project_dir=tmp_path / "source",
+    )
+
+    assert availability.enabled is True
+    assert availability.executable_path == exe.resolve()
+
+
 def test_uninstall_rejects_source_tree_even_with_exe(tmp_path):
     exe = tmp_path / "Sonar.exe"
     exe.write_text("", encoding="utf-8")

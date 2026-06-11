@@ -174,8 +174,7 @@ def _target_safety_error(target_dir: Path, *, project_dir: Path | None) -> str:
 
 def _looks_like_source_tree(path: Path) -> bool:
     return (
-        (path / ".git").exists()
-        or ((path / "pyproject.toml").exists() and (path / "src").exists())
+        ((path / "pyproject.toml").exists() and (path / "src").exists())
         or ((path / "src" / "sonar").exists() and (path / "tests").exists())
     )
 
