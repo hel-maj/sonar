@@ -10,8 +10,20 @@ from sonar.core.logging import configure_logging
 from sonar.paths import LOG_DIR, LOGS_ENABLED
 
 
+SELF_UNINSTALL_SMOKE_FLAG = "--self-uninstall-smoke-test"
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv
+    if SELF_UNINSTALL_SMOKE_FLAG in argv:
+        if os.environ.get("SONAR_ALLOW_SELF_UNINSTALL_TEST") != "1":
+            print(f"{SELF_UNINSTALL_SMOKE_FLAG} requires SONAR_ALLOW_SELF_UNINSTALL_TEST=1")
+            return 2
+        from sonar.self_uninstall import schedule_self_uninstall
+
+        schedule_self_uninstall()
+        return 0
+
     debug_enabled = "--debug" in argv
     configure_logging()
     if debug_enabled:

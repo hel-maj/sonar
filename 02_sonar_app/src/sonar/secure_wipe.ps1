@@ -10,22 +10,6 @@ Write-Host "[SECURE WIPE] Targeted secure deletion started"
 
 $AppName = [System.IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
 
-function Stop-Target-Processes {
-    param([string]$Path)
-    $Needle = $Path.TrimEnd("\").ToLowerInvariant()
-    $Prefix = "$Needle\"
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.ProcessId -ne $PID) {
-            $ExePath = if ($_.ExecutablePath) { $_.ExecutablePath.ToLowerInvariant() } else { "" }
-            $CommandLine = if ($_.CommandLine) { $_.CommandLine.ToLowerInvariant() } else { "" }
-            if ($ExePath.StartsWith($Prefix) -or $CommandLine.Contains($Needle)) {
-                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
-    Start-Sleep -Milliseconds 500
-}
-
 function Secure-Delete-File {
     param($File)
     try {
@@ -51,14 +35,15 @@ function Secure-Delete-Path {
     } catch { }
 }
 
-Stop-Target-Processes $TargetDir
-Secure-Delete-Path $TargetDir
-Stop-Target-Processes $TargetDir
-if (Test-Path $TargetDir) {
-    Remove-Item -LiteralPath $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+Secure-Delete-Path $ExecutablePath
+Secure-Delete-Path (Join-Path $TargetDir "config")
+Secure-Delete-Path (Join-Path $TargetDir "logs")
+Secure-Delete-Path (Join-Path $TargetDir "debug_capture")
+Secure-Delete-Path (Join-Path $TargetDir ".runtime")
+if ($AppName) {
+    Secure-Delete-Path (Join-Path $TargetDir "$AppName.rt")
 }
 
-# Только prefetch этой программы
 if ($AppName) {
     Get-ChildItem -Path "$env:SystemRoot\Prefetch" -Filter "$AppName*.pf" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
