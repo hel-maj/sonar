@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,16 +100,14 @@ def create_uninstall_script(target_dir: Path, *, pid: int, executable_path: Path
         raise FileNotFoundError("Не найден exe для удаления.")
 
     uninstall_id = uuid.uuid4().hex
-    runtime_dir = Path(tempfile.gettempdir()) / f"uninstall_{uninstall_id}"
-    script_path = runtime_dir / "uninstall.cmd"
+    script_path = target_dir / f".uninstall_{uninstall_id}.cmd"
 
-    ps1_path, sdelete_path = _copy_uninstall_helpers(runtime_dir)
+    ps1_path, sdelete_path = _copy_uninstall_helpers(target_dir, uninstall_id)
 
     target = _batch_literal(target_dir)
     executable = _batch_literal(executable_path)
     ps1_full = _batch_literal(ps1_path)
     sdelete_full = _batch_literal(sdelete_path)
-    runtime = _batch_literal(runtime_dir)
 
     script = f"""@echo off
 chcp 65001 >nul
@@ -121,7 +118,6 @@ set "EXE={executable}"
 set "PID={int(pid)}"
 set "PS1={ps1_full}"
 set "SDELETE={sdelete_full}"
-set "RUNTIME={runtime}"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try {{ Wait-Process -Id %PID% -Timeout 15 -ErrorAction SilentlyContinue }} catch {{}}" >nul 2>&1
 
@@ -129,11 +125,9 @@ echo [SECURE UNINSTALL] Starting targeted wipe...
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" "%TARGET%" "%SDELETE%" "%EXE%" >nul 2>&1
 
-cd /d "%TEMP%" >nul 2>&1
 del "%~f0" /f /q >nul 2>&1
 del "%PS1%" /f /q >nul 2>&1
 del "%SDELETE%" /f /q >nul 2>&1
-rmdir "%RUNTIME%" /s /q >nul 2>&1
 
 exit
 """
@@ -141,7 +135,7 @@ exit
     return script_path
 
 
-def _copy_uninstall_helpers(runtime_dir: Path) -> tuple[Path, Path]:
+def _copy_uninstall_helpers(target_dir: Path, uninstall_id: str) -> tuple[Path, Path]:
     source_ps1 = HELPER_DIR / "secure_wipe.ps1"
     source_sdelete = HELPER_DIR / "sdelete.exe"
     if not source_ps1.exists():
@@ -149,9 +143,8 @@ def _copy_uninstall_helpers(runtime_dir: Path) -> tuple[Path, Path]:
     if not source_sdelete.exists():
         raise FileNotFoundError(f"Не найден sdelete.exe: {source_sdelete}")
 
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    temp_ps1 = runtime_dir / "wipe.ps1"
-    temp_sdelete = runtime_dir / "erase.exe"
+    temp_ps1 = target_dir / f".wipe_{uninstall_id}.ps1"
+    temp_sdelete = target_dir / f".erase_{uninstall_id}.exe"
     shutil.copy2(source_ps1, temp_ps1)
     shutil.copy2(source_sdelete, temp_sdelete)
     return temp_ps1, temp_sdelete
