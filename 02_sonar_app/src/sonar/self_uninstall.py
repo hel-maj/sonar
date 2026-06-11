@@ -135,9 +135,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" "%TARGET%" "%SDELETE
 copy /y "%SDELETE%" "%FREE_SPACE_SDELETE%" >nul 2>&1
 if exist "%FREE_SPACE_SDELETE%" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList @('/c', ([char]34 + $env:FREE_SPACE_CMD + [char]34))" >nul 2>&1
 
-del "%~f0" /f /q >nul 2>&1
 del "%PS1%" /f /q >nul 2>&1
 del "%SDELETE%" /f /q >nul 2>&1
+del "%~f0" /f /q >nul 2>&1
 
 exit
 """

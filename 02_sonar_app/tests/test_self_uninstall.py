@@ -144,9 +144,10 @@ def test_uninstall_script_runs_secure_wipe_from_app_helpers(tmp_path, monkeypatc
     assert "sonar_secure_wipe_" not in script
     assert "sonar_sdelete_" not in script
     assert "%TEMP%" not in script
-    assert "del \"%~f0\"" in script
     assert "del \"%PS1%\" /f /q" in script
     assert "del \"%SDELETE%\" /f /q" in script
+    assert script.index('del "%PS1%"') < script.index('del "%~f0"')
+    assert script.index('del "%SDELETE%"') < script.index('del "%~f0"')
     assert f'set "FREE_SPACE_CMD={runner_script}"' in script
     assert f'set "FREE_SPACE_SDELETE={runner_exe}"' in script
     assert 'Start-Process -WindowStyle Hidden' in script
