@@ -44,6 +44,23 @@ def test_uninstall_allows_git_folder_without_source_tree(tmp_path):
     assert availability.executable_path == exe.resolve()
 
 
+def test_uninstall_allows_frozen_app_dir_without_source_tree_when_project_dir_matches(tmp_path):
+    exe = tmp_path / "Sonar.exe"
+    exe.write_text("", encoding="utf-8")
+    (tmp_path / "Sonar.rt").mkdir()
+    (tmp_path / "config").mkdir()
+
+    availability = get_uninstall_availability(
+        argv0=exe,
+        app_dir=tmp_path,
+        is_frozen=True,
+        project_dir=tmp_path,
+    )
+
+    assert availability.enabled is True
+    assert availability.executable_path == exe.resolve()
+
+
 def test_uninstall_rejects_source_tree_even_with_exe(tmp_path):
     exe = tmp_path / "Sonar.exe"
     exe.write_text("", encoding="utf-8")

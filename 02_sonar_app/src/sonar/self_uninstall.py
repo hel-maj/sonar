@@ -165,7 +165,7 @@ def _find_executable_in_dir(target_dir: Path) -> Path | None:
 def _target_safety_error(target_dir: Path, *, project_dir: Path | None) -> str:
     if target_dir.parent == target_dir or str(target_dir) == target_dir.anchor:
         return "Нельзя удалить корень диска."
-    if project_dir is not None and target_dir == project_dir:
+    if project_dir is not None and target_dir == project_dir and _looks_like_source_tree(target_dir):
         return "Папка похожа на папку исходного кода."
     if _looks_like_source_tree(target_dir):
         return "Папка похожа на папку исходного кода."
