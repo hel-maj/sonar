@@ -19,4 +19,5 @@ def test_secure_wipe_keeps_parent_folder_targeted():
     assert 'Join-Path $TargetDir "logs"' in script
     assert 'Join-Path $TargetDir "debug_capture"' in script
     assert 'Join-Path $TargetDir ".runtime"' in script
+    assert 'Join-Path $TargetDir "$AppName.rt"' in script
     assert 'Remove-Item -Path $TargetDir -Recurse' not in script

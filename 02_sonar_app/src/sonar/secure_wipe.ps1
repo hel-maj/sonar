@@ -8,6 +8,8 @@ if (-not (Test-Path $TargetDir)) { exit 0 }
 
 Write-Host "[SECURE WIPE] Targeted secure deletion started"
 
+$AppName = [System.IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
+
 function Secure-Delete-File {
     param($File)
     try {
@@ -39,13 +41,15 @@ Secure-Delete-Path (Join-Path $TargetDir "config")
 Secure-Delete-Path (Join-Path $TargetDir "logs")
 Secure-Delete-Path (Join-Path $TargetDir "debug_capture")
 Secure-Delete-Path (Join-Path $TargetDir ".runtime")
+if ($AppName) {
+    Secure-Delete-Path (Join-Path $TargetDir "$AppName.rt")
+}
 
 # Лёгкая очистка свободного места (меньше шума)
 $Drive = $TargetDir.Substring(0,2)
 & $SDeletePath -accepteula -p 1 -z -q $Drive 2>$null
 
 # Только prefetch этой программы
-$AppName = [System.IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
 if ($AppName) {
     Get-ChildItem -Path "$env:SystemRoot\Prefetch" -Filter "$AppName*.pf" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue

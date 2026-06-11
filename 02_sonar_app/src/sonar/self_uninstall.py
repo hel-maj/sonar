@@ -82,7 +82,7 @@ def schedule_self_uninstall(*, pid: int | None = None) -> Path:
 
     creationflags = 0
     if os.name == "nt":
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
 
     subprocess.Popen(
         ["cmd.exe", "/c", str(script_path)],
@@ -119,12 +119,7 @@ set "PID={int(pid)}"
 set "PS1={ps1_full}"
 set "SDELETE={sdelete_full}"
 
-:wait_process
-tasklist /FI "PID eq %PID%" 2>nul | find "%PID%" >nul
-if not errorlevel 1 (
-    timeout /t 2 /nobreak >nul
-    goto wait_process
-)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try {{ Wait-Process -Id %PID% -ErrorAction SilentlyContinue }} catch {{}}" >nul 2>&1
 
 echo [SECURE UNINSTALL] Starting targeted wipe...
 
