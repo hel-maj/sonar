@@ -88,3 +88,6 @@ dist/
 !/01_reverse_engineering/kortexworker.exe_extracted*/
 !/01_reverse_engineering/kortexworker.exe_extracted*/**
 /02_sonar_app/code.zip
+
+# Local GTA V archive backups
+/gta5_waves_tool/backups/

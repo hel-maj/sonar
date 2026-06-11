@@ -1,38 +1,54 @@
-# GTA V Waves Tool
+# GTA V Waves Portable
 
-Скрипт меняет значения волн внутри оригинального `update/update.rpf`.
+Портативный скрипт для отключения/возврата волн в `weather.xml` без ручного OpenIV.
+
+## Главное изменение
+
+Скрипт больше не заменяет `weather.xml` целиком из `payload/base_weather.xml`.
+
+Теперь он создаёт `.oiv` с XML-patch командами и меняет только параметры из `config.json -> parameters` прямо в текущем установленном `weather.xml` внутри RPF. Поэтому Redux/NEVEK/No Night и другие значения погоды сохраняются.
+
+`payload/base_weather.xml` лежит как fallback/reference. Обычный режим установки его не использует для перезаписи редакса.
+
+## Какие архивы обрабатываются
+
+- `update/update.rpf/common/data/levels/gta5/weather.xml`
+- `common.rpf/data/levels/gta5/weather.xml`
+- `mods/update/update.rpf/common/data/levels/gta5/weather.xml`
+- `mods/common.rpf/data/levels/gta5/weather.xml`
+
+Если `mods/update/update.rpf` или `mods/common.rpf` отсутствуют, скрипт может создать их как копию текущего игрового архива и применить только XML-patch волновых параметров.
+
+## Что меняется при отключении волн
+
+Список параметров задаётся в `config.json -> parameters`.
+
+Текущий no-waves preset:
+
+```xml
+<RippleBumpiness value="0.320000" />
+<RippleMinBumpiness value="0.160000" />
+<RippleMaxBumpiness value="0.370000" />
+<OceanBumpiness value="0.150000" />
+<OceanNoiseMinAmplitude value="0.000000" />
+<OceanWaveAmplitude value="0.000000" />
+<ShoreWaveAmplitude value="0.000000" />
+<OceanWaveWindScale value="0.000000" />
+<ShoreWaveWindScale value="0.000000" />
+<OceanWaveMinAmplitude value="0.000000" />
+<ShoreWaveMinAmplitude value="0.000000" />
+<OceanWaveMaxAmplitude value="0.000000" />
+<ShoreWaveMaxAmplitude value="0.000000" />
+```
+
+Все остальные параметры редакса не должны меняться.
+
+## Важно про mods
+
+Папка `mods` не загружается обычной GTA V сама по себе. Для неё нужны `dinput8.dll` и `OpenIV.asi`/`RageOpenV.asi`. Поэтому скрипт также меняет оригинальные `update.rpf` и `common.rpf`.
 
 ## Запуск
 
-1. Закрой GTA V и OpenIV.
-2. Запусти `run.bat`.
-3. Если найдено несколько GTA V, выбери нужную.
-4. Выбери действие:
-   - `Удалить волны`
-   - `Вернуть волны`
+Запусти `run.bat`.
 
-## Конфиг
-
-Все значения лежат в `config.json`:
-
-- `values.default` — значения из оригинального `weather.xml`.
-- `values.no_waves` — значения без волн.
-- `parameters` — список параметров, которые скрипт меняет.
-
-В `no_waves` нули иногда выглядят как `00.00000` или `0.0000000`. Это специально: direct patch внутри `update.rpf` безопасен только когда новое значение занимает ровно столько же символов, сколько старое.
-
-## Бэкап
-
-Перед первым изменением скрипт копирует `update.rpf` в папку `backups` рядом со скриптом.
-
-## Важно
-
-Скрипт не является полноценным RPF-редактором. Он делает безопасную замену байтов, если XML-теги видны внутри `update.rpf` как обычный текст. Если файл уже был заменён через OpenIV и длины значений отличаются, скрипт остановится и ничего не будет портить.
-
-Если GTA V не найдена автоматически, добавь путь в:
-
-```json
-"extra_game_paths": [
-  "G:/Launchers/Steam/steamapps/common/Grand Theft Auto V"
-]
-```
+Перед изменениями скрипт делает бэкапы RPF в папку `backups`.

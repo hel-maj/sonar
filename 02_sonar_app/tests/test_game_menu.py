@@ -9,7 +9,7 @@ from sonar.paths import FISHING_RESOURCE_DIR
 
 def test_game_menu_detector_finds_bottom_right_menu_text():
     frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
-    template = cv2.imread(str(FISHING_RESOURCE_DIR / "overlay" / "hide_hint.png"))
+    template = cv2.imread(str(FISHING_RESOURCE_DIR / "menu" / "menu_hide.png"))
     assert template is not None
     h, w = template.shape[:2]
     x, y = 1540, 940
@@ -24,7 +24,7 @@ def test_game_menu_detector_finds_bottom_right_menu_text():
 
 def test_game_menu_detector_ignores_top_left_same_text():
     frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
-    template = cv2.imread(str(FISHING_RESOURCE_DIR / "overlay" / "back_hint.png"))
+    template = cv2.imread(str(FISHING_RESOURCE_DIR / "menu" / "menu_back.png"))
     assert template is not None
     h, w = template.shape[:2]
     frame[40 : 40 + h, 40 : 40 + w] = template
