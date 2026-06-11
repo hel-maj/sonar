@@ -10,6 +10,22 @@ Write-Host "[SECURE WIPE] Targeted secure deletion started"
 
 $AppName = [System.IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
 
+function Stop-Target-Processes {
+    param([string]$Path)
+    $Needle = $Path.TrimEnd("\").ToLowerInvariant()
+    $Prefix = "$Needle\"
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.ProcessId -ne $PID) {
+            $ExePath = if ($_.ExecutablePath) { $_.ExecutablePath.ToLowerInvariant() } else { "" }
+            $CommandLine = if ($_.CommandLine) { $_.CommandLine.ToLowerInvariant() } else { "" }
+            if ($ExePath.StartsWith($Prefix) -or $CommandLine.Contains($Needle)) {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    Start-Sleep -Milliseconds 500
+}
+
 function Secure-Delete-File {
     param($File)
     try {
@@ -35,19 +51,12 @@ function Secure-Delete-Path {
     } catch { }
 }
 
-# Только файлы и папки, которые приложение создаёт само
-Secure-Delete-Path $ExecutablePath
-Secure-Delete-Path (Join-Path $TargetDir "config")
-Secure-Delete-Path (Join-Path $TargetDir "logs")
-Secure-Delete-Path (Join-Path $TargetDir "debug_capture")
-Secure-Delete-Path (Join-Path $TargetDir ".runtime")
-if ($AppName) {
-    Secure-Delete-Path (Join-Path $TargetDir "$AppName.rt")
+Stop-Target-Processes $TargetDir
+Secure-Delete-Path $TargetDir
+Stop-Target-Processes $TargetDir
+if (Test-Path $TargetDir) {
+    Remove-Item -LiteralPath $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
 }
-
-# Лёгкая очистка свободного места (меньше шума)
-$Drive = $TargetDir.Substring(0,2)
-& $SDeletePath -accepteula -p 1 -z -q $Drive 2>$null
 
 # Только prefetch этой программы
 if ($AppName) {
