@@ -17,6 +17,7 @@ def test_debug_log_uses_log_log_name_and_20mb_limit(tmp_path, monkeypatch):
     _close_debug_handlers()
     monkeypatch.setattr(log_module, "LOG_DIR", tmp_path)
     monkeypatch.setattr(log_module, "IS_FROZEN", False)
+    monkeypatch.setattr(log_module, "LOGS_ENABLED", True)
 
     log_module.configure_logging()
     log_module.debug_log("plain dev message")
@@ -33,6 +34,7 @@ def test_frozen_debug_log_is_encrypted_log_log_enc(tmp_path, monkeypatch):
     _close_debug_handlers()
     monkeypatch.setattr(log_module, "LOG_DIR", tmp_path)
     monkeypatch.setattr(log_module, "IS_FROZEN", True)
+    monkeypatch.setattr(log_module, "LOGS_ENABLED", True)
 
     log_module.configure_logging()
     log_module.debug_log("encrypted release message")
@@ -44,3 +46,16 @@ def test_frozen_debug_log_is_encrypted_log_log_enc(tmp_path, monkeypatch):
     assert b"encrypted release message" not in payload
     assert b"encrypted release message" in decrypt_log_payload(payload)
     assert not (tmp_path / "sonar_debug.log.enc").exists()
+
+
+def test_frozen_debug_log_is_disabled_when_release_logs_disabled(tmp_path, monkeypatch):
+    _close_debug_handlers()
+    monkeypatch.setattr(log_module, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(log_module, "IS_FROZEN", True)
+    monkeypatch.setattr(log_module, "LOGS_ENABLED", False)
+
+    log_module.configure_logging()
+    log_module.debug_log("discarded release message")
+    _close_debug_handlers()
+
+    assert list(tmp_path.iterdir()) == []

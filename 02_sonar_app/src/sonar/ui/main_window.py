@@ -4460,7 +4460,7 @@ def find_app_icon_path():
 
 
 def find_app_logo_path():
-    for icon_path in (RESOURCE_DIR / "sonar_logo.png", RESOURCE_DIR / "app.ico", RESOURCE_DIR / "icon.ico"):
+    for icon_path in (RESOURCE_DIR / "logo.png", RESOURCE_DIR / "sonar_logo.png", RESOURCE_DIR / "app.ico", RESOURCE_DIR / "icon.ico"):
         if icon_path.exists():
             return icon_path
     return None

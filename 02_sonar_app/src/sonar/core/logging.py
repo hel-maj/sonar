@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from sonar.core.log_crypto import encrypt_log_payload
-from sonar.paths import IS_FROZEN, LOG_DIR
+from sonar.paths import IS_FROZEN, LOG_DIR, LOGS_ENABLED
 
 
 LogCallback = Callable[[str], None]
@@ -69,6 +69,9 @@ def configure_logging(level: int = logging.INFO) -> None:
     debug_logger.setLevel(logging.DEBUG)
     debug_logger.propagate = False
     debug_logger.handlers.clear()
+    if not LOGS_ENABLED:
+        debug_logger.addHandler(logging.NullHandler())
+        return
     logs_dir = LOG_DIR
     logs_dir.mkdir(parents=True, exist_ok=True)
     if IS_FROZEN:

@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from sonar.paths import APP_DIR, IS_FROZEN, PROJECT_DIR
+from sonar.paths import APP_DIR, HELPER_DIR, IS_FROZEN, PROJECT_DIR
 
 
 PYTHON_EXECUTABLE_NAMES = {"python.exe", "pythonw.exe", "python", "pythonw"}
@@ -141,9 +141,8 @@ exit
 
 
 def _copy_uninstall_helpers(target_dir: Path, uninstall_id: str) -> tuple[Path, Path]:
-    package_dir = Path(__file__).resolve().parent
-    source_ps1 = package_dir / "secure_wipe.ps1"
-    source_sdelete = package_dir / "sdelete.exe"
+    source_ps1 = HELPER_DIR / "secure_wipe.ps1"
+    source_sdelete = HELPER_DIR / "sdelete.exe"
     if not source_ps1.exists():
         raise FileNotFoundError(f"Не найден файл удаления: {source_ps1}")
     if not source_sdelete.exists():

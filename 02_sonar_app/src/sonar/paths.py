@@ -11,11 +11,27 @@ def _is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False) or "__compiled__" in globals() or not is_python_executable)
 
 
+def _frozen_app_dir() -> Path:
+    argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
+    if argv0 is not None:
+        executable_name = argv0.name.lower()
+        is_python_executable = executable_name in {"python.exe", "pythonw.exe", "python", "pythonw"} or executable_name.startswith("python")
+        if not is_python_executable:
+            return argv0.parent
+    return Path(sys.executable).resolve().parent
+
+
+def _frozen_payload_dir() -> Path:
+    return PACKAGE_DIR.parent
+
+
 IS_FROZEN = _is_frozen()
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = PACKAGE_DIR.parents[2]
-APP_DIR = Path(sys.argv[0]).resolve().parent if IS_FROZEN else PROJECT_DIR
-RESOURCE_DIR = PACKAGE_DIR / "resources"
+APP_DIR = _frozen_app_dir() if IS_FROZEN else PROJECT_DIR
+PAYLOAD_DATA_DIR = _frozen_payload_dir() / ".payload" if IS_FROZEN else PACKAGE_DIR
+RESOURCE_DIR = PAYLOAD_DATA_DIR / "resources"
+HELPER_DIR = PAYLOAD_DATA_DIR / "helpers" if IS_FROZEN else PACKAGE_DIR
 FISHING_RESOURCE_DIR = RESOURCE_DIR / "fishing"
 CONFIG_DIR = APP_DIR / "config"
 LOG_DIR = APP_DIR / "logs"

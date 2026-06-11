@@ -79,7 +79,7 @@ def test_uninstall_script_runs_secure_wipe_from_app_helpers(tmp_path, monkeypatc
     helper_dir.mkdir()
     (helper_dir / "secure_wipe.ps1").write_text("param()\n", encoding="utf-8")
     (helper_dir / "sdelete.exe").write_bytes(b"fake exe")
-    monkeypatch.setattr("sonar.self_uninstall.__file__", str(helper_dir / "self_uninstall.py"))
+    monkeypatch.setattr("sonar.self_uninstall.HELPER_DIR", helper_dir)
     app_dir = tmp_path / "app%dir"
     app_dir.mkdir()
     exe = app_dir / "App.exe"
@@ -109,7 +109,7 @@ def test_uninstall_script_runs_secure_wipe_from_app_helpers(tmp_path, monkeypatc
 def test_uninstall_script_requires_helper_files(tmp_path, monkeypatch):
     helper_dir = tmp_path / "missing_helpers"
     helper_dir.mkdir()
-    monkeypatch.setattr("sonar.self_uninstall.__file__", str(helper_dir / "self_uninstall.py"))
+    monkeypatch.setattr("sonar.self_uninstall.HELPER_DIR", helper_dir)
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     exe = app_dir / "App.exe"
