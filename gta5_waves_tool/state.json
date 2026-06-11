@@ -1,0 +1,36 @@
+{
+  "g:\\launchers\\steam\\steamapps\\common\\grand theft auto v": {
+    "mods_no_waves": {
+      "applied": true,
+      "rpf_path": "g:\\launchers\\steam\\steamapps\\common\\Grand Theft Auto V\\mods\\update\\update.rpf",
+      "backup_path": "backups\\Grand_Theft_Auto_V_mods_update_before_no_waves_20260610_022030.rpf",
+      "after_snapshot": {
+        "size": 1740798976,
+        "mtime_ns": 1781047236856221600
+      },
+      "updated_at": "2026-06-10T02:20:36",
+      "update_update.rpf": {
+        "applied": true,
+        "target": "update/update.rpf",
+        "rpf_path": "g:\\launchers\\steam\\steamapps\\common\\Grand Theft Auto V\\mods\\update\\update.rpf",
+        "created_by_script": true,
+        "after_snapshot": {
+          "size": 2010816512,
+          "mtime_ns": 1781125074728857600
+        },
+        "updated_at": "2026-06-10T23:57:54"
+      },
+      "common.rpf": {
+        "applied": true,
+        "target": "common.rpf",
+        "rpf_path": "g:\\launchers\\steam\\steamapps\\common\\Grand Theft Auto V\\mods\\common.rpf",
+        "created_by_script": true,
+        "after_snapshot": {
+          "size": 27705344,
+          "mtime_ns": 1781125077614919300
+        },
+        "updated_at": "2026-06-10T23:57:57"
+      }
+    }
+  }
+}

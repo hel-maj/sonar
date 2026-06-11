@@ -1,3 +1,4 @@
+from sonar.ui import main_window
 from sonar.ui.main_window import format_download_link_html, format_update_message_html, is_update_available
 
 
@@ -32,3 +33,12 @@ def test_update_block_is_hidden_when_versions_match():
     assert is_update_available("0.1.0", current_version="0.1.0") is False
     assert is_update_available("v0.1.0", current_version="0.1.0") is False
     assert is_update_available("0.1.1", current_version="0.1.0") is True
+
+
+def test_release_logo_is_preferred_over_build_icon(tmp_path, monkeypatch):
+    logo_path = tmp_path / "logo.png"
+    logo_path.write_bytes(b"logo")
+    (tmp_path / "app.ico").write_bytes(b"icon")
+    monkeypatch.setattr(main_window, "RESOURCE_DIR", tmp_path)
+
+    assert main_window.find_app_logo_path() == logo_path

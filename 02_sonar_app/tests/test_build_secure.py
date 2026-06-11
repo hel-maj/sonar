@@ -26,10 +26,14 @@ def _load_branding():
     return module
 
 
-def test_secure_build_requests_admin_and_bundles_uninstall_helpers():
+def test_secure_build_does_not_require_admin_and_bundles_uninstall_helpers():
     script = (ROOT / "scripts" / "build_secure.ps1").read_text(encoding="utf-8")
 
-    assert "--windows-uac-admin" in script
+    assert "--windows-uac-admin" not in script
+    assert "--onefile-no-dll" not in script
+    assert '$OnefileTempDirSpec = "{PROGRAM_BASE}.rt/onefile_{PID}_{TIME}"' in script
+    assert "--onefile-tempdir-spec=$OnefileTempDirSpec" in script
+    assert "{PROGRAM_DIR}/.runtime" not in script
     assert "--python-flag=no_docstrings" in script
     assert "--python-flag=no_asserts" in script
     assert "[switch]$NoLto" in script
@@ -37,8 +41,11 @@ def test_secure_build_requests_admin_and_bundles_uninstall_helpers():
     assert "--lto=$LtoMode" in script
     assert "$env:PYTHONUTF8 = \"1\"" in script
     assert "$env:PYTHONIOENCODING = \"utf-8\"" in script
-    assert "--include-data-files=$SecureWipePath=sonar/secure_wipe.ps1" in script
-    assert "--include-data-files=$SDeletePath=sonar/sdelete.exe" in script
+    assert '$PayloadDataDir = ".payload"' in script
+    assert "--include-data-dir=$ResourcesPath=$PayloadDataDir/resources" in script
+    assert "--include-data-files=$SecureWipePath=$PayloadDataDir/helpers/secure_wipe.ps1" in script
+    assert "--include-data-files=$SDeletePath=$PayloadDataDir/helpers/sdelete.exe" in script
+    assert "--include-data-dir=$ResourcesPath=sonar/resources" not in script
 
 
 def test_secure_build_prepares_portable_streaming_binaries():
@@ -81,6 +88,15 @@ def test_secure_build_creates_uploadable_zip_archive_next_to_exe():
     assert "--startup-block-url" in script
     assert "--startup-block-public-key" in script
     assert "function New-BuildArchive" in script
+    assert "function Remove-ReleaseJunkFiles" in script
+    assert "function Remove-ReleaseForbiddenNames" in script
+    assert "function Copy-ReleaseLogo" in script
+    assert '$ReleaseJunkExtensions = @(".md", ".markdown", ".rst", ".txt", ".log", ".pdb", ".map")' in script
+    assert '$ReleaseLogo = Join-Path $ResourcesPath "logo.png"' in script
+    assert "Copy-ReleaseLogo -ResourcesPath $ResourcesPath" in script
+    assert "Remove-ReleaseJunkFiles -Path $ResourcesPath" in script
+    assert "Remove-ReleaseForbiddenNames -Path $ResourcesPath" in script
+    assert "Remove-ReleaseJunkFiles -Path $AppDist" in script
     assert "[System.IO.Path]::GetFileNameWithoutExtension($ExeName)" in script
     assert "[System.IO.Compression.ZipFile]::Open" in script
     assert "[System.IO.Compression.CompressionLevel]::NoCompression" in script
@@ -374,9 +390,32 @@ def test_branding_uses_planned_icon_and_records_history(tmp_path):
     assert "B.png" in branding.load_history(history_file)
 
 
+def test_branding_name_plan_accepts_forced_icon(tmp_path):
+    branding = _load_branding()
+    icons = tmp_path / "icons"
+    icons.mkdir()
+    Image.new("RGBA", (16, 16), (255, 0, 0, 255)).save(icons / "A.png")
+    Image.new("RGBA", (16, 16), (0, 255, 0, 255)).save(icons / "B.png")
+
+    icon_path = branding.choose_icon(
+        icons,
+        icons / ".build_history.json",
+        branding.random.Random("fixed-seed"),
+        use_history=False,
+        icon_name="B.png",
+    )
+    app_name = branding.app_name_from_icon(icon_path)
+    plan = [{"icon_name": icon_path.name, "app_name": app_name, "exe_name": f"{app_name}.exe"}]
+
+    assert plan == [{"icon_name": "B.png", "app_name": "B", "exe_name": "B.exe"}]
+    assert not (icons / ".build_history.json").exists()
+
+
 def test_secure_build_plans_names_before_loop_and_keeps_exe_name_clean():
     script = (ROOT / "scripts" / "build_secure.ps1").read_text(encoding="utf-8")
 
+    assert "[string]$IconName" in script
+    assert "IconName can only be used with Count 1" in script
     assert "--plan-count" in script
     assert "--existing-builds-dir" in script
     assert "--icon-name" in script

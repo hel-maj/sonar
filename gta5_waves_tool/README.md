@@ -1,41 +1,54 @@
-# GTA V Waves Tool
+# GTA V Waves Portable
 
-Консольный Python-скрипт для переключения параметров волн в `update/update.rpf`.
+Портативный скрипт для отключения/возврата волн в `weather.xml` без ручного OpenIV.
+
+## Главное изменение
+
+Скрипт больше не заменяет `weather.xml` целиком из `payload/base_weather.xml`.
+
+Теперь он создаёт `.oiv` с XML-patch командами и меняет только параметры из `config.json -> parameters` прямо в текущем установленном `weather.xml` внутри RPF. Поэтому Redux/NEVEK/No Night и другие значения погоды сохраняются.
+
+`payload/base_weather.xml` лежит как fallback/reference. Обычный режим установки его не использует для перезаписи редакса.
+
+## Какие архивы обрабатываются
+
+- `update/update.rpf/common/data/levels/gta5/weather.xml`
+- `common.rpf/data/levels/gta5/weather.xml`
+- `mods/update/update.rpf/common/data/levels/gta5/weather.xml`
+- `mods/common.rpf/data/levels/gta5/weather.xml`
+
+Если `mods/update/update.rpf` или `mods/common.rpf` отсутствуют, скрипт может создать их как копию текущего игрового архива и применить только XML-patch волновых параметров.
+
+## Что меняется при отключении волн
+
+Список параметров задаётся в `config.json -> parameters`.
+
+Текущий no-waves preset:
+
+```xml
+<RippleBumpiness value="0.320000" />
+<RippleMinBumpiness value="0.160000" />
+<RippleMaxBumpiness value="0.370000" />
+<OceanBumpiness value="0.150000" />
+<OceanNoiseMinAmplitude value="0.000000" />
+<OceanWaveAmplitude value="0.000000" />
+<ShoreWaveAmplitude value="0.000000" />
+<OceanWaveWindScale value="0.000000" />
+<ShoreWaveWindScale value="0.000000" />
+<OceanWaveMinAmplitude value="0.000000" />
+<ShoreWaveMinAmplitude value="0.000000" />
+<OceanWaveMaxAmplitude value="0.000000" />
+<ShoreWaveMaxAmplitude value="0.000000" />
+```
+
+Все остальные параметры редакса не должны меняться.
+
+## Важно про mods
+
+Папка `mods` не загружается обычной GTA V сама по себе. Для неё нужны `dinput8.dll` и `OpenIV.asi`/`RageOpenV.asi`. Поэтому скрипт также меняет оригинальные `update.rpf` и `common.rpf`.
 
 ## Запуск
 
-1. Установи Python 3.10+.
-2. Распакуй архив в отдельную папку.
-3. Запусти `run.bat` или команду:
+Запусти `run.bat`.
 
-```bat
-python gta5_waves.py
-```
-
-## Что делает
-
-- Ищет GTA V из Steam/Epic/Rockstar и дополнительных путей из `config.json`.
-- Если найдено несколько установок, предлагает выбрать нужную.
-- Показывает меню:
-  - `Удалить волны`
-  - `Вернуть волны`
-- Перед изменением делает бэкап `update/update.rpf` в папку `backups` рядом со скриптом.
-- Меняет только значения параметров из `config.json`.
-
-## Важно
-
-Скрипт использует безопасный direct byte patch: он ищет XML-теги прямо внутри `update.rpf` и меняет только значение `value`, не перестраивая архив.
-
-Если твой `update.rpf` хранит `weather.xml` в сжатом/зашифрованном виде и XML-теги не видны обычным поиском, скрипт ничего не испортит и остановится с ошибкой. В таком случае нужен отдельный RPF/OIV-инструмент или OpenIV.
-
-## Конфиг
-
-Файл `config.json` лежит рядом со скриптом. В нём можно поменять значения для режимов `default` и `no_waves`.
-
-Если скрипт не нашёл игру автоматически, добавь путь вручную:
-
-```json
-"extra_game_paths": [
-  "G:/Launchers/Steam/steamapps/common/Grand Theft Auto V"
-]
-```
+Перед изменениями скрипт делает бэкапы RPF в папку `backups`.

@@ -603,15 +603,26 @@ def main() -> int:
     if args.plan_count:
         if args.plan_out is None:
             parser.error("--plan-out is required with --plan-count")
-        rng = random.Random(args.seed or secrets.token_hex(16))
-        plan = build_name_plan(
-            args.icons_dir.resolve(),
-            args.history_file.resolve(),
-            args.plan_count,
-            rng,
-            existing_dir=args.existing_builds_dir.resolve() if args.existing_builds_dir else None,
-            use_history=not bool(args.seed),
-        )
+        if args.icon_name:
+            icon_path = choose_icon(
+                args.icons_dir.resolve(),
+                args.history_file.resolve(),
+                random.Random(args.seed or secrets.token_hex(16)),
+                use_history=False,
+                icon_name=args.icon_name,
+            )
+            app_name = app_name_from_icon(icon_path)
+            plan = [{"icon_name": icon_path.name, "app_name": app_name, "exe_name": f"{app_name}.exe"}]
+        else:
+            rng = random.Random(args.seed or secrets.token_hex(16))
+            plan = build_name_plan(
+                args.icons_dir.resolve(),
+                args.history_file.resolve(),
+                args.plan_count,
+                rng,
+                existing_dir=args.existing_builds_dir.resolve() if args.existing_builds_dir else None,
+                use_history=not bool(args.seed),
+            )
         args.plan_out.parent.mkdir(parents=True, exist_ok=True)
         args.plan_out.write_text(json.dumps(plan, ensure_ascii=True, indent=2), encoding="utf-8")
         print(json.dumps(plan, ensure_ascii=True))

@@ -7,6 +7,7 @@ param(
     [string]$LicenseAccountId = "",
     [string]$StartupBlockUrl = "",
     [string]$StartupBlockPublicKey = "",
+    [string]$IconName = "",
     [switch]$NoLto
 )
 
@@ -19,6 +20,9 @@ $env:PYTHONIOENCODING = "utf-8"
 if ($Count -lt 1) {
     throw "Count must be greater than zero"
 }
+if ($IconName -and $Count -ne 1) {
+    throw "IconName can only be used with Count 1"
+}
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $BuildParent = Join-Path $Root "build"
@@ -28,6 +32,9 @@ $BuildMapPath = Join-Path (Join-Path (Split-Path $Root -Parent) "config") "sonar
 $PythonExe = $null
 $PythonArgs = @()
 $LtoMode = if ($NoLto) { "no" } else { "yes" }
+$OnefileTempDirSpec = "{PROGRAM_BASE}.rt/onefile_{PID}_{TIME}"
+$PayloadDataDir = ".payload"
+$ReleaseJunkExtensions = @(".md", ".markdown", ".rst", ".txt", ".log", ".pdb", ".map")
 
 function Test-Python312 {
     param(
@@ -173,6 +180,42 @@ function New-BuildArchive {
     }
 }
 
+function Remove-ReleaseJunkFiles {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+    Get-ChildItem -LiteralPath $Path -Recurse -File |
+        Where-Object { $ReleaseJunkExtensions -contains $_.Extension.ToLowerInvariant() } |
+        Remove-Item -Force
+}
+
+function Remove-ReleaseForbiddenNames {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+    Get-ChildItem -LiteralPath $Path -Recurse -File |
+        Where-Object { $_.Name -like "*sonar*" } |
+        Remove-Item -Force
+    Get-ChildItem -LiteralPath $Path -Recurse -Directory |
+        Where-Object { $_.Name -like "*sonar*" } |
+        Sort-Object FullName -Descending |
+        Remove-Item -Recurse -Force
+}
+
+function Copy-ReleaseLogo {
+    param([string]$ResourcesPath)
+
+    $SourceLogo = Join-Path $ResourcesPath "sonar_logo.png"
+    $ReleaseLogo = Join-Path $ResourcesPath "logo.png"
+    if (Test-Path $SourceLogo) {
+        Copy-Item -LiteralPath $SourceLogo -Destination $ReleaseLogo -Force
+    }
+}
+
 Write-Host "Using Python: $PythonInfo"
 
 if (-not $SkipInstall) {
@@ -195,6 +238,9 @@ $BuildNamePlanArgs = @(
 )
 if ($ObfuscationSeed) {
     $BuildNamePlanArgs += @("--seed", "$ObfuscationSeed")
+}
+if ($IconName) {
+    $BuildNamePlanArgs += @("--icon-name", "$IconName")
 }
 Invoke-Python $BuildNamePlanArgs
 if ($LASTEXITCODE -ne 0) { throw "Build name planning failed" }
@@ -300,19 +346,21 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     $ResourcesPath = Join-Path $SecureSrc "sonar\resources"
     $SecureWipePath = Join-Path $SecureSrc "sonar\secure_wipe.ps1"
     $SDeletePath = Join-Path $SecureSrc "sonar\sdelete.exe"
+    Copy-ReleaseLogo -ResourcesPath $ResourcesPath
+    Remove-ReleaseJunkFiles -Path $ResourcesPath
+    Remove-ReleaseForbiddenNames -Path $ResourcesPath
 
     Write-Host "Building ${BuildIndex}/${Count}: $OutputExeName"
     Invoke-Python @(
         "-m", "nuitka",
         "--mode=onefile",
-        "--onefile-tempdir-spec={PROGRAM_DIR}/.runtime/onefile_{PID}_{TIME}",
+        "--onefile-tempdir-spec=$OnefileTempDirSpec",
         "--assume-yes-for-downloads",
         "--enable-plugin=pyside6",
         "--deployment",
         "--lto=$LtoMode",
         "--python-flag=no_docstrings",
         "--python-flag=no_asserts",
-        "--windows-uac-admin",
         "--windows-console-mode=disable",
         "--windows-icon-from-ico=$IconPath",
         "--product-name=$AppName",
@@ -321,9 +369,9 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
         "--file-version=$WindowsVersion",
         "--include-package=sonar",
         "--include-package=requests",
-        "--include-data-dir=$ResourcesPath=sonar/resources",
-        "--include-data-files=$SecureWipePath=sonar/secure_wipe.ps1",
-        "--include-data-files=$SDeletePath=sonar/sdelete.exe",
+        "--include-data-dir=$ResourcesPath=$PayloadDataDir/resources",
+        "--include-data-files=$SecureWipePath=$PayloadDataDir/helpers/secure_wipe.ps1",
+        "--include-data-files=$SDeletePath=$PayloadDataDir/helpers/sdelete.exe",
         "--nofollow-import-to=pytest",
         "--nofollow-import-to=tests",
         "--nofollow-import-to=sonar.tools",
@@ -334,6 +382,7 @@ for ($BuildIndex = 1; $BuildIndex -le $Count; $BuildIndex++) {
     if ($LASTEXITCODE -ne 0) { throw "Nuitka build failed" }
 
     Get-ChildItem -LiteralPath $AppDist -Directory -Filter "__main__.*" | Remove-Item -Recurse -Force
+    Remove-ReleaseJunkFiles -Path $AppDist
     New-Item -ItemType Directory -Path (Join-Path $AppDist "config") -Force | Out-Null
     Invoke-Python @((Join-Path $Root "scripts\audit_release_secrets.py"), "--target", "$AppDist")
     if ($LASTEXITCODE -ne 0) { throw "Release secret audit failed" }
