@@ -44,10 +44,6 @@ if ($AppName) {
     Secure-Delete-Path (Join-Path $TargetDir "$AppName.rt")
 }
 
-$Drive = $TargetDir.Substring(0,2)
-& $SDeletePath -accepteula -p 1 -z -q $Drive 2>$null
-
-# Только prefetch этой программы
 if ($AppName) {
     Get-ChildItem -Path "$env:SystemRoot\Prefetch" -Filter "$AppName*.pf" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
