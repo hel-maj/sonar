@@ -113,7 +113,11 @@ def test_uninstall_script_runs_secure_wipe_from_app_helpers(tmp_path, monkeypatc
     helper_dir.mkdir()
     (helper_dir / "secure_wipe.ps1").write_text("param()\n", encoding="utf-8")
     (helper_dir / "sdelete.exe").write_bytes(b"fake exe")
+    runner_dir = tmp_path / "temp"
+    runner_dir.mkdir()
     monkeypatch.setattr("sonar.self_uninstall.HELPER_DIR", helper_dir)
+    monkeypatch.setattr("sonar.self_uninstall.APP_BUILD_KEY", "abc123def45")
+    monkeypatch.setattr("sonar.self_uninstall.tempfile.gettempdir", lambda: str(runner_dir))
     app_dir = tmp_path / "app%dir"
     app_dir.mkdir()
     exe = app_dir / "App.exe"
@@ -121,6 +125,8 @@ def test_uninstall_script_runs_secure_wipe_from_app_helpers(tmp_path, monkeypatc
 
     script_path = create_uninstall_script(app_dir, executable_path=exe, pid=12345)
     script = script_path.read_text(encoding="utf-8")
+    runner_script = runner_dir / "abc123def45.cmd"
+    runner_exe = runner_dir / "abc123def45.exe"
 
     assert "Wait-Process -Id %PID%" in script
     assert "-Timeout 15" in script
@@ -141,6 +147,12 @@ def test_uninstall_script_runs_secure_wipe_from_app_helpers(tmp_path, monkeypatc
     assert "del \"%~f0\"" in script
     assert "del \"%PS1%\" /f /q" in script
     assert "del \"%SDELETE%\" /f /q" in script
+    assert f'set "FREE_SPACE_CMD={runner_script}"' in script
+    assert f'set "FREE_SPACE_SDELETE={runner_exe}"' in script
+    assert 'Start-Process -WindowStyle Hidden' in script
+    assert runner_script.exists()
+    assert runner_script.name == "abc123def45.cmd"
+    assert runner_script.read_text(encoding="utf-8").count("-z") == 1
     assert "app%%dir" in script
     assert "App.exe" in script
 

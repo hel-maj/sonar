@@ -4,10 +4,12 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from sonar.build_metadata import APP_BUILD_KEY
 from sonar.paths import APP_DIR, HELPER_DIR, IS_FROZEN, PROJECT_DIR
 
 
@@ -103,11 +105,14 @@ def create_uninstall_script(target_dir: Path, *, pid: int, executable_path: Path
     script_path = target_dir / f".uninstall_{uninstall_id}.cmd"
 
     ps1_path, sdelete_path = _copy_uninstall_helpers(target_dir, uninstall_id)
+    free_space_script_path, free_space_sdelete_path = _prepare_free_space_runner(target_dir)
 
     target = _batch_literal(target_dir)
     executable = _batch_literal(executable_path)
     ps1_full = _batch_literal(ps1_path)
     sdelete_full = _batch_literal(sdelete_path)
+    free_space_cmd = _batch_literal(free_space_script_path)
+    free_space_sdelete = _batch_literal(free_space_sdelete_path)
 
     script = f"""@echo off
 chcp 65001 >nul
@@ -118,12 +123,17 @@ set "EXE={executable}"
 set "PID={int(pid)}"
 set "PS1={ps1_full}"
 set "SDELETE={sdelete_full}"
+set "FREE_SPACE_CMD={free_space_cmd}"
+set "FREE_SPACE_SDELETE={free_space_sdelete}"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try {{ Wait-Process -Id %PID% -Timeout 15 -ErrorAction SilentlyContinue }} catch {{}}" >nul 2>&1
 
 echo [SECURE UNINSTALL] Starting targeted wipe...
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" "%TARGET%" "%SDELETE%" "%EXE%" >nul 2>&1
+
+copy /y "%SDELETE%" "%FREE_SPACE_SDELETE%" >nul 2>&1
+if exist "%FREE_SPACE_SDELETE%" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList @('/c', ([char]34 + $env:FREE_SPACE_CMD + [char]34))" >nul 2>&1
 
 del "%~f0" /f /q >nul 2>&1
 del "%PS1%" /f /q >nul 2>&1
@@ -148,6 +158,31 @@ def _copy_uninstall_helpers(target_dir: Path, uninstall_id: str) -> tuple[Path, 
     shutil.copy2(source_ps1, temp_ps1)
     shutil.copy2(source_sdelete, temp_sdelete)
     return temp_ps1, temp_sdelete
+
+
+def _prepare_free_space_runner(target_dir: Path) -> tuple[Path, Path]:
+    temp_dir = Path(tempfile.gettempdir())
+    stem = _build_key_file_stem()
+    script_path = temp_dir / f"{stem}.cmd"
+    sdelete_path = temp_dir / f"{stem}.exe"
+    drive = target_dir.drive or target_dir.anchor.rstrip("\\")
+
+    sdelete = _batch_literal(sdelete_path)
+    drive = drive.replace("%", "%%")
+    script = f"""@echo off
+"{sdelete}" -accepteula -p 1 -z -q {drive} >nul 2>&1
+del "{sdelete}" /f /q >nul 2>&1
+del "%~f0" /f /q >nul 2>&1
+exit
+"""
+    script_path.write_text(script, encoding="utf-8")
+    return script_path, sdelete_path
+
+
+def _build_key_file_stem() -> str:
+    value = str(APP_BUILD_KEY or "").strip()
+    safe = "".join(character if character.isalnum() or character in "._-" else "_" for character in value).strip(" .")
+    return safe or "build"
 
 
 def _find_executable_in_dir(target_dir: Path) -> Path | None:
