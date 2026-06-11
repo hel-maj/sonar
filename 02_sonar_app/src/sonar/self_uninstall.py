@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -82,11 +83,11 @@ def schedule_self_uninstall(*, pid: int | None = None) -> Path:
 
     creationflags = 0
     if os.name == "nt":
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
 
     subprocess.Popen(
         ["cmd.exe", "/c", str(script_path)],
-        cwd=str(script_path.parent),
+        cwd=str(script_path.parent.parent),
         creationflags=creationflags,
         close_fds=True,
     )
@@ -100,14 +101,16 @@ def create_uninstall_script(target_dir: Path, *, pid: int, executable_path: Path
         raise FileNotFoundError("Не найден exe для удаления.")
 
     uninstall_id = uuid.uuid4().hex
-    script_path = target_dir / f".uninstall_{uninstall_id}.cmd"
+    runtime_dir = Path(tempfile.gettempdir()) / f"uninstall_{uninstall_id}"
+    script_path = runtime_dir / "uninstall.cmd"
 
-    ps1_path, sdelete_path = _copy_uninstall_helpers(target_dir, uninstall_id)
+    ps1_path, sdelete_path = _copy_uninstall_helpers(runtime_dir)
 
     target = _batch_literal(target_dir)
     executable = _batch_literal(executable_path)
     ps1_full = _batch_literal(ps1_path)
     sdelete_full = _batch_literal(sdelete_path)
+    runtime = _batch_literal(runtime_dir)
 
     script = f"""@echo off
 chcp 65001 >nul
@@ -118,21 +121,19 @@ set "EXE={executable}"
 set "PID={int(pid)}"
 set "PS1={ps1_full}"
 set "SDELETE={sdelete_full}"
+set "RUNTIME={runtime}"
 
-:wait_process
-tasklist /FI "PID eq %PID%" 2>nul | find "%PID%" >nul
-if not errorlevel 1 (
-    timeout /t 2 /nobreak >nul
-    goto wait_process
-)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try {{ Wait-Process -Id %PID% -Timeout 15 -ErrorAction SilentlyContinue }} catch {{}}" >nul 2>&1
 
 echo [SECURE UNINSTALL] Starting targeted wipe...
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" "%TARGET%" "%SDELETE%" "%EXE%" >nul 2>&1
 
+cd /d "%TEMP%" >nul 2>&1
 del "%~f0" /f /q >nul 2>&1
 del "%PS1%" /f /q >nul 2>&1
 del "%SDELETE%" /f /q >nul 2>&1
+rmdir "%RUNTIME%" /s /q >nul 2>&1
 
 exit
 """
@@ -140,7 +141,7 @@ exit
     return script_path
 
 
-def _copy_uninstall_helpers(target_dir: Path, uninstall_id: str) -> tuple[Path, Path]:
+def _copy_uninstall_helpers(runtime_dir: Path) -> tuple[Path, Path]:
     source_ps1 = HELPER_DIR / "secure_wipe.ps1"
     source_sdelete = HELPER_DIR / "sdelete.exe"
     if not source_ps1.exists():
@@ -148,8 +149,9 @@ def _copy_uninstall_helpers(target_dir: Path, uninstall_id: str) -> tuple[Path, 
     if not source_sdelete.exists():
         raise FileNotFoundError(f"Не найден sdelete.exe: {source_sdelete}")
 
-    temp_ps1 = target_dir / f".wipe_{uninstall_id}.ps1"
-    temp_sdelete = target_dir / f".erase_{uninstall_id}.exe"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    temp_ps1 = runtime_dir / "wipe.ps1"
+    temp_sdelete = runtime_dir / "erase.exe"
     shutil.copy2(source_ps1, temp_ps1)
     shutil.copy2(source_sdelete, temp_sdelete)
     return temp_ps1, temp_sdelete
@@ -165,7 +167,7 @@ def _find_executable_in_dir(target_dir: Path) -> Path | None:
 def _target_safety_error(target_dir: Path, *, project_dir: Path | None) -> str:
     if target_dir.parent == target_dir or str(target_dir) == target_dir.anchor:
         return "Нельзя удалить корень диска."
-    if project_dir is not None and target_dir == project_dir:
+    if project_dir is not None and target_dir == project_dir and _looks_like_source_tree(target_dir):
         return "Папка похожа на папку исходного кода."
     if _looks_like_source_tree(target_dir):
         return "Папка похожа на папку исходного кода."
@@ -174,8 +176,7 @@ def _target_safety_error(target_dir: Path, *, project_dir: Path | None) -> str:
 
 def _looks_like_source_tree(path: Path) -> bool:
     return (
-        (path / ".git").exists()
-        or ((path / "pyproject.toml").exists() and (path / "src").exists())
+        ((path / "pyproject.toml").exists() and (path / "src").exists())
         or ((path / "src" / "sonar").exists() and (path / "tests").exists())
     )
 
