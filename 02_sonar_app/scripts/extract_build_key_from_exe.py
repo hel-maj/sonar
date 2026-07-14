@@ -25,8 +25,8 @@ class ExtractionResult:
 
 def extract_build_key(path: Path, build_map_path: Path | None = DEFAULT_BUILD_MAP) -> ExtractionResult:
     path = path.resolve()
-    candidates = candidate_keys_from_path(path)
     key_map = load_build_key_map(build_map_path) if build_map_path else {}
+    candidates = unique_keys(candidate_keys_from_build_map_path(path, key_map) + candidate_keys_from_path(path))
     build_key = choose_candidate(candidates, key_map)
     return ExtractionResult(
         path=path,
@@ -43,6 +43,7 @@ def candidate_keys_from_path(path: Path) -> list[str]:
     if path.suffix.lower() == ".zip":
         candidates.extend(candidate_keys_from_zip(path))
     else:
+        candidates.extend(candidate_keys_from_sibling_archives(path))
         candidates.extend(candidate_keys_from_file(path))
     return unique_keys(candidates)
 
@@ -64,6 +65,28 @@ def candidate_keys_from_zip(path: Path) -> list[str]:
                     candidates.extend(scan_stream(file))
     except (OSError, zipfile.BadZipFile):
         return candidates
+    return candidates
+
+
+def candidate_keys_from_sibling_archives(path: Path) -> list[str]:
+    if path.suffix.lower() != ".exe":
+        return []
+    archive_suffix = f"-{path.stem}.zip"
+    try:
+        archives = sorted(
+            (
+                candidate
+                for candidate in path.parent.glob("*.zip")
+                if candidate.is_file() and candidate.name.endswith(archive_suffix)
+            ),
+            key=lambda candidate: candidate.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return []
+    candidates: list[str] = []
+    for archive in archives:
+        candidates.extend(candidate_keys_from_name(archive.name))
     return candidates
 
 
@@ -97,6 +120,27 @@ def unique_keys(keys: list[str]) -> list[str]:
             seen.add(normalized)
             result.append(normalized)
     return result
+
+
+def candidate_keys_from_build_map_path(path: Path, key_map: dict[str, dict[str, object]]) -> list[str]:
+    normalized_path = normalize_path(path)
+    candidates: list[str] = []
+    for key, value in key_map.items():
+        for field in ("dist_path", "archive_path"):
+            mapped_path = value.get(field)
+            if not isinstance(mapped_path, str):
+                continue
+            if normalize_path(Path(mapped_path)) == normalized_path:
+                candidates.append(key)
+                break
+    return candidates
+
+
+def normalize_path(path: Path) -> str:
+    try:
+        return str(path.resolve()).casefold()
+    except OSError:
+        return str(path).casefold()
 
 
 def load_build_key_map(path: Path | None) -> dict[str, dict[str, object]]:

@@ -13,3 +13,4 @@
 - [Переменные окружения для домена и релиза](guides/environment_variables.md)
 - [Доступные URL](guides/available_urls.md)
 - [Offline wheelhouse для Python 3.12](guides/offline_wheelhouse_py312.md)
+- [Утилита дампа памяти игры](guides/memory_dump_utility.md)

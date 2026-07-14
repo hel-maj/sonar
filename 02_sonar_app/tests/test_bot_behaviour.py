@@ -258,6 +258,40 @@ def test_prepare_start_falls_through_when_storage_is_not_selected(monkeypatch):
     assert bot.input_controller.keys == ["e"]
 
 
+def test_failed_inventory_retry_does_not_block_casting_start():
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot._stop_event = threading.Event()
+    bot._inventory_tasks_retry_pending = True
+    bot._inventory_retry_after = time.time() - 1.0
+    bot._start_attempt_since = None
+    logs: list[str] = []
+    prepare_calls: list[str] = []
+    pending_calls: list[bool] = []
+    bot._log = logs.append
+    bot._sleep = lambda _seconds: None
+    bot._stop_from_brain = lambda _reason: None
+
+    def handle_pending_tasks(*, do_meal: bool | None = None) -> None:
+        pending_calls.append(bool(do_meal))
+        bot._inventory_tasks_retry_pending = True
+        bot._inventory_retry_after = time.time() + 8.0
+
+    def prepare_fishing_start(timeout: float = 12.0) -> str | None:
+        del timeout
+        prepare_calls.append("prepare")
+        return None
+
+    bot._handle_pending_tasks = handle_pending_tasks
+    bot._prepare_fishing_start = prepare_fishing_start
+
+    bot._do_casting()
+
+    assert pending_calls == [True]
+    assert prepare_calls == ["prepare"]
+    assert any("продолжаю запуск рыбалки" in message for message in logs)
+
+
 def test_storage_selection_opens_selector_from_wrong_current_storage():
     bot = FishingBot.__new__(FishingBot)
     bot.settings = FishingSettings(store_in_trunk=True)
@@ -757,6 +791,7 @@ def test_auto_stop_is_cancelled_when_final_stage_check_sees_stage():
     bot.state = BotState(running=True)
     bot.capture = DummyCapture()
     bot.trigger_monitor = SequenceTriggerMonitor([{"start1": DummyMatch()}])
+    bot._stop_event = threading.Event()
     bot._no_stage_since = time.time() - bot_module.AUTO_STOP_TIMEOUT_SECONDS - 1.0
     bot._last_trigger_matches = {}
     bot._last_triggers = {}
@@ -771,6 +806,39 @@ def test_auto_stop_is_cancelled_when_final_stage_check_sees_stage():
     assert bot._stop_if_no_stage_timed_out(None, needs_meal=False) is False
     assert bot._no_stage_since is None
     assert reasons == []
+
+
+def test_auto_stop_confirmation_waits_for_stage_to_reappear(monkeypatch):
+    current_time = 100.0
+    bot = FishingBot.__new__(FishingBot)
+    bot.state = BotState(running=True)
+    bot.capture = DummyCapture()
+    bot.trigger_monitor = SequenceTriggerMonitor([{}, {"start": DummyMatch()}])
+    bot._last_triggers = {}
+    bot._last_trigger_matches = {}
+    bot._stop_event = threading.Event()
+    bot._no_stage_since = current_time - bot_module.AUTO_STOP_TIMEOUT_SECONDS - 1.0
+    bot._has_pending_catch = lambda: False
+    bot._probe_catch_screen = lambda: False
+    bot._stage_label = lambda stage: f"stage:{stage}"
+    stages: list[str] = []
+    sleeps: list[float] = []
+    bot._publish_stage = stages.append
+    bot._log = lambda _message: None
+    monkeypatch.setattr(bot_module, "AUTO_STOP_CONFIRMATION_GRACE_SECONDS", 1.0)
+    monkeypatch.setattr(bot_module.time, "time", lambda: current_time)
+
+    def sleep(seconds: float) -> None:
+        nonlocal current_time
+        sleeps.append(seconds)
+        current_time += seconds
+
+    bot._sleep = sleep
+
+    assert bot._confirm_no_stage_before_autostop() is False
+    assert stages == ["stage:start"]
+    assert sleeps == [bot_module.PREPARE_START_POLL_SECONDS]
+    assert bot._no_stage_since is None
 
 
 def test_lost_hooking_stage_does_not_reuse_stale_no_stage_timer():
@@ -905,6 +973,78 @@ def test_reeling_walking_guard_stops_when_no_state_and_idle_cannot_return():
 
     assert bot._check_reeling_walking_guard("target_search") is True
     assert reasons == [bot_module.STOP_REASON_WALKING_GUARD]
+
+
+def test_reeling_memory_fish_caught_without_catch_screen_is_not_saved_as_loss():
+    class FishCaughtState:
+        active = True
+        action = "fish_caught"
+        distance = None
+        fish_addr = 0x1000
+        player_addr = 0x2000
+        lateral = None
+        move_val = None
+        player_pos_offset = None
+        fish_pos_offset = None
+
+    class FishCaughtTracker:
+        def __init__(self) -> None:
+            self.stopped = False
+            self.started = False
+            self.control_started = False
+            self.manual_modes: list[bool] = []
+
+        def configure_manual_mode(self, enabled: bool) -> None:
+            self.manual_modes.append(enabled)
+
+        def start(self) -> None:
+            self.started = True
+
+        def start_control_loop(self) -> None:
+            self.control_started = True
+
+        def latest_state(self) -> FishCaughtState:
+            return FishCaughtState()
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    bot = FishingBot.__new__(FishingBot)
+    tracker = FishCaughtTracker()
+    bot.state = BotState()
+    bot._stop_event = threading.Event()
+    bot._last_triggers = {"ad": time.time()}
+    bot._last_catch_result = None
+    bot.manual_reeling_mode = False
+    bot.reeling_tracker = tracker
+    bot.capture = DummyCapture()
+    bot.game_menu_detector = ClosedDetector()
+    bot.catch_detector = DummyCatchDetector()
+    bot._reset_active_tackle_scan = lambda _stage: None
+    bot._refresh_triggers = lambda *args, **kwargs: None
+    bot._publish_stage = lambda _label: None
+    bot._restore_reeling_focus = lambda *args, **kwargs: 0.0
+    bot._update_focus_state_notification = lambda: None
+    bot._scan_tackle_for_active_stage = lambda _stage, _frame: None
+    bot._remember_trigger_matches = lambda _matches: None
+    bot._merge_trigger_matches = lambda _matches: None
+    bot._check_reeling_walking_guard = lambda _action: False
+    bot._sleep = lambda _seconds: None
+    bot._should_collect_reeling_loss_log = lambda: True
+    bot._log = lambda _message: None
+    wait_timeouts: list[float] = []
+    saved_reasons: list[str] = []
+    bot._wait_for_catch_screen = lambda timeout: wait_timeouts.append(timeout) or (None, 0.0)
+    bot._save_reeling_debug_log = lambda _records, reason: saved_reasons.append(reason)
+
+    assert bot._run_reeling_module() == (None, 0.0)
+
+    assert tracker.started is True
+    assert tracker.control_started is True
+    assert tracker.stopped is True
+    assert tracker.manual_modes == [False]
+    assert wait_timeouts == [bot_module.REEL_CATCH_SCREEN_TIMEOUT_SECONDS]
+    assert saved_reasons == []
 
 
 def test_restore_reeling_focus_uses_force_focus_while_bot_is_running():
@@ -1131,7 +1271,7 @@ def test_exit_to_idle_waits_after_escape_before_rechecking_stage():
     assert events[:3] == ["key:esc", "sleep:2.3", "sleep_random:1.2:1.0"]
 
 
-def test_failed_inventory_tasks_are_retried_instead_of_casting():
+def test_failed_inventory_tasks_are_retried_without_blocking_casting():
     events: list[str] = []
     bot = FishingBot.__new__(FishingBot)
     bot.settings = FishingSettings(auto_meal=True)
@@ -1143,13 +1283,15 @@ def test_failed_inventory_tasks_are_retried_instead_of_casting():
     assert bot._inventory_tasks_retry_pending is True
 
     bot._inventory_retry_after = 0.0
+    bot._start_attempt_since = None
+    bot._stop_event = threading.Event()
     bot._handle_pending_tasks = lambda do_meal: events.append(f"inventory:{do_meal}")
     bot._prepare_fishing_start = lambda: events.append("casting") or None
 
     bot._do_casting()
 
     assert "inventory:True" in events
-    assert "casting" not in events
+    assert "casting" in events
 
 
 def test_return_to_fishing_waits_after_inventory_is_closed():
