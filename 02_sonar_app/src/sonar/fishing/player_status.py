@@ -13,10 +13,12 @@ from ctypes import wintypes
 
 import cv2
 import numpy as np
+from PIL import Image
 import psutil
 
 from sonar.fishing.constants import PROCESS_NAME
 from sonar.fishing.memory_reeling import MEM_COMMIT, PAGE_GUARD, PAGE_NOACCESS, PROCESS_ALL_READ
+from sonar.ocr import configure_tesseract, tessdata_config
 from sonar.paths import LOG_DIR
 from sonar.security.runtime import decrypt_json_literal
 
@@ -24,6 +26,11 @@ from sonar.security.runtime import decrypt_json_literal
 STATUS_BAR_WIDTH_AT_1080P = 288.0
 STATUS_BAR_MIN_WIDTH_AT_1080P = 55.0
 STATUS_SEARCH_ROI = (0.30, 0.35, 0.70, 0.62)
+SCREENSHOT_WEIGHT_ROIS_AT_1080P = {
+    "inventory": (1350, 42, 90, 42),
+    "backpack": (500, 536, 80, 42),
+}
+SCREENSHOT_WEIGHT_RE = re.compile(r"(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*/\s*(\d{1,3})(?!\d)")
 MEMORY_PROFILE_GLOB = "player_status_memory_profile_*.json"
 _PLAYER_STATUS_CONFIG = decrypt_json_literal("player_status")
 WEBENGINE_PROCESS_NAME = str(_PLAYER_STATUS_CONFIG["webengine_process_name"])
@@ -240,12 +247,21 @@ class PlayerStatusDetector:
     def detect(self, frame: np.ndarray) -> PlayerStatus | None:
         bars = self.detect_bars(frame)
         values = {bar.name: bar.percent for bar in bars}
-        if not {"food", "water", "health"}.issubset(values):
+        if not bars:
+            return None
+        inventory_weight, inventory_weight_max, backpack_weight, backpack_weight_max = self._detect_inventory_weights(frame)
+        if not {"food", "water", "health"}.issubset(values) and all(
+            value is None for value in (inventory_weight, inventory_weight_max, backpack_weight, backpack_weight_max)
+        ):
             return None
         return PlayerStatus(
-            food=values["food"],
-            water=values["water"],
-            health=values["health"],
+            food=values.get("food"),
+            water=values.get("water"),
+            health=values.get("health"),
+            inventory_weight=inventory_weight,
+            inventory_weight_max=inventory_weight_max,
+            backpack_weight=backpack_weight,
+            backpack_weight_max=backpack_weight_max,
             source="screenshot",
         )
 
@@ -253,7 +269,7 @@ class PlayerStatusDetector:
         if frame.size == 0:
             return ()
         height, width = frame.shape[:2]
-        scale = max(0.35, min(2.0, height / 1080.0))
+        scale = max(0.35, min(2.0, round(height / 1080.0, 2)))
         x1, y1, x2, y2 = self._search_roi(width, height)
         roi = frame[y1:y2, x1:x2]
         if roi.size == 0:
@@ -389,6 +405,75 @@ class PlayerStatusDetector:
                 continue
             compact.append(rect)
         return compact
+
+    @classmethod
+    def _detect_inventory_weights(
+        cls,
+        frame: np.ndarray,
+    ) -> tuple[float | None, float | None, float | None, float | None]:
+        inventory = cls._read_weight_pair(frame, "inventory")
+        backpack = cls._read_weight_pair(frame, "backpack")
+        return (
+            inventory[0] if inventory is not None else None,
+            inventory[1] if inventory is not None else None,
+            backpack[0] if backpack is not None else None,
+            backpack[1] if backpack is not None else None,
+        )
+
+    @classmethod
+    def _read_weight_pair(cls, frame: np.ndarray, name: str) -> tuple[float, float] | None:
+        roi = SCREENSHOT_WEIGHT_ROIS_AT_1080P[name]
+        for text in cls._read_ocr_candidates(frame, roi):
+            match = SCREENSHOT_WEIGHT_RE.search(text.replace(" ", ""))
+            if not match:
+                continue
+            try:
+                current = float(match.group(1).replace(",", "."))
+                maximum_text = match.group(2)
+                if len(maximum_text) > 2 and maximum_text.endswith("6") and float(maximum_text) > 100:
+                    maximum_text = maximum_text[:-1]
+                maximum = float(maximum_text)
+            except ValueError:
+                continue
+            if 0.0 <= current <= maximum <= 100.0:
+                return current, maximum
+        return None
+
+    @staticmethod
+    def _read_ocr_candidates(frame: np.ndarray, roi_at_1080p: tuple[int, int, int, int]) -> tuple[str, ...]:
+        try:
+            import pytesseract
+        except Exception:
+            return ()
+        configure_tesseract(pytesseract)
+        height, width = frame.shape[:2]
+        scale_x = width / 1920.0
+        scale_y = height / 1080.0
+        x, y, roi_width, roi_height = roi_at_1080p
+        left = max(0, int(round(x * scale_x)))
+        top = max(0, int(round(y * scale_y)))
+        right = min(width, int(round((x + roi_width) * scale_x)))
+        bottom = min(height, int(round((y + roi_height) * scale_y)))
+        if right <= left or bottom <= top:
+            return ()
+        crop = frame[top:bottom, left:right]
+        if crop.size == 0:
+            return ()
+        scaled = cv2.resize(crop, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(scaled[:, :, :3], cv2.COLOR_BGR2GRAY)
+        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, inverted = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        config = tessdata_config("--psm 7 -c tessedit_char_whitelist=0123456789./, ", "eng")
+        texts: list[str] = []
+        for image in (gray, otsu, inverted):
+            try:
+                text = pytesseract.image_to_string(Image.fromarray(image), lang="eng", config=config)
+            except Exception:
+                continue
+            text = " ".join(text.replace("\n", " ").split())
+            if text and text not in texts:
+                texts.append(text)
+        return tuple(texts)
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,6 +9,7 @@ from sonar.fishing.hooking import create_monitor_for_frame
 from sonar.fishing.catch_screen import CatchScreenDetector
 from sonar.fishing.inventory_stage import InventoryStageDetector
 from sonar.fishing.meal_system import MealSystem
+from sonar.fishing.player_status import PlayerStatusDetector
 from sonar.fishing.trigger_monitor import TriggerMonitor
 from sonar.fishing.constants import resolution_name
 
@@ -130,6 +131,24 @@ def stage_from_detections(matches: dict[str, float]) -> str | None:
 )
 def test_inventory_open_is_detected(fixture):
     assert InventoryStageDetector().is_open(load_frame(fixture)) is True
+
+
+def test_inventory_with_no_font_smoothing_status_and_weights_are_detected():
+    frame = load_frame("inventory_no_font_smoothing_20260613.jpg")
+
+    assert frame.shape[:2] == (1079, 1919)
+    assert InventoryStageDetector().is_open(frame) is True
+
+    status = PlayerStatusDetector().detect(frame)
+
+    assert status is not None
+    assert status.food == 53
+    assert status.water == 46
+    assert status.health == 77
+    assert status.inventory_weight == pytest.approx(3.94)
+    assert status.inventory_weight_max == pytest.approx(35.0)
+    assert status.backpack_weight == pytest.approx(10.20)
+    assert status.backpack_weight_max == pytest.approx(15.0)
 
 
 @pytest.mark.parametrize(

@@ -72,6 +72,7 @@ DEBUG_CAPTURE_WEIGHT_THRESHOLD_KG = 15.0
 START_STOP_SOUND_VOLUME = 0.3
 AUTO_STOP_TIMEOUT_SECONDS = 40.0
 AUTO_STOP_SCREENSHOT_DELAY_SECONDS = 5.0
+AUTO_STOP_CONFIRMATION_GRACE_SECONDS = 5.0
 STOP_REASON_MANUAL = "вручную"
 STOP_REASON_START_FAILED = "не смог начать рыбалку в течение 40 секунд"
 STOP_REASON_NO_STAGE = "не в зоне рыбалки или не видно стадии рыбалки 40 секунд"
@@ -901,21 +902,24 @@ class FishingBot:
         return True
 
     def _confirm_no_stage_before_autostop(self) -> bool:
-        try:
-            frame = self.capture.capture()
-            matches = self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES)
-        except Exception as exc:
-            self.state.last_error = str(exc)
-            self._log(f"Auto-stop confirmation error: {exc}")
-            return True
-        self._remember_trigger_matches(matches)
-        stage = self._detect_stage(self._last_triggers)
-        if stage is not None:
-            self._publish_stage(self._stage_label(stage))
-            return False
-        if self._has_pending_catch() or self._probe_catch_screen():
-            self._no_stage_since = None
-            return False
+        deadline = time.time() + AUTO_STOP_CONFIRMATION_GRACE_SECONDS
+        while time.time() < deadline and not self._stop_event.is_set():
+            try:
+                frame = self.capture.capture()
+                matches = self.trigger_monitor.find_detections(frame, names=FISHING_STAGE_TRIGGER_NAMES)
+            except Exception as exc:
+                self.state.last_error = str(exc)
+                self._log(f"Auto-stop confirmation error: {exc}")
+                return True
+            self._remember_trigger_matches(matches)
+            stage = self._detect_stage(self._last_triggers)
+            if stage is not None:
+                self._publish_stage(self._stage_label(stage))
+                return False
+            if self._has_pending_catch() or self._probe_catch_screen():
+                self._no_stage_since = None
+                return False
+            self._sleep(PREPARE_START_POLL_SECONDS)
         return True
 
     def _run_casting_module(self) -> None:
@@ -1044,6 +1048,12 @@ class FishingBot:
         while time.time() < deadline and not self._stop_event.is_set():
             self._update_focus_state_notification()
             now = time.time()
+            state = self.reeling_tracker.latest_state()
+            if state.action == "fish_caught":
+                finish_reason = "fish_caught"
+                self._log("Вываживание: память сообщила о завершении рыбы")
+                self._append_reeling_debug_log(reeling_debug_log, "memory_fish_caught", state=state)
+                break
             if now - last_trigger_check_at >= REELING_STAGE_CHECK_INTERVAL_SECONDS:
                 last_trigger_check_at = now
                 frame = self.capture.capture()
@@ -1106,7 +1116,6 @@ class FishingBot:
                         self._log("Вываживание: стадия закончилась")
                         self._append_reeling_debug_log(reeling_debug_log, "ad_stage_ended")
                         break
-            state = self.reeling_tracker.latest_state()
             if state.action == "input_blocked":
                 last_reeling_focus_attempt_at = self._restore_reeling_focus(last_reeling_focus_attempt_at, now)
             if seen_ad_stage and now - last_walking_guard_at >= REELING_WALKING_GUARD_INTERVAL_SECONDS:
@@ -1147,6 +1156,10 @@ class FishingBot:
         if fish_name:
             self._append_reeling_debug_log(reeling_debug_log, "finish_catch_wait", fish_id=fish_name, confidence=confidence)
             return fish_name, confidence
+        if finish_reason == "fish_caught":
+            self._append_reeling_debug_log(reeling_debug_log, "finish_memory_caught_no_screen")
+            self._log("Вываживание: рыба завершена в памяти, экран улова не найден; продолжаю без лога срыва")
+            return None, 0.0
         self._append_reeling_debug_log(reeling_debug_log, "finish_lost", reason=finish_reason)
         if not self._stop_event.is_set():
             self._save_reeling_debug_log(reeling_debug_log, finish_reason)
@@ -1411,10 +1424,12 @@ class FishingBot:
             return False
         wait_seconds = self._inventory_retry_after - time.time()
         if wait_seconds > 0.0:
-            self._sleep(min(0.5, wait_seconds))
-            return True
+            return False
         self._log("Инвентарь: повторяю отложенные действия перед забросом")
         self._handle_pending_tasks(do_meal=True)
+        if getattr(self, "_inventory_tasks_retry_pending", False):
+            self._log("Инвентарь: повтор не удался, продолжаю запуск рыбалки")
+            return False
         return True
 
     def _casting_control_loop(
