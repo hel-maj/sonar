@@ -35,16 +35,16 @@ python -m sonar.tools.dump_process_memory --mode auto --interactive --select --n
 
 ## Режимы
 
-- `--mode gtav` — только `GTA5.exe`.
-- `--mode webengine` — все `majestic-webengine.exe`; с `--select` можно выбрать
+- `--mode gtav` - только `GTA5.exe`.
+- `--mode webengine` - все `majestic-webengine.exe`; с `--select` можно выбрать
   несколько renderer PID.
-- `--mode all` или `--mode auto` — `GTA5.exe` плюс WebEngine.
-- `--mode cache` — только кешированные окна памяти чата и состояния из
+- `--mode all` или `--mode auto` - `GTA5.exe` плюс WebEngine.
+- `--mode cache` - только кешированные окна памяти чата и состояния из
   `chat_windows_latest.json` / `chat_state_windows_latest.json`.
-- `--mode near-player` — окна вокруг найденных адресов `player`, `fish` и
+- `--mode near-player` - окна вокруг найденных адресов `player`, `fish` и
   `replay_interface` в `GTA5.exe`.
-- `--mode map` — только карта readable regions и modules, без байтов памяти.
-- `--mode custom --pid 12345` или `--process name.exe,pid:12345` — ручной выбор.
+- `--mode map` - только карта readable regions и modules, без байтов памяти.
+- `--mode custom --pid 12345` или `--process name.exe,pid:12345` - ручной выбор.
 
 Полный `GTA5.exe` может занимать много гигабайт. Для разведки сначала используйте
 карту или лимит:
@@ -92,9 +92,9 @@ python -m sonar.tools.dump_process_memory --compare `
 
 Результат `memory_diff_*.json` содержит:
 
-- `comparable_bytes` — сколько байтов удалось сравнить по одинаковым адресам;
-- `changed_bytes` — сколько байтов отличается;
-- `changed_ranges` — первые диапазоны адресов, где были изменения.
+- `comparable_bytes` - сколько байтов удалось сравнить по одинаковым адресам;
+- `changed_bytes` - сколько байтов отличается;
+- `changed_ranges` - первые диапазоны адресов, где были изменения.
 
 Если процесс перезапустился между дампами, используйте `--compare-key process`,
 но трактуйте результат осторожно: адресное пространство могло измениться.
@@ -109,15 +109,15 @@ python -m sonar.tools.dump_chat_history --memory-dump ..\logs\chat_memory\probe_
 
 Для дальнейшего анализа смотрите:
 
-- `manifest.json` — процессы, PID, modules, выбранные regions, anchors/cache
+- `manifest.json` - процессы, PID, modules, выбранные regions, anchors/cache
   metadata;
-- `selected_regions` — что планировалось читать;
-- `regions` — что реально записалось в `memory.bin`;
-- `memory_map` в режиме `map` — карта readable regions без байтов.
+- `selected_regions` - что планировалось читать;
+- `regions` - что реально записалось в `memory.bin`;
+- `memory_map` в режиме `map` - карта readable regions без байтов.
 
 ## Практические ограничения
 
-- Дамп — это снимок процесса на момент чтения; живой процесс может менять память
+- Дамп - это снимок процесса на момент чтения; живой процесс может менять память
   во время записи.
 - `--mode cache` работает только с валидным кешем текущего процесса. Если игра
   или WebEngine перезапущены, manifest покажет `process_restarted`,

@@ -98,7 +98,9 @@ python -m json.tool /opt/sonar-keygen/startup-blocklist.json
 
 ## Настройка сборки
 
-В релизную сборку нужно вшить независимый URL и public key:
+В сборке уже есть текущие production defaults для URL и public key. Явно
+передавайте параметры при смене endpoint, ротации ключа или проверке новой
+инфраструктурной конфигурации:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 `

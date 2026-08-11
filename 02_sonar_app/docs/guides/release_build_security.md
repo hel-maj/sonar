@@ -1,6 +1,9 @@
 # Защищенная сборка и проверка exe
 
-Этот документ описывает, что делает защищенная сборка. Полный порядок выпуска версии находится в [update_release_full.md](update_release_full.md).
+Этот документ описывает, что делает защищенная сборка. Полный порядок выпуска
+версии находится в [update_release_full.md](update_release_full.md), а все
+параметры команды - в
+[build_secure_parameters.md](build_secure_parameters.md).
 
 ## Что делает build_secure.ps1
 
@@ -18,6 +21,13 @@
 10. Проверяет dist на запрещенные plaintext markers.
 11. Создает рядом готовый zip `<build_key>-<exe name>.zip`.
 12. Записывает build metadata в `config\sonar_build_keys.json`.
+
+Перед выполнением сборки скрипт полностью удаляет каталоги `build` и `dist`.
+Не запускайте сборки параллельно и заранее сохраните нужные артефакты.
+Прямой console output содержит build identity и obfuscation seed. Не сохраняйте
+его в transcript. Для журнала используйте только Container wrapper с проверенным
+`build-log-sanitizer.ps1`; журнал хранится в product-local
+`logs\container-build`.
 
 ## Нейтральный публичный домен
 
@@ -67,17 +77,21 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 
 Каждая обычная сборка получает новый seed, поэтому приватные имена функций и переменных отличаются между билдами.
 
-Для повторения конкретного билда используйте:
+Для повторения build identity конкретного билда возьмите key, seed и имя файла
+из `icon_png` в карте сборок, затем используйте:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -BuildKey "<build_key>" -ObfuscationSeed "<seed>" -LicenseServerUrl "https://m-sonar-addr.ru"
+powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 1 -BuildKey "<build_key>" -ObfuscationSeed "<seed>" -IconName "<icon-file.png>" -LicenseServerUrl "https://m-sonar-addr.ru"
 ```
 
 Seed берется из:
 
 ```text
-P:\projects\Majestic\Sonar\config\sonar_build_keys.json
+P:\projects\neiro\Sonar Fishing\config\sonar_build_keys.json
 ```
+
+Это не обещает побайтово идентичный exe: карта пока не хранит все URL
+overrides, режим LTO и версии toolchain.
 
 ## Что не должно попадать в exe
 
@@ -95,7 +109,7 @@ P:\projects\Majestic\Sonar\config\sonar_build_keys.json
 Ручной запуск:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 python scripts\audit_release_secrets.py --target ".\dist\<app_version>\<имя exe>"
 ```
 
@@ -104,16 +118,18 @@ python scripts\audit_release_secrets.py --target ".\dist\<app_version>\<имя e
 Из exe:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<имя exe>.exe"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<имя exe>.exe" --no-map
 ```
 
 Из zip:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<build_key>-<имя exe>.zip"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\<build_key>-<имя exe>.zip" --no-map
 ```
 
-Если рядом есть `config\sonar_build_keys.json`, утилита также покажет seed, app name и exe name.
+Без `--no-map` утилита читает локальную build map и может показать seed, app
+name и exe name. Используйте этот режим только локально для явно запрошенного
+повтора build identity и не сохраняйте вывод в чат, transcript или отчёт.
 
 ## Минимальный чек перед публикацией
 
@@ -124,7 +140,8 @@ python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<имя exe>\
 - `build_secure.ps1` завершился без ошибок;
 - audit release secrets прошел;
 - рядом с exe создан zip;
-- имя zip начинается с 64-символьного build key;
+- имя zip начинается с 11-символьного современного или 64-символьного legacy
+  build key;
 - exe внутри zip открывается и запускается;
 - `extract_build_key_from_exe.py` находит build key;
 - build key есть в `config\sonar_build_keys.json`.

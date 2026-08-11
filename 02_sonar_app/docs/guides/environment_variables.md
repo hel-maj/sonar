@@ -2,6 +2,9 @@
 
 Главное правило: домен для проверки лицензии попадает в exe во время сборки. Если exe уже собран, переменная окружения на компьютере пользователя не поменяет адрес сервера лицензий внутри этого exe.
 
+Полный список параметров `build_secure.ps1` находится в
+[build_secure_parameters.md](build_secure_parameters.md).
+
 Текущий боевой домен:
 
 ```text
@@ -13,7 +16,7 @@ https://m-sonar-addr.ru
 Для релизной сборки проще передавать домен параметром команды:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 1 -LicenseServerUrl "https://m-sonar-addr.ru" -NoLto
 ```
 
@@ -22,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 Для загрузки zip на сервер параметр `--host` уже не обязателен, потому что дефолт в скрипте сейчас `m-sonar-addr.ru`:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 python scripts\upload_build_archives.py
 ```
 
@@ -33,7 +36,7 @@ Upload-скрипт сам читает `APP_VERSION` из `src\sonar\version.py
 Если хочется задавать значения через переменные окружения, вставляйте их в тот же PowerShell перед командой сборки или загрузки:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 $env:SONAR_LICENSE_SERVER_URL = "https://m-sonar-addr.ru"
 $env:SONAR_UPLOAD_HOST = "m-sonar-addr.ru"
 
@@ -54,7 +57,7 @@ python scripts\upload_build_archives.py
 Создайте файл:
 
 ```text
-P:\projects\Majestic\Sonar\02_sonar_app\.env
+P:\projects\neiro\Sonar Fishing\02_sonar_app\.env
 ```
 
 Минимальное содержимое:
@@ -67,7 +70,7 @@ SONAR_UPLOAD_HOST=m-sonar-addr.ru
 После этого можно запускать так:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 python -m sonar --debug --keep-debug-capture
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 1 -NoLto
 python scripts\upload_build_archives.py
@@ -76,7 +79,7 @@ python scripts\upload_build_archives.py
 Файл `.env` игнорируется git. Шаблон лежит рядом:
 
 ```text
-P:\projects\Majestic\Sonar\02_sonar_app\.env.example
+P:\projects\neiro\Sonar Fishing\02_sonar_app\.env.example
 ```
 
 Приоритет такой:
@@ -89,8 +92,8 @@ P:\projects\Majestic\Sonar\02_sonar_app\.env.example
 Скрипты ищут `.env` в двух местах:
 
 ```text
-P:\projects\Majestic\Sonar\.env
-P:\projects\Majestic\Sonar\02_sonar_app\.env
+P:\projects\neiro\Sonar Fishing\.env
+P:\projects\neiro\Sonar Fishing\02_sonar_app\.env
 ```
 
 Если есть оба файла, значения из `02_sonar_app\.env` перекрывают значения из корневого `.env`.

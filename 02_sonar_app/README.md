@@ -1,6 +1,8 @@
-# Sonar
+# Sonar Fishing
 
-Sonar - desktop-приложение для автоматизации рыбалки в Majestic RP.
+Sonar Fishing - внутреннее имя desktop-приложения для автоматизации рыбалки в
+Majestic RP. Пользовательское имя приложения пока остаётся `Sonar`, поэтому
+переименование репозитория и документации не меняет видимый branding release.
 
 ## Возможности
 
@@ -17,7 +19,7 @@ Sonar - desktop-приложение для автоматизации рыба�
 ## Быстрый старт из исходников
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 python -m pip install -e .[test]
 python -m sonar
 ```
@@ -39,18 +41,24 @@ python scripts\run_tests.py
 Один защищенный билд:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
-powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
+powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 1 -LicenseServerUrl "https://m-sonar-addr.ru"
 ```
 
 Много билдов для случайной выдачи:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
-powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall --count 20 -LicenseServerUrl "https://m-sonar-addr.ru"
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
+powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 20 -LicenseServerUrl "https://m-sonar-addr.ru"
 ```
 
 `m-sonar-addr.ru` - текущий нейтральный публичный домен релиза. Не используйте публично `nip.io`, `keygen`, `license`, `admin` или `ui` в названии домена.
+
+Каждый реальный build полностью удаляет локальные `build` и `dist`. Не запускайте
+сборки параллельно и заранее сохраните нужные артефакты. Прямой build выводит
+чувствительную build identity. Для сохраняемого журнала используйте только
+Container wrapper с проверенным `build-log-sanitizer.ps1`; он формирует только
+sanitized log в product-local `logs\container-build` без `Start-Transcript`.
 
 Переменные окружения и `.env` для сборки и загрузки описаны в [docs/guides/environment_variables.md](docs/guides/environment_variables.md). Полный список публичных URL: [docs/guides/available_urls.md](docs/guides/available_urls.md).
 
@@ -64,7 +72,7 @@ dist\<app_version>\<exe name>\<build_key>-<exe name>.zip
 Локальная карта воспроизводимости:
 
 ```text
-P:\projects\Majestic\Sonar\config\sonar_build_keys.json
+P:\projects\neiro\Sonar Fishing\config\sonar_build_keys.json
 ```
 
 В ней хранится `build_key`, `obfuscation_seed`, имя exe, путь к exe и путь к archive.
@@ -74,8 +82,8 @@ P:\projects\Majestic\Sonar\config\sonar_build_keys.json
 Если на ПК настроен SSH key и команда `ssh root@m-sonar-addr.ru` входит без пароля, можно загрузить готовые zip из `dist/<APP_VERSION>` в `builds/<APP_VERSION>`:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
-python scripts\upload_build_archives.py --host m-sonar-addr.ru
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru
 ```
 
 Вместо постоянного `--host` можно один раз задать переменную `SONAR_UPLOAD_HOST`.
@@ -83,31 +91,36 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru
 Проверка без загрузки:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --dry-run
 ```
 
-Если пересобираете ту же версию и хотите заменить ее набор архивов:
+Если пересобираете ту же версию и хотите заменить ее набор архивов, сначала
+подготовьте проверенный backup и rollback, затем выполните точный dry-run:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --replace-version --dry-run
 ```
+
+Live `--replace-version` выполняет remote `rm -rf` version-папки. Удалять
+`--dry-run` можно только после отдельного свежего подтверждения точной версии,
+количества архивов и rollback source.
 
 Если вход по паролю, а не по SSH key:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --allow-password
 ```
 
 Если ключ лежит не в стандартном месте:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --key "$env:USERPROFILE\.ssh\id_ed25519"
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --key "$env:USERPROFILE\.ssh\id_ed25519"
 ```
 
 Если архивы лежат не в `dist`:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path\to\archives"
+python scripts\upload_build_archives.py --source "C:\path\to\archives" --version "<app_version>" --host m-sonar-addr.ru
 ```
 
 Папка на сервере для конкретной версии:
@@ -141,20 +154,23 @@ https://m-sonar-addr.ru/random-build-health
 Из exe:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe" --no-map
 ```
 
 Из zip:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip" --no-map
 ```
 
 JSON-вывод:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe" --json
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe" --no-map --json
 ```
+
+Без `--no-map` утилита может прочитать локальную build map и вывести
+obfuscation seed. Такой вывод нельзя сохранять в transcript, отчёт или чат.
 
 ## Лицензии и обновления
 
@@ -216,15 +232,15 @@ docs/guides/update_release_full.md
 ## Проверки перед публикацией
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 python scripts\run_tests.py
-powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip"
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
+powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 1 -LicenseServerUrl "https://m-sonar-addr.ru"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip" --no-map
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --dry-run
 ```
 
 Если все ок, загрузить:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru
 ```

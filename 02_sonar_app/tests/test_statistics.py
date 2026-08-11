@@ -28,7 +28,7 @@ def test_embedded_price_catalog_contains_markdown_prices():
 def test_markdown_price_parser_reads_item_and_thousand_ranges(tmp_path: Path):
     note = tmp_path / "prices.md"
     note.write_text(
-        "1. Краснопёрка — от <strong>1.26&#36;</strong> до <strong>1.35&#36;</strong> || "
+        "1. Краснопёрка \u2014 от <strong>1.26&#36;</strong> до <strong>1.35&#36;</strong> || "
         "<strong>1260&#36;</strong> - <strong>1350&#36;</strong>\n",
         encoding="utf-8",
     )
