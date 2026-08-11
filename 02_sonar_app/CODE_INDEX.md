@@ -1,8 +1,10 @@
 # Sonar Code Index
 
-Дата актуализации: 2026-05-27
+Дата актуализации: 2026-07-18
 
 Это ручной индекс проекта. Он нужен, чтобы быстро понимать, где лежит нужная логика и какие файлы трогать при типовых изменениях.
+Индекс является навигацией, а не доказательством текущего поведения. Перед
+изменением проверять пути, symbols, consumers и tests через `rg` и исходный код.
 
 ## Корень приложения
 
@@ -71,6 +73,16 @@ Entrypoint для `python -m sonar`.
 
 UI helper для проверки доступности features и блокировки действий.
 
+### `src/sonar/ui/widgets.py`
+
+Переиспользуемые product UI widgets текущего PySide6 приложения. Не добавлять
+сюда несвязанные page state, persistence или domain policy.
+
+### `src/sonar/chat_wip_gate.py`
+
+Startup-sensitive gate текущего chat WIP. Проверять вместе с bootstrap,
+streaming state и release source stripping.
+
 ## License and feature gates
 
 ### `src/sonar/license/client.py`
@@ -101,9 +113,10 @@ UI helper для проверки доступности features и блоки�
 
 Основные entities:
 
-- `Feature`;
+- `LicenseEntitlements`;
 - `GROUP_FEATURES`;
-- `resolve_license_features()`.
+- `entitlements_from_metadata()`;
+- `entitlements_from_cached_fields()`.
 
 Если надо добавить новую платную функцию, сначала добавить feature здесь, потом подключить gate в UI/runtime.
 
@@ -165,6 +178,8 @@ Build metadata:
 - `fishing/meal_system.py` - еда/вода.
 - `fishing/garbage_disposal.py` - мусор.
 - `fishing/statistics.py` - статистика.
+- `fishing/session_history.py` - история сессий.
+- `fishing/statistics_export.py` - экспорт статистики.
 
 ## Streaming and Telegram
 
@@ -223,13 +238,13 @@ config/license_settings.json
 - собирает onefile exe через Nuitka;
 - запускает audit plaintext markers;
 - создает zip рядом с exe: `<build_key>-<exe name>.zip`;
-- обновляет `P:\projects\Majestic\Sonar\config\sonar_build_keys.json`.
+- обновляет `P:\projects\neiro\Sonar Fishing\config\sonar_build_keys.json`.
 
 Команды:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
-powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall --count 20 -LicenseServerUrl "https://m-sonar-addr.ru"
+powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 20 -LicenseServerUrl "https://m-sonar-addr.ru"
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -BuildKey "<build_key>" -ObfuscationSeed "<seed>"
 ```
 
@@ -273,30 +288,32 @@ Seed-based обфускация приватных identifiers во времен
 Примеры:
 
 ```powershell
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe"
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip" --json
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<name>.exe" --no-map
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip" --no-map --json
 ```
 
-Если рядом есть `config\sonar_build_keys.json`, выводит seed и build metadata.
+Без `--no-map` может вывести seed и build metadata из локальной карты. Не
+сохранять такой вывод в transcript, отчёт или чат.
 
 ### `scripts/upload_build_archives.py`
 
 Загружает готовые build archives на сервер через системные `ssh/scp`.
 
-По умолчанию читает `APP_VERSION`, сканирует `dist/<APP_VERSION>`, если папка есть, и загружает в `builds/<APP_VERSION>`.
+Для production передавать точные `--source` и `--version`, чтобы fallback scan
+не выбрал старые локальные архивы.
 
 По умолчанию ожидает SSH key или agent, чтобы `ssh root@m-sonar-addr.ru` входил без пароля. Для входа по паролю используйте `--allow-password`; пароль вводится в prompt `ssh/scp`, а не в команду.
 
 Команды:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
-python scripts\upload_build_archives.py --host m-sonar-addr.ru
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --key "$env:USERPROFILE\.ssh\id_ed25519"
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path\to\archives"
+python scripts\upload_build_archives.py --source ".\dist\<version>" --version "<version>" --host m-sonar-addr.ru --dry-run
+python scripts\upload_build_archives.py --source ".\dist\<version>" --version "<version>" --host m-sonar-addr.ru
+python scripts\upload_build_archives.py --source ".\dist\<version>" --version "<version>" --host m-sonar-addr.ru --replace-version --dry-run
 ```
+
+Live `--replace-version` выполняет remote `rm -rf` и требует отдельного свежего
+подтверждения после проверки backup и rollback source.
 
 Берет только файлы с именем:
 
@@ -331,7 +348,7 @@ python scripts\run_tests.py
 Точечные тесты новых release flows:
 
 ```powershell
-python -m pytest tests\test_build_secure.py tests\test_extract_build_key_from_exe.py tests\test_random_build_download_server.py tests\test_upload_build_archives.py -q
+python scripts\run_tests.py tests\test_build_secure.py tests\test_extract_build_key_from_exe.py tests\test_random_build_download_server.py tests\test_upload_build_archives.py
 ```
 
 Связанные тесты:
@@ -347,6 +364,7 @@ python -m pytest tests\test_build_secure.py tests\test_extract_build_key_from_ex
 Все рабочие инструкции лежат в `docs/guides`.
 
 - `docs/guides/update_release_full.md` - полный выпуск новой версии.
+- `docs/guides/build_secure_parameters.md` - параметры и destructive effects сборки.
 - `docs/guides/random_build_downloads.md` - случайная выдача готовых zip.
 - `docs/guides/delete_old_build_versions.md` - пошаговое удаление старых version-папок.
 - `docs/guides/keygen_license_features.md` - группы, features, Keygen metadata.
@@ -381,8 +399,11 @@ python -m pytest tests\test_build_secure.py tests\test_extract_build_key_from_ex
 
 ## Minimal checks after changes
 
+Во время работы запускать только affected checks. Полный offline suite запускать
+один раз после завершения кода и документации как final gate.
+
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 python -m compileall -q scripts src\sonar
 python scripts\run_tests.py
 ```
@@ -390,7 +411,7 @@ python scripts\run_tests.py
 Перед публикацией:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
-python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip"
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
+powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 1 -LicenseServerUrl "https://m-sonar-addr.ru"
+python scripts\extract_build_key_from_exe.py ".\dist\<app_version>\<name>\<build_key>-<name>.zip" --no-map
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --dry-run
 ```

@@ -68,6 +68,15 @@ def test_secure_build_records_reproducible_build_key_map():
     assert "--seed" in branding
 
 
+def test_secure_build_rejects_unsafe_manual_identity_parameters_for_multiple_builds():
+    script = (ROOT / "scripts" / "build_secure.ps1").read_text(encoding="utf-8")
+
+    assert 'if (($BuildKey -or $ObfuscationSeed) -and $Count -ne 1)' in script
+    assert 'throw "BuildKey and ObfuscationSeed can only be used with Count 1"' in script
+    assert 'if ($BuildKey -and $BuildKey -notmatch "^(?:[0-9a-fA-F]{11}|[0-9a-fA-F]{64})$")' in script
+    assert 'throw "BuildKey must contain 11 or 64 hexadecimal characters"' in script
+
+
 def test_secure_build_runs_release_secret_audit():
     script = (ROOT / "scripts" / "build_secure.ps1").read_text(encoding="utf-8")
     audit = (ROOT / "scripts" / "audit_release_secrets.py").read_text(encoding="utf-8")

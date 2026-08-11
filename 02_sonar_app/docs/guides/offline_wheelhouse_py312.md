@@ -26,7 +26,7 @@
 ## Скачать wheelhouse на Windows
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 .\scripts\download_wheelhouse.ps1
 ```
 
@@ -53,7 +53,7 @@ wheelhouse/linux-py312/
 ## Установить зависимости без интернета на Windows
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 .\scripts\install_venv_offline.ps1
 ```
 

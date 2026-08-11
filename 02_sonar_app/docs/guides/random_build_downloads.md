@@ -47,15 +47,15 @@ Warhammer 40,000 - Darktide.exe
 Один билд:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall
 ```
 
 Много билдов:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
-powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall --count 20
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
+powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 -SkipInstall -Count 20 -LicenseServerUrl "https://m-sonar-addr.ru"
 ```
 
 После сборки в каждой папке `dist\<app_version>\<имя>` будет:
@@ -153,44 +153,51 @@ ssh root@m-sonar-addr.ru "curl -sS https://m-sonar-addr.ru/random-build-health"
 Если `ssh root@m-sonar-addr.ru` входит без пароля, загрузить все архивы из `dist` можно так:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
-python scripts\upload_build_archives.py --host m-sonar-addr.ru
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru
 ```
 
-Скрипт сам читает `APP_VERSION` из `src\sonar\version.py` и загружает архивы в `builds/<APP_VERSION>`. Если внутри `dist` есть папка этой версии, скрипт сканирует только `dist/<APP_VERSION>`, чтобы не залить старые локальные архивы. Вместо постоянного `--host` можно задать переменную окружения `SONAR_UPLOAD_HOST`.
+Для production всегда передавайте точные `--source` и `--version`, чтобы
+fallback scan не подобрал старые локальные архивы. Вместо постоянного `--host`
+можно задать переменную окружения `SONAR_UPLOAD_HOST`.
 
 Проверить без загрузки:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --dry-run
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --dry-run
 ```
 
-Если надо заменить набор архивов внутри этой же версии, явно очистите version-папку перед загрузкой:
+Если надо заменить набор архивов внутри этой же версии, сначала подготовьте
+проверенный backup и rollback source, затем выполните dry-run:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version --dry-run
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --replace-version
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --replace-version --dry-run
 ```
+
+`--replace-version` выполняет remote `rm -rf` target version-папки и не является
+atomic. Live replacement требует отдельного свежего подтверждения точной
+версии, archive count, backup и rollback source. Без проверенного восстановления
+операция заблокирована.
 
 Удаление старых version-папок описано отдельно: [delete_old_build_versions.md](delete_old_build_versions.md).
 
 Если вход по паролю, а не по SSH key, разрешите prompt пароля:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password --dry-run
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --allow-password
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --allow-password --dry-run
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --allow-password
 ```
 
 Если ключ лежит не в стандартном месте:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --key "$env:USERPROFILE\.ssh\id_ed25519"
+python scripts\upload_build_archives.py --source ".\dist\<app_version>" --version "<app_version>" --host m-sonar-addr.ru --key "$env:USERPROFILE\.ssh\id_ed25519"
 ```
 
 Если архивы лежат в отдельной папке:
 
 ```powershell
-python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path\to\archives"
+python scripts\upload_build_archives.py --source "C:\path\to\archives" --version "<app_version>" --host m-sonar-addr.ru
 ```
 
 Утилита использует системные `ssh/scp`, поэтому работает с обычными ключами из `.ssh`, `ssh-agent` и настройками OpenSSH.
@@ -198,10 +205,10 @@ python scripts\upload_build_archives.py --host m-sonar-addr.ru --source "C:\path
 Ручная загрузка без upload-скрипта:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
 $Version = "0.1.0"
 $BuildsDir = "/var/lib/docker/volumes/sonar-keygen-caddy-data/_data/builds/$Version"
-$Archives = Get-ChildItem -Path ".\dist" -Recurse -File -Filter "*.zip" |
+$Archives = Get-ChildItem -Path ".\dist\$Version" -Recurse -File -Filter "*.zip" |
   Where-Object { $_.Name -match '^(?:[0-9a-f]{11}|[0-9a-f]{64})-.+(?:\.exe)?\.zip$' }
 if (-not $Archives) { throw "No build archives found in .\dist" }
 
@@ -225,12 +232,12 @@ curl.exe -L -OJ https://m-sonar-addr.ru/api/random-build.zip
 Вытащить build key из скачанного zip:
 
 ```powershell
-cd P:\projects\Majestic\Sonar\02_sonar_app
-python scripts\extract_build_key_from_exe.py "C:\path\to\<build_key>-<exe name>.zip"
+cd P:\projects\neiro\Sonar Fishing\02_sonar_app
+python scripts\extract_build_key_from_exe.py "C:\path\to\<build_key>-<exe name>.zip" --no-map
 ```
 
 Сверить seed:
 
 ```text
-P:\projects\Majestic\Sonar\config\sonar_build_keys.json
+P:\projects\neiro\Sonar Fishing\config\sonar_build_keys.json
 ```

@@ -20,6 +20,12 @@ $env:PYTHONIOENCODING = "utf-8"
 if ($Count -lt 1) {
     throw "Count must be greater than zero"
 }
+if (($BuildKey -or $ObfuscationSeed) -and $Count -ne 1) {
+    throw "BuildKey and ObfuscationSeed can only be used with Count 1"
+}
+if ($BuildKey -and $BuildKey -notmatch "^(?:[0-9a-fA-F]{11}|[0-9a-fA-F]{64})$") {
+    throw "BuildKey must contain 11 or 64 hexadecimal characters"
+}
 if ($IconName -and $Count -ne 1) {
     throw "IconName can only be used with Count 1"
 }

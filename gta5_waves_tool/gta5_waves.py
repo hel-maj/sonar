@@ -155,7 +155,7 @@ def process_targets(action: str, game_path: Path, config: dict, targets: list[Rp
       if target.required:
         raise RuntimeError(f'Не найден обязательный архив: {original_path}')
 
-      print(f'{target.label}: оригинальный архив не найден — оригинал пропускаю.')
+      print(f'{target.label}: оригинальный архив не найден - оригинал пропускаю.')
     else:
       if config.get('target', {}).get('backup_whole_update_rpf', True):
         backup_named_rpf(original_path, game_path, config, f'{target.slug}_before_{action}')
@@ -170,7 +170,7 @@ def process_targets(action: str, game_path: Path, config: dict, targets: list[Rp
         create_no_waves_missing_mods(game_path, config, target)
       else:
         clear_mods_no_waves_state(game_path, target)
-        print(f'{target.label}: {target.mods_relative_path.as_posix()} не было до отключения волн — mods не создаю и не трогаю.')
+        print(f'{target.label}: {target.mods_relative_path.as_posix()} не было до отключения волн - mods не создаю и не трогаю.')
     else:
       restore_mods_if_we_changed_it(game_path, config, target)
 
@@ -478,7 +478,7 @@ def apply_no_waves_to_existing_mods(game_path: Path, config: dict, target: RpfTa
   mods_rpf = game_path / target.mods_relative_path
 
   if not mods_rpf.exists():
-    print(f'{target.mods_relative_path.as_posix()} исчез до применения волн — пропускаю mods.')
+    print(f'{target.mods_relative_path.as_posix()} исчез до применения волн - пропускаю mods.')
     return
 
   backup_path = backup_named_rpf(mods_rpf, game_path, config, f'{target.slug}_mods_before_no_waves')
@@ -492,7 +492,7 @@ def apply_oiv_to_existing_mods_rpf(oiv_path: Path, game_path: Path, config: dict
   mods_rpf = game_path / target.mods_relative_path
 
   if not mods_rpf.exists():
-    print(f'{target.mods_relative_path.as_posix()} не найден — пропускаю.')
+    print(f'{target.mods_relative_path.as_posix()} не найден - пропускаю.')
     return
 
   print('')
@@ -516,11 +516,11 @@ def restore_mods_if_we_changed_it(game_path: Path, config: dict, target: RpfTarg
   mods_state = mods_states.get(target.slug) if isinstance(mods_states, dict) else None
 
   if not isinstance(mods_state, dict) or not mods_state.get('applied'):
-    print(f'Для {target.mods_relative_path.as_posix()} нет записи, что no-waves применялся этим скриптом — mods не трогаю.')
+    print(f'Для {target.mods_relative_path.as_posix()} нет записи, что no-waves применялся этим скриптом - mods не трогаю.')
     return
 
   if not mods_rpf.exists():
-    print(f'{target.mods_relative_path.as_posix()} был изменён этим скриптом, но сейчас файла нет — не пересоздаю его.')
+    print(f'{target.mods_relative_path.as_posix()} был изменён этим скриптом, но сейчас файла нет - не пересоздаю его.')
     clear_mods_no_waves_state(game_path, target)
     return
 
@@ -530,7 +530,7 @@ def restore_mods_if_we_changed_it(game_path: Path, config: dict, target: RpfTarg
 
   if created_by_script:
     if snapshots_equal(current_snapshot, after_snapshot):
-      print(f'{target.mods_relative_path.as_posix()} был создан этим скриптом и после этого не менялся — удаляю его при откате.')
+      print(f'{target.mods_relative_path.as_posix()} был создан этим скриптом и после этого не менялся - удаляю его при откате.')
       mods_rpf.unlink()
       cleanup_empty_dirs([mods_rpf.parent])
       clear_mods_no_waves_state(game_path, target)

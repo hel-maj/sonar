@@ -15,11 +15,11 @@ python test_info_ocr/run.py
 
 Результаты появятся в `test_info_ocr/results`:
 
-- `results/slices` — нарезанные описания предметов;
-- `results/results.csv` — табличный результат;
-- `results/results.json` — полный результат;
-- `results/results.txt` — быстрый текстовый просмотр;
-- `results/mismatch_report.txt` и `results/mismatch_report.csv` — сравнение с `tests/fixtures/inventory_item_info/metadata.csv`, если эталонные данные есть в проекте.
+- `results/slices` - нарезанные описания предметов;
+- `results/results.csv` - табличный результат;
+- `results/results.json` - полный результат;
+- `results/results.txt` - быстрый текстовый просмотр;
+- `results/mismatch_report.txt` и `results/mismatch_report.csv` - сравнение с `tests/fixtures/inventory_item_info/metadata.csv`, если эталонные данные есть в проекте.
 
 ## Важно
 

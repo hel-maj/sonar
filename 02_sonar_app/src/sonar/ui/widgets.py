@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 SONAR_QSS = """
 * {
-    font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+    font-family: "Inter", "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
     color: #192342;
     outline: none;
 }
@@ -680,7 +680,7 @@ class ElidedLabel(QLabel):
 
 
 class ExternalLinkLabel(ElidedLabel):
-    def __init__(self, text: str = "—", parent: QWidget | None = None, *, tooltip_delay_ms: int = 500) -> None:
+    def __init__(self, text: str = "-", parent: QWidget | None = None, *, tooltip_delay_ms: int = 500) -> None:
         super().__init__(text, parent, tooltip_delay_ms=tooltip_delay_ms)
         self._url = ""
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -1116,7 +1116,7 @@ def icon_widget(icon: str | Path, size: int = 28, fallback_style: str = "font-si
 
 
 class MetricCard(Card):
-    def __init__(self, label: str, value: str = "—", icon: str | Path = "", parent: QWidget | None = None) -> None:
+    def __init__(self, label: str, value: str = "-", icon: str | Path = "", parent: QWidget | None = None) -> None:
         super().__init__(parent, soft=True)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)

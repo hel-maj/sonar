@@ -1,6 +1,11 @@
-# Sonar docs
+# Sonar Fishing docs
 
 Все рабочие гайды лежат в отдельной папке [guides](guides).
+
+## Архитектура WPF/C++ migration
+
+- [Product ADR: WPF Host и C++ Engine](architecture/ADR-0001-WPF-CSHARP-CPP-ENGINE.md)
+- [Code-backed Engine migration plan](architecture/ENGINE_MIGRATION.md)
 
 Начинать лучше с [полного гайда обновления версии](guides/update_release_full.md).
 

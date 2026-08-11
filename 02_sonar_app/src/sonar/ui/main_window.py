@@ -124,6 +124,7 @@ MANUAL_REELING_ARG = "--manual-reeling"
 UI_ICON_DIR = RESOURCE_DIR / "ui_icons"
 FISH_ICON_DIR = RESOURCE_DIR / "fishing" / "fish"
 FONT_DIR = RESOURCE_DIR / "fonts"
+APP_FONT_FAMILIES = ("Inter", "Segoe UI Variable", "Segoe UI", "Arial")
 FISH_KEEP_COLUMNS = 2
 FISHING_PREVIEW_IMAGE_RADIUS = 8
 
@@ -221,11 +222,6 @@ def load_app_fonts() -> None:
         path = windows_font_dir / name
         if path.exists():
             font_paths.append(path)
-    sf_download_dir = Path(r"D:\Downloads\San-Francisco-Pro-Fonts-master\San-Francisco-Pro-Fonts-master")
-    for name in ("SF-Pro-Text-Regular.otf", "SF-Pro-Text-Semibold.otf", "SF-Pro-Display-Regular.otf", "SF-Pro-Display-Bold.otf"):
-        path = sf_download_dir / name
-        if path.exists():
-            font_paths.append(path)
     loaded: set[Path] = set()
     for path in font_paths:
         normalized = path.resolve()
@@ -237,7 +233,7 @@ def load_app_fonts() -> None:
 
 def apply_app_font(app: QApplication) -> None:
     families = set(QFontDatabase.families())
-    for family in ("Segoe UI Variable", "Segoe UI", "Arial"):
+    for family in APP_FONT_FAMILIES:
         if family in families:
             font = QFont(family, 8)
             font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
@@ -376,7 +372,7 @@ class CatchSizeDonut(QWidget):
 
 
 class CompactMetric(QFrame):
-    def __init__(self, label: str, value: str = "—", icon: str | Path = "", parent: QWidget | None = None) -> None:
+    def __init__(self, label: str, value: str = "-", icon: str | Path = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("compactMetric")
         self.setStyleSheet(
@@ -901,11 +897,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(title_row)
         metrics = QHBoxLayout()
         metrics.setSpacing(9)
-        self.player_food_metric = MetricCard("Еда", "—", ui_icon("food.svg"))
-        self.player_water_metric = MetricCard("Вода", "—", ui_icon("gauge_10fps.png"))
-        self.player_health_metric = MetricCard("HP", "—", ui_icon("gauge_10fps.png"))
-        self.player_inventory_weight_metric = MetricCard("Инвентарь", "—", ui_icon("scales.svg"))
-        self.player_backpack_weight_metric = MetricCard("Рюкзак", "—", ui_icon("backpack.png"))
+        self.player_food_metric = MetricCard("Еда", "-", ui_icon("food.svg"))
+        self.player_water_metric = MetricCard("Вода", "-", ui_icon("gauge_10fps.png"))
+        self.player_health_metric = MetricCard("HP", "-", ui_icon("gauge_10fps.png"))
+        self.player_inventory_weight_metric = MetricCard("Инвентарь", "-", ui_icon("scales.svg"))
+        self.player_backpack_weight_metric = MetricCard("Рюкзак", "-", ui_icon("backpack.png"))
         for metric in (
             self.player_food_metric,
             self.player_water_metric,
@@ -989,10 +985,10 @@ class MainWindow(QMainWindow):
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
-        self.game_state_tile = self._status_tile("Игра", "—", "Majestic RP", ui_icon("monitor.svg"))
-        self.player_food_tile = self._status_tile("Еда", "—", "Показатель", ui_icon("food.svg"))
-        self.player_water_tile = self._status_tile("Вода", "—", "Показатель", ui_icon("pulse.svg"))
-        self.player_inventory_tile = self._status_tile("Инвентарь", "—", "Вес", ui_icon("backpack.png"))
+        self.game_state_tile = self._status_tile("Игра", "-", "Majestic RP", ui_icon("monitor.svg"))
+        self.player_food_tile = self._status_tile("Еда", "-", "Показатель", ui_icon("food.svg"))
+        self.player_water_tile = self._status_tile("Вода", "-", "Показатель", ui_icon("pulse.svg"))
+        self.player_inventory_tile = self._status_tile("Инвентарь", "-", "Вес", ui_icon("backpack.png"))
         self._system_tiles["game"].append(self.game_state_tile)
         self._system_tiles["food"].append(self.player_food_tile)
         self._system_tiles["water"].append(self.player_water_tile)
@@ -1002,9 +998,9 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.player_food_tile, 1, 0)
         grid.addWidget(self.player_water_tile, 1, 1)
         if include_tackle:
-            self.tackle_bait_tile = self._status_tile("Наживка", "—", "", ui_icon("bait.png"))
-            self.tackle_leader_tile = self._status_tile("Поводок", "—", "", ui_icon("leader.png"))
-            self.tackle_net_tile = self._status_tile("Подсак", "—", "", ui_icon("landing_net.png"))
+            self.tackle_bait_tile = self._status_tile("Наживка", "-", "", ui_icon("bait.png"))
+            self.tackle_leader_tile = self._status_tile("Поводок", "-", "", ui_icon("leader.png"))
+            self.tackle_net_tile = self._status_tile("Подсак", "-", "", ui_icon("landing_net.png"))
             self._system_tiles["bait"].append(self.tackle_bait_tile)
             self._system_tiles["leader"].append(self.tackle_leader_tile)
             self._system_tiles["net"].append(self.tackle_net_tile)
@@ -1074,11 +1070,11 @@ class MainWindow(QMainWindow):
         self.overview_telegram_description.setWordWrap(True)
         self.overview_telegram_description.setProperty("muted", True)
         layout.addWidget(self.overview_telegram_description)
-        self.overview_telegram_chat_id_label = QLabel("—")
+        self.overview_telegram_chat_id_label = QLabel("-")
         self.overview_telegram_chat_id_label.setStyleSheet("font-weight: 800; color: #1268e8;")
-        self.overview_telegram_status_label = QLabel("—")
+        self.overview_telegram_status_label = QLabel("-")
         self.overview_telegram_status_label.setStyleSheet("font-weight: 800; color: #17203c;")
-        self.overview_telegram_notifications_label = QLabel("—")
+        self.overview_telegram_notifications_label = QLabel("-")
         self.overview_telegram_notifications_label.setStyleSheet("font-weight: 800; color: #17203c;")
         layout.addLayout(self._overview_detail_row("Chat ID", self.overview_telegram_chat_id_label))
         layout.addLayout(self._overview_detail_row("Статус", self.overview_telegram_status_label))
@@ -1109,11 +1105,11 @@ class MainWindow(QMainWindow):
         self.overview_stream_description.setWordWrap(True)
         self.overview_stream_description.setProperty("muted", True)
         layout.addWidget(self.overview_stream_description)
-        self.overview_stream_status_label = QLabel("—")
+        self.overview_stream_status_label = QLabel("-")
         self.overview_stream_status_label.setStyleSheet("font-weight: 800; color: #17203c;")
-        self.overview_stream_quality_label = QLabel("—")
+        self.overview_stream_quality_label = QLabel("-")
         self.overview_stream_quality_label.setStyleSheet("font-weight: 800; color: #17203c;")
-        self.overview_stream_mode_label = QLabel("—")
+        self.overview_stream_mode_label = QLabel("-")
         self.overview_stream_mode_label.setStyleSheet("font-weight: 800; color: #17203c;")
         layout.addLayout(self._overview_detail_row("Статус", self.overview_stream_status_label))
         layout.addLayout(self._overview_detail_row("Качество", self.overview_stream_quality_label))
@@ -1224,8 +1220,8 @@ class MainWindow(QMainWindow):
         info_title = QLabel("Аккаунт")
         info_title.setProperty("sectionTitle", True)
         self.license_account_status = MetricCard("Статус", "Не активна", ui_icon("shield_check.svg"))
-        self.license_account_tier = MetricCard("Подписка", "—", ui_icon("id_card.svg"))
-        self.license_account_expiry = MetricCard("Действует до", "—", ui_icon("calendar.svg"))
+        self.license_account_tier = MetricCard("Подписка", "-", ui_icon("id_card.svg"))
+        self.license_account_expiry = MetricCard("Действует до", "-", ui_icon("calendar.svg"))
         self.license_account_role = MetricCard("Роль", "user", ui_icon("id_card.svg"))
         self.license_account_role.hide()
         info_layout.addWidget(info_title)
@@ -1363,7 +1359,7 @@ class MainWindow(QMainWindow):
         fish_layout.setSpacing(7)
         fish_title = QLabel("Рыбу оставлять")
         fish_title.setProperty("sectionTitle", True)
-        fish_note = QLabel("Выберите рыбу, которую бот будет забирать. Остальную — отпускать.")
+        fish_note = QLabel("Выберите рыбу, которую бот будет забирать. Остальную - отпускать.")
         fish_note.setProperty("muted", True)
         fish_layout.addWidget(fish_title)
         fish_layout.addWidget(fish_note)
@@ -1742,7 +1738,7 @@ class MainWindow(QMainWindow):
             if end_day < start_day:
                 raise ValueError("Дата «по» должна быть не раньше даты «с»")
             records = [item for item in self._stats_history_records if start_day <= item.day <= end_day]
-            return self._stats_from_records(records), f"{start_day.strftime('%d.%m.%Y')} — {end_day.strftime('%d.%m.%Y')} · сессий: {len(records)}"
+            return self._stats_from_records(records), f"{start_day.strftime('%d.%m.%Y')} - {end_day.strftime('%d.%m.%Y')} · сессий: {len(records)}"
         if mode == STATS_FILTER_SINCE:
             start_day = self._parse_stats_filter_date(str(key[1] if len(key) > 1 else ""))
             records = [item for item in self._stats_history_records if item.day >= start_day]
@@ -2165,8 +2161,8 @@ class MainWindow(QMainWindow):
         self.stream_status_label = QLabel("offline")
         self.stream_area_label = QLabel("Все окно")
         self.stream_quality_label = QLabel("720p")
-        self.stream_auto_stop_label = QLabel("—")
-        self.stream_url_label = ExternalLinkLabel("—")
+        self.stream_auto_stop_label = QLabel("-")
+        self.stream_url_label = ExternalLinkLabel("-")
         self.stream_url_label.setWordWrap(False)
         self.stream_url_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.stream_url_label.setMaximumHeight(22)
@@ -2265,7 +2261,7 @@ class MainWindow(QMainWindow):
         self.stream_fps_metric = MetricCard("Целевой FPS", "30", ui_icon("gauge_10fps.png"))
         self.stream_bitrate_metric = MetricCard("Битрейт профиля", "2900k", ui_icon("profit.svg"))
         self.stream_mode_metric = MetricCard("Режим", "Обычный", ui_icon("frame.svg"))
-        self.stream_uptime_metric = MetricCard("Время стрима", "—", ui_icon("timer.svg"))
+        self.stream_uptime_metric = MetricCard("Время стрима", "-", ui_icon("timer.svg"))
         for metric in (self.stream_fps_metric, self.stream_bitrate_metric, self.stream_mode_metric, self.stream_uptime_metric):
             perf_metrics.addWidget(metric)
         perf_layout.addLayout(perf_metrics)
@@ -2590,7 +2586,7 @@ class MainWindow(QMainWindow):
         chat_id = ", ".join(str(item) for item in telegram.admin_ids[:2])
         if len(telegram.admin_ids) > 2:
             chat_id = f"{chat_id}, +{len(telegram.admin_ids) - 2}"
-        self.overview_telegram_chat_id_label.setText(chat_id or "—")
+        self.overview_telegram_chat_id_label.setText(chat_id or "-")
         self.overview_telegram_status_label.setText(status)
         notification_count = sum(
             bool(item)
@@ -2609,7 +2605,7 @@ class MainWindow(QMainWindow):
             self.stream_telegram_badge.setText(status)
             self.stream_telegram_badge.set_tone(tone)
             self.stream_telegram_status_label.setText(description)
-            self.stream_telegram_admins_label.setText(f"Chat ID: {chat_id or '—'}")
+            self.stream_telegram_admins_label.setText(f"Chat ID: {chat_id or '-'}")
 
     def _refresh_overview_stream_card(self) -> None:
         if not hasattr(self, "overview_stream_badge"):
@@ -2623,7 +2619,7 @@ class MainWindow(QMainWindow):
         else:
             self.overview_stream_description.setText("Трансляция запущена." if active else "Трансляция ожидает запуска.")
         self.overview_stream_status_label.setText("Онлайн" if active else str(snapshot.status or "Оффлайн"))
-        self.overview_stream_quality_label.setText(str(snapshot.quality or "—"))
+        self.overview_stream_quality_label.setText(str(snapshot.quality or "-"))
         self.overview_stream_mode_label.setText("10fps" if snapshot.snapshot_mode_enabled else "Обычный")
 
     def _refresh_stream_license_card(self) -> None:
@@ -2636,7 +2632,7 @@ class MainWindow(QMainWindow):
             self.stream_license_expires_label.setText(f"Действует до: {expires}")
         else:
             self.stream_license_status_label.setText("Статус: не активна")
-            self.stream_license_expires_label.setText("Действует до: —")
+            self.stream_license_expires_label.setText("Действует до: -")
 
     def _handle_telegram_settings_changed(self, telegram_settings: object) -> None:
         if not hasattr(telegram_settings, "to_dict"):
@@ -2886,8 +2882,8 @@ class MainWindow(QMainWindow):
             self.license_summary_label.setText("Введите ключ лицензии")
             self.license_status_label.setText(f"Статус: не активна\n{error}")
             self.license_account_status.set_value("Не активна")
-            self.license_account_tier.set_value("—")
-            self.license_account_expiry.set_value("—")
+            self.license_account_tier.set_value("-")
+            self.license_account_expiry.set_value("-")
             self.license_account_role.set_value("user")
             self.sidebar_license_title.setText("Лицензия не активна")
             self.sidebar_license_subtitle.setText("нужна активация")
@@ -3610,14 +3606,14 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _format_percent_value(value: int | None) -> str:
-        return "—" if value is None else f"{value}%"
+        return "-" if value is None else f"{value}%"
 
     @staticmethod
     def _format_weight_pair(current: float | None, maximum: float | None) -> str:
         if current is None and maximum is None:
-            return "—"
+            return "-"
         if current is None:
-            return f"— / {MainWindow._format_weight_number(maximum)} кг"
+            return f"- / {MainWindow._format_weight_number(maximum)} кг"
         if maximum is None:
             return f"{MainWindow._format_weight_number(current)} кг"
         return f"{MainWindow._format_weight_number(current)} / {MainWindow._format_weight_number(maximum)} кг"
@@ -3625,7 +3621,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _format_weight_number(value: float | None) -> str:
         if value is None:
-            return "—"
+            return "-"
         text = f"{value:.2f}".rstrip("0").rstrip(".")
         return text or "0"
 
@@ -3755,7 +3751,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _format_tackle_presence(count: int | None) -> str:
         if count is None:
-            return "—"
+            return "-"
         if count <= 0:
             return "Нет"
         return "Есть" if count == 1 else f"Есть · {count}"
@@ -4115,13 +4111,13 @@ class MainWindow(QMainWindow):
             minutes, seconds = divmod(max(0, int(snapshot.seconds_until_auto_stop)), 60)
             self.stream_auto_stop_label.setText(f"{minutes}:{seconds:02d} без зрителей")
         else:
-            self.stream_auto_stop_label.setText("—")
+            self.stream_auto_stop_label.setText("-")
         if snapshot.stream_url:
             self.stream_url_label.set_link(snapshot.stream_url)
         elif snapshot.error:
             self.stream_url_label.set_plain_text(snapshot.error, snapshot.error)
         else:
-            self.stream_url_label.set_plain_text("—")
+            self.stream_url_label.set_plain_text("-")
         quality_block = self.stream_quality_combo.blockSignals(True)
         chat_block = self.stream_chat_zoom_check.blockSignals(True)
         snapshot_block = self.stream_snapshot_mode_check.blockSignals(True)
@@ -4143,12 +4139,12 @@ class MainWindow(QMainWindow):
         quality = STREAM_QUALITIES.get(snapshot.quality)
         fps = 10 if snapshot.snapshot_mode_enabled else 30
         self.stream_fps_metric.set_value(str(fps))
-        self.stream_bitrate_metric.set_value(quality.bitrate_for_fps(fps) if quality is not None else "—")
+        self.stream_bitrate_metric.set_value(quality.bitrate_for_fps(fps) if quality is not None else "-")
         self.stream_mode_metric.set_value("10fps" if snapshot.snapshot_mode_enabled else "Обычный")
         if snapshot.active and snapshot.started_at is not None:
             self.stream_uptime_metric.set_value(format_duration(max(0.0, self.stream_service.clock() - snapshot.started_at)))
         else:
-            self.stream_uptime_metric.set_value("—")
+            self.stream_uptime_metric.set_value("-")
         self._refresh_overview_stream_card()
 
     def reset_session_stats(self) -> None:

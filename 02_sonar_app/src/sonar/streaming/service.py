@@ -1298,7 +1298,7 @@ STREAM_PAGE_HTML = r"""<!doctype html>
               chatCommands.filter((command) => command.code).map((command) =>
                 React.createElement("div", { key: `help-${command.key}` },
                   React.createElement("strong", null, command.code),
-                  ` — ${command.title}: ${command.description}`
+                  ` - ${command.title}: ${command.description}`
                 )
               )
             ))

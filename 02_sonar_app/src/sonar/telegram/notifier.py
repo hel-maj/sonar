@@ -1488,7 +1488,7 @@ class NotificationManager:
             if item_info.effects:
                 lines.extend(["", "✨ <b>Эффекты</b>"])
                 for effect in item_info.effects:
-                    duration = f" — ⏳ {_h(effect.duration)}" if effect.duration else ""
+                    duration = f" - ⏳ {_h(effect.duration)}" if effect.duration else ""
                     lines.append(f"• <b>{_h(effect.name)}</b>{duration}")
                     if effect.description:
                         lines.append(f"  <i>{_h(effect.description)}</i>")
@@ -1527,7 +1527,7 @@ class NotificationManager:
         if current is None and maximum is None:
             return ""
         if current is None:
-            return f"— / {NotificationManager._format_status_weight_number(maximum)}"
+            return f"- / {NotificationManager._format_status_weight_number(maximum)}"
         if maximum is None:
             return NotificationManager._format_status_weight_number(current)
         return (
@@ -1538,7 +1538,7 @@ class NotificationManager:
     @staticmethod
     def _format_status_weight_number(value: float | None) -> str:
         if value is None:
-            return "—"
+            return "-"
         return f"{value:.2f}".rstrip("0").rstrip(".")
 
     @staticmethod
@@ -1557,7 +1557,7 @@ class NotificationManager:
         if trophy:
             lines.append(f"🏆 <b>{_h(quality_text)}!</b>")
             lines.append("")
-        lines.append(f"🐟 <b>{_h(fish_name)}</b> — {_h(format_weight(weight_kg or 0.0))}")
+        lines.append(f"🐟 <b>{_h(fish_name)}</b> - {_h(format_weight(weight_kg or 0.0))}")
         if released is not None:
             status = "отпущена" if released else "оставлена"
             lines.append(f"🌊 <b>Статус:</b> {_h(status)}")
