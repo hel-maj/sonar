@@ -1,0 +1,93 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.EngineStatus.EngineStatusScreen"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    AutomationProperties.Name="Управление рыбалкой"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+
+    <common:Card
+        x:Name="EngineStatusCard"
+        AutomationProperties.Name="Управление рыбалкой"
+        HorizontalContentAlignment="Stretch"
+        Variant="Soft">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <common:SectionHeader
+                x:Name="EngineStatusHeader"
+                AutomationProperties.HeadingLevel="Level2"
+                Title="Автоматизация">
+                <common:SectionHeader.Status>
+                    <common:StatusBadge
+                        x:Name="EngineStatusBadge"
+                        AutomationProperties.Name="{Binding ViewModel.BadgeText, ElementName=Root}"
+                        Content="{Binding ViewModel.BadgeText, ElementName=Root}"
+                        Tone="{Binding ViewModel.BadgeTone, ElementName=Root}" />
+                </common:SectionHeader.Status>
+            </common:SectionHeader>
+
+            <StackPanel Grid.Row="1" Margin="0,16,0,0">
+                <TextBlock
+                    x:Name="EngineStatusTitle"
+                    FontSize="{DynamicResource Sonar.Font.Size.Title}"
+                    FontWeight="SemiBold"
+                    Text="{Binding ViewModel.Title, ElementName=Root}"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    x:Name="EngineStatusDescription"
+                    Margin="0,4,0,0"
+                    Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                    Text="{Binding ViewModel.Description, ElementName=Root}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Grid x:Name="EngineActions" Grid.Row="2" Margin="0,16,0,0">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger
+                                Binding="{Binding ViewModel.ShowActions, ElementName=Root}"
+                                Value="False">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <common:ActionButton
+                    x:Name="StartFishingButton"
+                    Margin="0,0,4,0"
+                    AutomationProperties.HelpText="Начинает рыбалку с текущими настройками"
+                    AutomationProperties.Name="Начать рыбалку"
+                    Command="{Binding StartCommand, ElementName=Root}"
+                    Content="_Начать"
+                    IsEnabled="{Binding ViewModel.CanStart, ElementName=Root}"
+                    Role="Primary"
+                    Size="Large" />
+                <common:ActionButton
+                    x:Name="StopFishingButton"
+                    Grid.Column="1"
+                    Margin="4,0,0,0"
+                    AutomationProperties.HelpText="Завершает текущую рыбалку"
+                    AutomationProperties.Name="Остановить рыбалку"
+                    Command="{Binding StopCommand, ElementName=Root}"
+                    Content="_Остановить"
+                    IsEnabled="{Binding ViewModel.CanStop, ElementName=Root}"
+                    Role="Danger"
+                    Size="Large" />
+            </Grid>
+        </Grid>
+    </common:Card>
+</UserControl>

@@ -1,0 +1,210 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.Shell.FishingHostShell"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:about="clr-namespace:Sonar.Fishing.Host.AboutPage"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    xmlns:engineHealth="clr-namespace:Sonar.Fishing.Host.EngineHealth"
+    xmlns:fishing="clr-namespace:Sonar.Fishing.Host.FishingPage"
+    xmlns:license="clr-namespace:Sonar.Fishing.Host.LicensePage"
+    xmlns:overview="clr-namespace:Sonar.Fishing.Host.Overview"
+    xmlns:settings="clr-namespace:Sonar.Fishing.Host.SettingsPage"
+    xmlns:statistics="clr-namespace:Sonar.Fishing.Host.StatisticsPage"
+    xmlns:streaming="clr-namespace:Sonar.Fishing.Host.StreamingPage"
+    xmlns:telegram="clr-namespace:Sonar.Fishing.Host.TelegramPage"
+    AutomationProperties.Name="Sonar Fishing"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <common:AppShell x:Name="ApplicationShell">
+        <common:AppShell.Brand>
+            <common:AppBrand
+                x:Name="ProductBrand"
+                AutomationProperties.Name="Sonar Fishing"
+                CompactLogoSource="/Sonar.Fishing.Host;component/Assets/sonar_logo.png"
+                CompactText="S"
+                LogoCornerRadius="12"
+                LogoSource="/Sonar.Fishing.Host;component/Assets/sonar_logo.png"
+                LogoStretch="Uniform"
+                Subtitle="Fishing"
+                Title="Sonar" />
+        </common:AppShell.Brand>
+        <common:AppShell.CompactBrand>
+            <common:AppBrand
+                AutomationProperties.Name="Sonar Fishing"
+                CompactLogoSource="/Sonar.Fishing.Host;component/Assets/sonar_logo.png"
+                CompactText="S"
+                LogoCornerRadius="10"
+                LogoSource="/Sonar.Fishing.Host;component/Assets/sonar_logo.png"
+                LogoStretch="Uniform" />
+        </common:AppShell.CompactBrand>
+
+        <common:AppShell.Navigation>
+            <StackPanel x:Name="NavigationPanel" AutomationProperties.Name="Навигация Sonar Fishing">
+                <common:NavigationButton
+                    x:Name="OverviewNavigationButton"
+                    AutomationProperties.Name="Открыть обзор"
+                    Command="{Binding ViewModel.ShowOverviewCommand, ElementName=Root}"
+                    CompactContent="⌂"
+                    Content="_Обзор"
+                    IsSelected="{Binding ViewModel.IsOverviewSelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter AutomationLabel="Обзор" Glyph="⌂" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+                <common:NavigationButton
+                    x:Name="FishingNavigationButton"
+                    Margin="0,4,0,0"
+                    AutomationProperties.Name="Открыть страницу рыбалки"
+                    Command="{Binding ViewModel.ShowFishingCommand, ElementName=Root}"
+                    CompactContent="🎣"
+                    Content="_Рыбалка"
+                    IsSelected="{Binding ViewModel.IsFishingSelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter
+                            AutomationLabel="Рыбалка"
+                            Glyph="🎣"
+                            UseColorEmoji="True" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+                <common:NavigationButton
+                    x:Name="SettingsNavigationButton"
+                    Margin="0,4,0,0"
+                    AutomationProperties.Name="Открыть настройки"
+                    Command="{Binding ViewModel.ShowSettingsCommand, ElementName=Root}"
+                    CompactContent="⚙"
+                    Content="_Настройки"
+                    IsSelected="{Binding ViewModel.IsSettingsSelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter AutomationLabel="Настройки" Glyph="⚙" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+                <common:NavigationButton
+                    x:Name="StatisticsNavigationButton"
+                    Margin="0,4,0,0"
+                    AutomationProperties.Name="Открыть статистику"
+                    Command="{Binding ViewModel.ShowStatisticsCommand, ElementName=Root}"
+                    CompactContent="▥"
+                    Content="_Статистика"
+                    IsSelected="{Binding ViewModel.IsStatisticsSelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter AutomationLabel="Статистика" Glyph="▥" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+                <common:NavigationButton
+                    x:Name="StreamingNavigationButton"
+                    Margin="0,4,0,0"
+                    AutomationProperties.Name="Открыть стрим"
+                    Command="{Binding ViewModel.ShowStreamingCommand, ElementName=Root}"
+                    CompactContent="▶"
+                    Content="С_трим"
+                    IsSelected="{Binding ViewModel.IsStreamingSelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter AutomationLabel="Стрим" Glyph="▶" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+                <common:NavigationButton
+                    x:Name="TelegramNavigationButton"
+                    Margin="0,4,0,0"
+                    AutomationProperties.Name="Открыть Telegram"
+                    Command="{Binding ViewModel.ShowTelegramCommand, ElementName=Root}"
+                    CompactContent="✈"
+                    Content="_Telegram"
+                    IsSelected="{Binding ViewModel.IsTelegramSelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter AutomationLabel="Telegram" Glyph="✈" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+                <common:NavigationButton
+                    x:Name="AboutNavigationButton"
+                    Margin="0,4,0,0"
+                    AutomationProperties.Name="Открыть страницу о программе"
+                    Command="{Binding ViewModel.ShowAboutCommand, ElementName=Root}"
+                    CompactContent="i"
+                    Content="О _программе"
+                    IsSelected="{Binding ViewModel.IsAboutSelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter AutomationLabel="О программе" Glyph="i" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+            </StackPanel>
+        </common:AppShell.Navigation>
+
+        <common:AppShell.NavigationFooter>
+            <StackPanel x:Name="FooterPanel">
+                <common:NavigationButton
+                    x:Name="LicenseNavigationButton"
+                    AutomationProperties.Name="Открыть лицензию"
+                    Command="{Binding ViewModel.ShowLicenseCommand, ElementName=Root}"
+                    CompactContent="◆"
+                    Content="_Лицензия"
+                    IsSelected="{Binding ViewModel.IsLicenseSelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter AutomationLabel="Лицензия" Glyph="◆" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+                <TextBlock
+                    Margin="12,8,12,0"
+                    Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                    Text="{Binding ViewModel.VersionText, ElementName=Root}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCompact, ElementName=ApplicationShell}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </common:AppShell.NavigationFooter>
+
+        <common:AppShell.Header>
+            <common:PageHeader Margin="24,12" Title="Sonar Fishing">
+                <common:PageHeader.Status>
+                    <common:StatusBadge
+                        x:Name="HostModeBadge"
+                        AutomationProperties.Name="{Binding ViewModel.ModeText, ElementName=Root}"
+                        Content="{Binding ViewModel.ModeText, ElementName=Root}"
+                        Tone="{Binding ViewModel.ModeTone, ElementName=Root}" />
+                </common:PageHeader.Status>
+            </common:PageHeader>
+        </common:AppShell.Header>
+
+        <ContentControl
+            x:Name="PageHost"
+            Content="{Binding ViewModel.CurrentPage, ElementName=Root}">
+            <ContentControl.Resources>
+                <DataTemplate DataType="{x:Type overview:OverviewPageViewModel}">
+                    <overview:OverviewScreen ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type license:LicensePageViewModel}">
+                    <license:LicenseScreen ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type fishing:FishingPageViewModel}">
+                    <fishing:FishingPage ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type settings:FishingSettingsPageViewModel}">
+                    <settings:SettingsScreen ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type statistics:StatisticsPageViewModel}">
+                    <statistics:StatisticsScreen ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type streaming:StreamingPageViewModel}">
+                    <streaming:StreamingScreen ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type telegram:TelegramSettingsPageViewModel}">
+                    <telegram:TelegramScreen ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type about:AboutPageViewModel}">
+                    <about:AboutScreen ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type engineHealth:EngineHealthViewModel}">
+                    <engineHealth:EngineHealthScreen ViewModel="{Binding}" />
+                </DataTemplate>
+            </ContentControl.Resources>
+        </ContentControl>
+    </common:AppShell>
+</UserControl>

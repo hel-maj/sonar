@@ -1,0 +1,6 @@
+scenario	enabled	candidates	expected_keys
+all_by_confidence	corn,bag,pack	corn~0.20~0.30~0.81;bag~0.40~0.50~0.97;pack~0.60~0.70~0.88	bag,pack,corn
+filtered	bag	corn~0.20~0.30~0.99;bag~0.40~0.50~0.82;pack~0.60~0.70~0.90	bag
+stable_tie	corn,bag,pack	corn~0.10~0.20~0.90;bag~0.30~0.40~0.90;pack~0.50~0.60~0.90	corn,bag,pack
+no_candidates	corn,bag,pack	-	-
+disabled	-	bag~0.40~0.50~0.99	-

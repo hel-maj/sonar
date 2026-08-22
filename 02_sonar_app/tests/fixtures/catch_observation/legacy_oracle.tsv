@@ -1,0 +1,11 @@
+raw_fish	raw_quality	raw_weight	raw_xp	expected_valid	expected_fish_id	expected_fish_text	expected_quality_label	expected_quality_key	expected_weight	expected_max_level	expected_xp_current	expected_xp_total
+Марлин	Рекордный улов	4.04 кг	Максимальный уровень 10735	1	marlin	Марлин	Рекордный улов	record	4.04	1	10735	<none>
+Марлн	ТРОФЕЙНАЯ	799	2903 / 3120	1	marlin	Марлин	Трофейная	trophy	7.99	0	2903	3120
+Красный горбылъ	ХОРОШИЙ УЛОВ	310	Максимальный уровень 133 11133	1	krasny_gorbyl	Красный горбыль	Хороший улов	good	3.10	1	11133	<none>
+Синяя	Неизвестный вид	24,179 кг	133 11133	1	<none>	Синяя	Неизвестный вид	unknown	24.17	0	133	<none>
+Лещ	Скромный	12	<none>	1	<none>	Лещ	Скромный улов	modest	12	0	<none>	<none>
+Рыб	<none>	1,234	<none>	1	<none>	Рыб	<none>	unknown	1.23	0	<none>	<none>
+<none>	Рекордный	2.5	100 / 200	0	<none>	<none>	Рекордный улов	record	2.5	0	100	200
+Марлин	Рекордный	<none>	<none>	0	marlin	Марлин	Рекордный улов	record	<none>	0	<none>	<none>
+Марлин	Рекордный	0.009	<none>	0	marlin	Марлин	Рекордный улов	record	0.00	0	<none>	<none>
+Марлин	Рекордный	500.1	<none>	0	marlin	Марлин	Рекордный улов	record	500.1	0	<none>	<none>

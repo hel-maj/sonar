@@ -1,0 +1,181 @@
+#include <array>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+#include "sonar/fishing/engine_ipc/engine_mode.h"
+#include "sonar/fishing/engine_ipc/session_lifecycle.h"
+
+namespace {
+
+using sonar::fishing::engine_ipc::accepted_entitlement;
+using sonar::fishing::engine_ipc::engine_authority_mode;
+using sonar::fishing::engine_ipc::fishing_session_lifecycle;
+using sonar::fishing::engine_ipc::start_session_context;
+
+void require(const bool condition, const std::string_view reason) {
+  if (!condition) {
+    throw std::runtime_error(std::string(reason));
+  }
+}
+
+[[nodiscard]] start_session_context valid_context() {
+  return start_session_context{
+      .authority_mode = engine_authority_mode::production,
+      .side_effects_negotiated = true,
+      .expected_settings_revision = 7,
+      .accepted_settings_revision = 7,
+      .settings_snapshot_present = true,
+      .entitlement = accepted_entitlement{
+          .generation = 11,
+          .expires_unix_seconds = 2'000,
+      },
+      .now_unix_seconds = 1'000,
+      .capability_composition_ready = true,
+      .capability_reason = "production_capability_composition_ready",
+  };
+}
+
+void handshake_is_mode_specific() {
+  sonar::platform::ipc::v1::HandshakeHello offline;
+  sonar::fishing::engine_ipc::apply_handshake_mode(
+      offline, engine_authority_mode::offline_diagnostics);
+  require(offline.diagnostic_mode(), "offline_handshake_not_diagnostic");
+  require(!offline.side_effect_support(), "offline_side_effects_advertised");
+  require(offline.capabilities_size() == 0, "offline_session_control_advertised");
+  const auto offline_policy = sonar::fishing::engine_ipc::handshake_policy(
+      engine_authority_mode::offline_diagnostics);
+  require(
+      !offline_policy.side_effects_may_be_enabled,
+      "offline_acceptance_may_enable_side_effects");
+
+  sonar::platform::ipc::v1::HandshakeHello production;
+  sonar::fishing::engine_ipc::apply_handshake_mode(
+      production, engine_authority_mode::production);
+  require(!production.diagnostic_mode(), "production_handshake_diagnostic");
+  require(production.side_effect_support(), "production_side_effects_missing");
+  require(production.capabilities_size() == 1, "production_capability_count_changed");
+  require(
+      production.capabilities(0).capability_id() ==
+          sonar::fishing::engine_ipc::fishing_session_control_capability_id,
+      "production_session_control_missing");
+  require(
+      production.capabilities(0).major() == 1 &&
+          production.capabilities(0).minor() == 0,
+      "production_session_control_version_changed");
+  const auto production_policy = sonar::fishing::engine_ipc::handshake_policy(
+      engine_authority_mode::production);
+  require(
+      production_policy.side_effects_may_be_enabled,
+      "production_acceptance_cannot_enable_side_effects");
+}
+
+void production_start_gates_fail_closed() {
+  struct test_case final {
+    std::string_view name;
+    void (*mutate)(start_session_context&);
+    std::string_view expected_reason;
+  };
+  constexpr std::array cases{
+      test_case{
+          "offline_mode",
+          [](start_session_context& value) {
+            value.authority_mode = engine_authority_mode::offline_diagnostics;
+          },
+          "production_authority_required",
+      },
+      test_case{
+          "side_effects_disabled",
+          [](start_session_context& value) { value.side_effects_negotiated = false; },
+          "side_effects_not_negotiated",
+      },
+      test_case{
+          "settings_missing",
+          [](start_session_context& value) { value.settings_snapshot_present = false; },
+          "runtime_settings_required_before_session",
+      },
+      test_case{
+          "settings_revision_mismatch",
+          [](start_session_context& value) { value.expected_settings_revision = 6; },
+          "runtime_settings_revision_mismatch",
+      },
+      test_case{
+          "entitlement_missing",
+          [](start_session_context& value) { value.entitlement.clear(); },
+          "signed_entitlement_required_before_session",
+      },
+      test_case{
+          "entitlement_expired",
+          [](start_session_context& value) { value.now_unix_seconds = 2'000; },
+          "signed_entitlement_expired",
+      },
+      test_case{
+          "capability_composition_unavailable",
+          [](start_session_context& value) {
+            value.capability_composition_ready = false;
+            value.capability_reason = "production_capability_adapters_unavailable";
+          },
+          "production_capability_adapters_unavailable",
+      },
+  };
+
+  for (const auto& item : cases) {
+    auto context = valid_context();
+    item.mutate(context);
+    fishing_session_lifecycle lifecycle;
+    const auto result = lifecycle.start(context);
+    require(!result.accepted, item.name);
+    require(result.status == "rejected", item.name);
+    require(result.reason == item.expected_reason, item.name);
+    require(!lifecycle.running(), item.name);
+  }
+}
+
+void start_and_stop_are_coarse_and_bounded() {
+  fishing_session_lifecycle lifecycle;
+  const auto validated = lifecycle.validate_start(valid_context());
+  require(validated.accepted, "pure_start_admission_rejected");
+  require(!lifecycle.running(), "pure_start_admission_mutated_lifecycle");
+  const auto started = lifecycle.start(valid_context());
+  require(started.accepted, "valid_start_rejected");
+  require(started.status == "completed", "valid_start_status_changed");
+  require(started.reason == "fishing_session_started", "valid_start_reason_changed");
+  require(lifecycle.running(), "lifecycle_not_running");
+  require(lifecycle.settings_revision() == 7, "active_settings_revision_changed");
+  require(lifecycle.entitlement_generation() == 11, "active_entitlement_changed");
+
+  const auto duplicate = lifecycle.start(valid_context());
+  require(!duplicate.accepted, "duplicate_start_accepted");
+  require(
+      duplicate.reason == "fishing_session_already_running",
+      "duplicate_start_reason_changed");
+
+  const auto stopped = lifecycle.stop();
+  require(stopped.accepted, "stop_rejected");
+  require(stopped.reason == "automation_stopped", "stop_reason_changed");
+  require(!lifecycle.running(), "lifecycle_still_running");
+  require(lifecycle.settings_revision() == 0, "stopped_settings_not_cleared");
+  require(lifecycle.entitlement_generation() == 0, "stopped_entitlement_not_cleared");
+
+  const auto repeated_stop = lifecycle.stop();
+  require(repeated_stop.accepted, "idempotent_stop_rejected");
+  require(
+      repeated_stop.reason == "automation_already_stopped",
+      "idempotent_stop_reason_changed");
+}
+
+}  // namespace
+
+int main() {
+  try {
+    handshake_is_mode_specific();
+    production_start_gates_fail_closed();
+    start_and_stop_are_coarse_and_bounded();
+    std::cout << "PASS Fishing Engine mode handshake and session lifecycle\n";
+    return 0;
+  } catch (const std::exception& error) {
+    std::cerr << error.what() << '\n';
+    return 1;
+  }
+}

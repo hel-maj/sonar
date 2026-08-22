@@ -1,0 +1,49 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.FishingPage.FishingPage"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    xmlns:layout="clr-namespace:Sonar.UI.Wpf.Layout;assembly=Sonar.UI.Wpf"
+    xmlns:engineStatus="clr-namespace:Sonar.Fishing.Host.EngineStatus"
+    xmlns:sessionSummary="clr-namespace:Sonar.Fishing.Host.FishingSessionSummary"
+    AutomationProperties.Name="Рыбалка"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <common:PageScrollViewer x:Name="FishingPageScrollViewer">
+        <common:PageContainer>
+        <StackPanel>
+            <common:PageHeader
+                x:Name="FishingPageHeader"
+                Title="Рыбалка" />
+            <layout:ResponsiveGrid Margin="0,24,0,0">
+                <engineStatus:EngineStatusScreen
+                    x:Name="EngineStatusScreen"
+                    layout:ResponsiveGrid.CompactSpan="4"
+                    layout:ResponsiveGrid.MediumSpan="8"
+                    layout:ResponsiveGrid.ExpandedSpan="6"
+                    StartCommand="{Binding ViewModel.StartFishingCommand, ElementName=Root}"
+                    StopCommand="{Binding ViewModel.StopFishingCommand, ElementName=Root}"
+                    ViewModel="{Binding ViewModel.EngineStatus, ElementName=Root}" />
+                <common:Card
+                    layout:ResponsiveGrid.CompactSpan="4"
+                    layout:ResponsiveGrid.MediumSpan="8"
+                    layout:ResponsiveGrid.ExpandedSpan="6"
+                    Header="Игра">
+                    <common:AspectRatioFrame AspectRatio="1.7777777777777777">
+                        <common:ImageSlot
+                            AutomationLabel="Окно игры"
+                            Placeholder="Нет изображения"
+                            State="Empty"
+                            Stretch="Uniform" />
+                    </common:AspectRatioFrame>
+                </common:Card>
+            </layout:ResponsiveGrid>
+            <sessionSummary:FishingSessionSummaryScreen
+                x:Name="FishingSessionSummaryScreen"
+                Margin="0,24,0,0"
+                ViewModel="{Binding ViewModel.SessionSummary, ElementName=Root}" />
+        </StackPanel>
+        </common:PageContainer>
+    </common:PageScrollViewer>
+</UserControl>

@@ -1,0 +1,259 @@
+syntax = "proto3";
+
+package sonar.fishing.ipc.v1;
+
+option csharp_namespace = "Sonar.Fishing.Ipc.Contracts.V1";
+option optimize_for = LITE_RUNTIME;
+
+import "ipc/v1/sonar_platform.proto";
+
+// Fishing owns only its typed product payloads. Transport/session metadata and
+// product-neutral lifecycle messages remain owned by Sonar Platform IPC.
+message Envelope {
+  sonar.platform.ipc.v1.EnvelopeHeader header = 1;
+
+  oneof payload {
+    sonar.platform.ipc.v1.PlatformPayload platform = 2;
+    ClassifyCatchQualityRequest classify_catch_quality_request = 10;
+    ClassifyCatchQualityResult classify_catch_quality_result = 11;
+    EvaluateCatchDispositionRequest evaluate_catch_disposition_request = 12;
+    EvaluateCatchDispositionResult evaluate_catch_disposition_result = 13;
+    StartFishingSessionRequest start_fishing_session_request = 14;
+    FishingSessionSnapshot fishing_session_snapshot = 15;
+    ApplyRuntimeSettingsRequest apply_runtime_settings_request = 16;
+    ApplyRuntimeSettingsResult apply_runtime_settings_result = 17;
+    ApplySignedEntitlementRequest apply_signed_entitlement_request = 18;
+    ApplySignedEntitlementResult apply_signed_entitlement_result = 19;
+    RevokeSignedEntitlementRequest revoke_signed_entitlement_request = 20;
+    RevokeSignedEntitlementResult revoke_signed_entitlement_result = 21;
+  }
+}
+
+// One coarse, pure command: normalization and stable-key classification are
+// evaluated together inside the Engine so their invariant is never split by
+// IPC. Presence distinguishes Python None from a supplied string.
+message ClassifyCatchQualityRequest {
+  optional string raw_text = 1;
+}
+
+message ClassifyCatchQualityResult {
+  optional string normalized_label = 1;
+  string stable_key = 2;
+  bool recognized = 3;
+}
+
+// Offline parity diagnostic only. This is not a production action command:
+// the complete immutable observation and selection policy cross IPC together,
+// and the result never authorizes keep/release input.
+message EvaluateCatchDispositionRequest {
+  optional string fish_id = 1;
+  repeated string selected_fish_ids = 2;
+  bool inventory_full = 3;
+}
+
+enum CatchDisposition {
+  CATCH_DISPOSITION_UNSPECIFIED = 0;
+  CATCH_DISPOSITION_KEEP = 1;
+  CATCH_DISPOSITION_RELEASE = 2;
+}
+
+message EvaluateCatchDispositionResult {
+  CatchDisposition disposition = 1;
+  string reason = 2;
+}
+
+// One whole-session start intent. The Common EnvelopeHeader owns command_id,
+// correlation and routing. Stop remains the Common PlatformPayload
+// StopAutomation command and is not duplicated in this product schema.
+message StartFishingSessionRequest {
+  uint64 expected_revision = 1;
+}
+
+enum OverweightAction {
+  OVERWEIGHT_ACTION_UNSPECIFIED = 0;
+  OVERWEIGHT_ACTION_RELEASE = 1;
+  OVERWEIGHT_ACTION_STOP = 2;
+  OVERWEIGHT_ACTION_EXIT_GAME = 3;
+}
+
+enum DepletedAction {
+  DEPLETED_ACTION_UNSPECIFIED = 0;
+  DEPLETED_ACTION_STOP = 1;
+  DEPLETED_ACTION_EXIT_GAME = 2;
+}
+
+enum EquipmentDepletedAction {
+  EQUIPMENT_DEPLETED_ACTION_UNSPECIFIED = 0;
+  EQUIPMENT_DEPLETED_ACTION_STOP = 1;
+  EQUIPMENT_DEPLETED_ACTION_EXIT_GAME = 2;
+  EQUIPMENT_DEPLETED_ACTION_SHUTDOWN_PC = 3;
+}
+
+enum FoodDepletedAction {
+  FOOD_DEPLETED_ACTION_UNSPECIFIED = 0;
+  FOOD_DEPLETED_ACTION_CONTINUE = 1;
+  FOOD_DEPLETED_ACTION_STOP = 2;
+  FOOD_DEPLETED_ACTION_EXIT_GAME = 3;
+  FOOD_DEPLETED_ACTION_SHUTDOWN_PC = 4;
+}
+
+message BooleanPolicyEntry {
+  string id = 1;
+  bool enabled = 2;
+}
+
+message CustomFishPriceEntry {
+  string fish_id = 1;
+  double price = 2;
+}
+
+// One full immutable policy/config snapshot. The Engine validates every field
+// and atomically advances accepted_revision; equal/stale/invalid snapshots do
+// not partially mutate the active fishing state-machine policy.
+message FishingRuntimeSettings {
+  uint64 revision = 1;
+  bool auto_meal = 2;
+  uint32 restore_food_from = 3;
+  uint32 restore_water_from = 4;
+  uint32 restore_health_from = 5;
+  bool auto_change_bait = 6;
+  bool store_in_trunk = 7;
+  bool start_stop_sound_enabled = 8;
+  OverweightAction overweight_action = 9;
+  bool fish_without_leader = 10;
+  DepletedAction leader_depleted_action = 11;
+  bool fish_without_net = 12;
+  DepletedAction net_depleted_action = 13;
+  EquipmentDepletedAction equipment_depleted_action = 14;
+  FoodDepletedAction food_depleted_action = 15;
+  string start_stop_hotkey = 16;
+  string inventory_hotkey = 17;
+  string use_item_hotkey = 18;
+  string backpack_move_hotkey = 19;
+  string discard_hotkey = 20;
+  string chat_hotkey = 21;
+  bool stream_snapshot_mode = 22;
+  repeated BooleanPolicyEntry fish_keep_policy = 23;
+  repeated BooleanPolicyEntry garbage_disposal_policy = 24;
+  repeated CustomFishPriceEntry custom_fish_prices = 25;
+}
+
+message ApplyRuntimeSettingsRequest {
+  FishingRuntimeSettings settings = 1;
+}
+
+message ApplyRuntimeSettingsResult {
+  bool accepted = 1;
+  uint64 accepted_revision = 2;
+  string reason = 3;
+}
+
+// Exact signed HTTP response bytes cross once as a coarse entitlement lease
+// command. The Engine owns its embedded trust root and reparses product claims;
+// it never accepts a Host-derived licensed boolean or rewritten JSON.
+message SignedEntitlementEnvelope {
+  string method = 1;
+  string request_target = 2;
+  string host = 3;
+  string date_header = 4;
+  string digest_header = 5;
+  string signature_header = 6;
+  bytes raw_body = 7;
+}
+
+message ApplySignedEntitlementRequest {
+  SignedEntitlementEnvelope envelope = 1;
+}
+
+message ApplySignedEntitlementResult {
+  bool accepted = 1;
+  string reason = 2;
+  uint64 accepted_generation = 3;
+  int64 expires_unix_seconds = 4;
+}
+
+// One coarse fail-closed command. Revocation carries no replacement claims and
+// always removes the current short Engine authority on the authenticated pipe.
+message RevokeSignedEntitlementRequest {
+}
+
+message RevokeSignedEntitlementResult {
+  bool revoked = 1;
+  uint64 previous_generation = 2;
+  string reason = 3;
+}
+
+enum FishingPhase {
+  FISHING_PHASE_UNSPECIFIED = 0;
+  FISHING_PHASE_IDLE = 1;
+  FISHING_PHASE_CASTING = 2;
+  FISHING_PHASE_HOOKING = 3;
+  FISHING_PHASE_REELING = 4;
+  FISHING_PHASE_CATCH = 5;
+  FISHING_PHASE_INVENTORY = 6;
+  FISHING_PHASE_RECOVERY = 7;
+  FISHING_PHASE_STOPPING = 8;
+}
+
+message FishingSessionTotals {
+  double duration_seconds = 1;
+  uint64 caught_count = 2;
+  double caught_kg = 3;
+  uint64 released_count = 4;
+  double released_kg = 5;
+  double earned_min = 6;
+  double earned_max = 7;
+}
+
+message TackleItemSnapshot {
+  string key = 1;
+  string name = 2;
+  uint32 count = 3;
+}
+
+message FishPriceSnapshot {
+  double per_item_min = 1;
+  double per_item_max = 2;
+  double per_1000_min = 3;
+  double per_1000_max = 4;
+}
+
+message FishStatisticsRowSnapshot {
+  string fish_id = 1;
+  string name = 2;
+  uint64 caught_count = 3;
+  double caught_kg = 4;
+  uint64 released_count = 5;
+  double released_kg = 6;
+  uint64 kept_count = 7;
+  double kept_kg = 8;
+  FishPriceSnapshot base_price = 9;
+  optional double custom_price = 10;
+  double earned_min = 11;
+  double earned_max = 12;
+}
+
+message CatchSizeStatisticsSnapshot {
+  string key = 1;
+  string label = 2;
+  uint64 count = 3;
+  double percent = 4;
+}
+
+// The Engine emits this single coalescible aggregate on the events channel
+// after handshake, observable changes and accepted/rejected control intents.
+// Transport sequence/timestamp and side-effect authority stay in Common
+// headers and platform session state rather than parallel product DTOs.
+message FishingSessionSnapshot {
+  uint64 revision = 1;
+  bool running = 2;
+  bool stopping = 3;
+  FishingPhase phase = 4;
+  string detected_stage = 5;
+  optional string last_error = 6;
+  FishingSessionTotals totals = 7;
+  repeated TackleItemSnapshot tackle_items = 8;
+  uint64 accepted_settings_revision = 9;
+  repeated FishStatisticsRowSnapshot fish_rows = 10;
+  repeated CatchSizeStatisticsSnapshot catch_sizes = 11;
+}

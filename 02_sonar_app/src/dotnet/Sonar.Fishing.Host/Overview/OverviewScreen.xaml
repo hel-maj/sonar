@@ -1,0 +1,134 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.Overview.OverviewScreen"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    xmlns:layout="clr-namespace:Sonar.UI.Wpf.Layout;assembly=Sonar.UI.Wpf"
+    AutomationProperties.Name="Обзор"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <common:PageScrollViewer x:Name="OverviewPageScrollViewer">
+        <common:PageContainer>
+            <StackPanel>
+                <common:PageHeader
+                    x:Name="OverviewHeader"
+                    Title="Обзор">
+                    <common:PageHeader.Status>
+                        <common:StatusBadge
+                            Content="{Binding ViewModel.FishingStatus, ElementName=Root}"
+                            Tone="{Binding ViewModel.FishingTone, ElementName=Root}" />
+                    </common:PageHeader.Status>
+                </common:PageHeader>
+
+                <layout:ResponsiveGrid Margin="0,16,0,0">
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="2"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="3"
+                        Label="Время"
+                        Value="{Binding ViewModel.Duration, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="2"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="3"
+                        Label="Поймано"
+                        Value="{Binding ViewModel.Caught, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="2"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="3"
+                        Label="Оставлено"
+                        Value="{Binding ViewModel.Kept, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="2"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="3"
+                        Label="Доход / час"
+                        Value="{Binding ViewModel.IncomePerHour, ElementName=Root}" />
+                </layout:ResponsiveGrid>
+
+                <layout:ResponsiveGrid Margin="0,16,0,0">
+                    <common:Card
+                        layout:ResponsiveGrid.CompactSpan="2"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="6"
+                        Header="Telegram">
+                        <StackPanel>
+                            <common:StatusBadge
+                                HorizontalAlignment="Left"
+                                Content="{Binding ViewModel.TelegramStatus, ElementName=Root}"
+                                Tone="{Binding ViewModel.TelegramTone, ElementName=Root}" />
+                            <TextBlock
+                                Margin="0,16,0,0"
+                                Text="{Binding ViewModel.TelegramAdministrators, ElementName=Root}" />
+                            <TextBlock
+                                Margin="0,6,0,0"
+                                Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                                Text="{Binding ViewModel.TelegramNotifications, ElementName=Root}" />
+                        </StackPanel>
+                    </common:Card>
+                    <common:Card
+                        layout:ResponsiveGrid.CompactSpan="2"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="6"
+                        Header="Стрим">
+                        <StackPanel>
+                            <common:StatusBadge
+                                HorizontalAlignment="Left"
+                                Content="{Binding ViewModel.StreamStatus, ElementName=Root}"
+                                Tone="{Binding ViewModel.StreamTone, ElementName=Root}" />
+                            <TextBlock
+                                Margin="0,16,0,0"
+                                Text="{Binding ViewModel.StreamDescription, ElementName=Root}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </common:Card>
+                </layout:ResponsiveGrid>
+
+                <common:Card Margin="0,16,0,0" Header="Последние события">
+                    <Grid>
+                        <common:PageStatePresenter
+                            State="Empty"
+                            StateBadgeContent="Нет данных"
+                            StateMessage="Запустите рыбалку, чтобы получать события."
+                            StateTitle="Нет событий">
+                            <common:PageStatePresenter.Style>
+                                <Style
+                                    BasedOn="{StaticResource {x:Type common:PageStatePresenter}}"
+                                    TargetType="{x:Type common:PageStatePresenter}">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ViewModel.HasEvents, ElementName=Root}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </common:PageStatePresenter.Style>
+                        </common:PageStatePresenter>
+                        <ItemsControl ItemsSource="{Binding ViewModel.Events, ElementName=Root}">
+                            <ItemsControl.Style>
+                                <Style TargetType="ItemsControl">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ViewModel.HasEvents, ElementName=Root}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ItemsControl.Style>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <common:DataListItem
+                                        Detail="{Binding OccurredAtText}"
+                                        Subtitle="{Binding Detail}"
+                                        Title="{Binding Message}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Grid>
+                </common:Card>
+            </StackPanel>
+        </common:PageContainer>
+    </common:PageScrollViewer>
+</UserControl>

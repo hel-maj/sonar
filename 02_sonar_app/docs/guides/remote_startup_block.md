@@ -90,41 +90,44 @@ Blocklist хранится на сервере в отдельном JSON-фай
 4. Проверьте JSON-синтаксис:
 
 ```bash
-python -m json.tool /opt/sonar-keygen/startup-blocklist.json
+jq empty /opt/sonar-keygen/startup-blocklist.json
 ```
 
 5. Если download URL изменился, обновите `download_url`.
 6. Перезапуск приложения на клиенте не обязателен: работающие клиенты повторяют проверку каждые 5 минут.
 
-## Настройка сборки
+## Настройка native-сборки
 
-В сборке уже есть текущие production defaults для URL и public key. Явно
-передавайте параметры при смене endpoint, ротации ключа или проверке новой
-инфраструктурной конфигурации:
+Целевой клиент реализован в C# в `src/dotnet/Sonar.Fishing.Host/StartupGate/` и
+проверяет подпись через exact-pinned `Sonar.Licensing.Verification 0.1.3`.
+Offline build и acceptance:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_secure.ps1 `
-  -SkipInstall `
-  -LicenseServerUrl "https://m-sonar-addr.ru" `
-  -StartupBlockUrl "https://m-sonar-addr.ru/api/startup-block" `
-  -StartupBlockPublicKey "<ed25519-public-key-hex-or-base64url>"
+powershell -ExecutionPolicy Bypass -File .\scripts\build_dotnet.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\test_dotnet.ps1
 ```
 
-Можно задать то же через `.env` перед сборкой:
+Эти команды не подставляют production endpoint/key и не выполняют сетевой
+запрос. Demo/offline composition остается network-denied. Реальный HTTPS URL,
+32-byte Ed25519 public key, build identity и release policy должны быть
+встроены product release pipeline как подписанные/immutable metadata; отсутствие
+любого из них обязано оставлять production startup fail closed. Точный wiring
+отслеживается как `H04` в
+`docs/architecture/PRODUCTION_CUTOVER_CHECKLIST.md`.
 
-```dotenv
-SONAR_STARTUP_BLOCK_URL=https://m-sonar-addr.ru/api/startup-block
-SONAR_STARTUP_BLOCK_PUBLIC_KEY=<ed25519-public-key-hex-or-base64url>
-```
-
-Private key хранится только на сервере в `SONAR_STARTUP_BLOCK_PRIVATE_KEY`. В клиент и репозиторий его не добавлять.
+Private key хранится только на сервере в
+`SONAR_STARTUP_BLOCK_PRIVATE_KEY`. В EXE, bundle, client config и репозиторий
+его не добавлять. Legacy build parameters и executable tooling удалены из
+product graph; целевой build contract принадлежит PowerShell/.NET/CMake
+entrypoints.
 
 ## Проверка Ed25519-подписи
 
 Клиент делает так:
 
 1. Берет из ответа поля `blocked` и `download_url`.
-2. Строит canonical JSON: `sort_keys=True`, `separators=(",", ":")`, UTF-8.
+2. Строит exact UTF-8 canonical JSON без пробелов в порядке `blocked`,
+   `download_url`.
 3. Декодирует `signature` из base64url.
 4. Проверяет Ed25519 подпись pinned public key.
 5. Доверяет `blocked` только если проверка подписи успешна.

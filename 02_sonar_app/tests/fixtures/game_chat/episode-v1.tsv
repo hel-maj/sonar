@@ -1,0 +1,11 @@
+# message\tclassification
+/gb привет	explicit
+/cb	explicit
+  /me машет	explicit
+/неизвестная команда	explicit
+без слеша	plain
+//gb привет	plain
+/ gb	plain
+/cb/family	plain
+/	plain
+   	plain

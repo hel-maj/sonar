@@ -1,0 +1,66 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.EngineHealth.EngineHealthScreen"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    AutomationProperties.Name="Проверка приложения"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <ScrollViewer
+        HorizontalScrollBarVisibility="Disabled"
+        Padding="24"
+        VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <common:SectionHeader
+                x:Name="EngineHealthPageHeader"
+                AutomationProperties.HeadingLevel="Level1"
+                Subtitle="Убедитесь, что приложение готово к работе"
+                Title="Проверка приложения" />
+            <common:Card
+                x:Name="EngineHealthCard"
+                Margin="0,24,0,0"
+                AutomationProperties.Name="Готовность приложения"
+                HorizontalContentAlignment="Stretch"
+                Variant="Soft">
+                <StackPanel>
+                    <common:SectionHeader
+                        x:Name="EngineHealthHeader"
+                        AutomationProperties.HeadingLevel="Level2"
+                        Subtitle="{Binding ViewModel.ModeLabel, ElementName=Root}"
+                        Title="Компоненты">
+                        <common:SectionHeader.Status>
+                            <common:StatusBadge
+                                x:Name="EngineHealthBadge"
+                                AutomationProperties.Name="{Binding ViewModel.BadgeText, ElementName=Root}"
+                                Content="{Binding ViewModel.BadgeText, ElementName=Root}"
+                                Tone="{Binding ViewModel.BadgeTone, ElementName=Root}" />
+                        </common:SectionHeader.Status>
+                    </common:SectionHeader>
+                    <TextBlock
+                        x:Name="EngineHealthTitle"
+                        Margin="0,20,0,0"
+                        FontSize="{DynamicResource Sonar.Font.Size.Title}"
+                        FontWeight="SemiBold"
+                        Text="{Binding ViewModel.Title, ElementName=Root}"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        x:Name="EngineHealthDescription"
+                        Margin="0,6,0,0"
+                        Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                        Text="{Binding ViewModel.Description, ElementName=Root}"
+                        TextWrapping="Wrap" />
+                    <common:ActionButton
+                        x:Name="CheckEngineHealthButton"
+                        Margin="0,20,0,0"
+                        HorizontalAlignment="Left"
+                        AutomationProperties.Name="Проверить приложение"
+                        Command="{Binding ViewModel.CheckHealthCommand, ElementName=Root}"
+                        Content="_Проверить"
+                        Role="Primary"
+                        Size="Large" />
+                </StackPanel>
+            </common:Card>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

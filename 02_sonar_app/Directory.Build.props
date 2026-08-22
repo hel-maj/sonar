@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <CommonFeed Condition="'$(CommonFeed)' == '' and '$(SONAR_COMMON_FEED)' != ''">$(SONAR_COMMON_FEED)</CommonFeed>
+    <CommonFeed Condition="'$(CommonFeed)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\.artifacts\sonar-feed'))</CommonFeed>
+    <SonarProtocExecutable Condition="'$(SonarProtocExecutable)' == '' and '$(SONAR_PROTOC_EXECUTABLE)' != ''">$(SONAR_PROTOC_EXECUTABLE)</SonarProtocExecutable>
+    <RestoreAdditionalProjectSources>$(CommonFeed);$(RestoreAdditionalProjectSources)</RestoreAdditionalProjectSources>
+    <BaseOutputPath Condition="'$(UseArtifactsOutput)' != 'true'">$(MSBuildThisFileDirectory)build\dotnet\bin\$(MSBuildProjectName)\</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="'$(UseArtifactsOutput)' != 'true'">$(MSBuildThisFileDirectory)build\dotnet\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <!-- Frozen packages normalize ZIP/DLL timestamps. Always refresh CopyLocal
+         so an exact version repin cannot leave a same-size prior assembly. -->
+    <SkipCopyUnchangedFiles>false</SkipCopyUnchangedFiles>
+  </PropertyGroup>
+</Project>

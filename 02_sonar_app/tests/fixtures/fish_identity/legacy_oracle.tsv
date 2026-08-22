@@ -1,0 +1,14 @@
+raw_text	expected_id	expected_display
+<none>	<none>	unknown
+	<none>	unknown
+Лещ	<none>	Лещ
+Марлин	marlin	Марлин
+марлин	marlin	Марлин
+Марлн	marlin	Марлин
+Красный горбылъ	krasny_gorbyl	Красный горбыль
+Красиый горбыль	krasny_gorbyl	Красный горбыль
+Токсичный окунь	toksichny_okun	Токсичный окунь
+красноперка	rudd_krasnoperka	Краснопёрка
+Вобла	roach_vobla	Вобла
+Синяя	<none>	Синяя
+совсем другая строка	<none>	совсем другая строка

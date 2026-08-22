@@ -1,0 +1,16 @@
+<Window
+    x:Class="Sonar.Fishing.Host.StartupGate.StartupAdmissionWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:Sonar.Fishing.Host.StartupGate"
+    Title="Sonar Fishing"
+    Width="680"
+    Height="460"
+    MinWidth="520"
+    MinHeight="360"
+    Background="{DynamicResource Sonar.Brush.SurfaceSoft}"
+    ResizeMode="CanResize"
+    SizeToContent="Manual"
+    WindowStartupLocation="CenterScreen">
+    <local:StartupAdmissionScreen ViewModel="{Binding}" />
+</Window>

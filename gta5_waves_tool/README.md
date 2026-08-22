@@ -2,6 +2,13 @@
 
 Портативный скрипт для отключения/возврата волн в `weather.xml` без ручного OpenIV.
 
+## Граница Sonar Fishing
+
+Это отдельная **nonshipping dev utility** вне `02_sonar_app`. Она не входит в
+исходники, setup/test/build/package entrypoints, runtime composition или release
+bundle Sonar Fishing. Её локальный Python нужен только для ручной подготовки
+GTA-файлов и не является Python-зависимостью продукта.
+
 ## Главное изменение
 
 Скрипт больше не заменяет `weather.xml` целиком из `payload/base_weather.xml`.

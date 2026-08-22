@@ -1,0 +1,192 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.StreamingPage.StreamingScreen"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    xmlns:layout="clr-namespace:Sonar.UI.Wpf.Layout;assembly=Sonar.UI.Wpf"
+    AutomationProperties.Name="Стрим"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <common:PageScrollViewer>
+        <common:PageContainer>
+            <StackPanel>
+                <common:PageHeader
+                    x:Name="StreamingHeader"
+                    Title="Стрим"
+                    Subtitle="Запустите трансляцию всего окна или только чата">
+                    <common:PageHeader.Status>
+                        <common:StatusBadge
+                            Content="{Binding ViewModel.Status, ElementName=Root}"
+                            Tone="{Binding ViewModel.StatusTone, ElementName=Root}" />
+                    </common:PageHeader.Status>
+                    <common:PageHeader.Actions>
+                        <StackPanel Orientation="Horizontal">
+                            <common:ActionButton
+                                x:Name="StreamStartButton"
+                                AutomationProperties.Name="Запустить стрим"
+                                Command="{Binding ViewModel.StartCommand, ElementName=Root}"
+                                Content="Запустить"
+                                Role="Primary" />
+                            <common:ActionButton
+                                x:Name="StreamStopButton"
+                                Margin="8,0,0,0"
+                                AutomationProperties.Name="Остановить стрим"
+                                Command="{Binding ViewModel.StopCommand, ElementName=Root}"
+                                Content="Остановить"
+                                Role="Danger" />
+                        </StackPanel>
+                    </common:PageHeader.Actions>
+                </common:PageHeader>
+
+                <common:NotificationBanner
+                    Margin="0,24,0,0"
+                    Header="Трансляция недоступна"
+                    Tone="Warning">
+                    <common:NotificationBanner.Style>
+                        <Style
+                            BasedOn="{StaticResource {x:Type common:NotificationBanner}}"
+                            TargetType="{x:Type common:NotificationBanner}">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ViewModel.HasNotice, ElementName=Root}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </common:NotificationBanner.Style>
+                    <TextBlock
+                        Text="{Binding ViewModel.Description, ElementName=Root}"
+                        TextWrapping="Wrap" />
+                </common:NotificationBanner>
+
+                <common:Card Margin="0,24,0,0" Header="Управление стримом">
+                    <layout:ResponsiveGrid>
+                        <common:SettingItem
+                            layout:ResponsiveGrid.CompactSpan="4"
+                            layout:ResponsiveGrid.MediumSpan="4"
+                            layout:ResponsiveGrid.ExpandedSpan="3"
+                            Header="Статус"
+                            Status="{Binding ViewModel.Status, ElementName=Root}" />
+                        <common:SettingItem
+                            layout:ResponsiveGrid.CompactSpan="4"
+                            layout:ResponsiveGrid.MediumSpan="4"
+                            layout:ResponsiveGrid.ExpandedSpan="3"
+                            Header="Область"
+                            Status="{Binding ViewModel.CaptureArea, ElementName=Root}" />
+                        <common:SettingItem
+                            layout:ResponsiveGrid.CompactSpan="4"
+                            layout:ResponsiveGrid.MediumSpan="4"
+                            layout:ResponsiveGrid.ExpandedSpan="3"
+                            Header="Автостоп"
+                            Status="{Binding ViewModel.AutoStop, ElementName=Root}" />
+                        <common:SettingItem
+                            layout:ResponsiveGrid.CompactSpan="4"
+                            layout:ResponsiveGrid.MediumSpan="4"
+                            layout:ResponsiveGrid.ExpandedSpan="3"
+                            Header="Ссылка"
+                            Status="{Binding ViewModel.StreamUrl, ElementName=Root}" />
+                    </layout:ResponsiveGrid>
+                </common:Card>
+
+                <layout:ResponsiveGrid Margin="0,24,0,0">
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="3"
+                        Label="Целевой FPS"
+                        Value="{Binding ViewModel.TargetFps, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="3"
+                        Label="Битрейт"
+                        Value="{Binding ViewModel.Bitrate, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="3"
+                        Label="Режим"
+                        Value="{Binding ViewModel.Mode, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="3"
+                        Label="Время"
+                        Value="{Binding ViewModel.Uptime, ElementName=Root}" />
+                </layout:ResponsiveGrid>
+
+                <layout:ResponsiveGrid Margin="0,24,0,0">
+                    <common:Card
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="4"
+                        Header="Качество стрима">
+                        <StackPanel>
+                            <TextBlock
+                                Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                                Text="Разрешение и битрейт трансляции."
+                                TextWrapping="Wrap" />
+                            <common:NonScrollingComboBox
+                                x:Name="StreamQualitySelector"
+                                Margin="0,16,0,0"
+                                AutomationProperties.Name="Качество стрима"
+                                DisplayMemberPath="Name"
+                                IsEnabled="{Binding ViewModel.CanConfigure, ElementName=Root}"
+                                ItemsSource="{Binding ViewModel.QualityOptions, ElementName=Root}"
+                                SelectedValue="{Binding ViewModel.Quality, ElementName=Root, Mode=TwoWay}"
+                                SelectedValuePath="Name" />
+                        </StackPanel>
+                    </common:Card>
+                    <common:Card
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="4"
+                        Header="Увеличить чат">
+                        <StackPanel>
+                            <TextBlock
+                                Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                                Text="Крупная область чата для лучшей читаемости."
+                                TextWrapping="Wrap" />
+                            <common:ToggleSwitch
+                                x:Name="StreamChatZoomToggle"
+                                Margin="0,16,0,0"
+                                HorizontalAlignment="Left"
+                                AutomationProperties.Name="Увеличить чат в стриме"
+                                IsChecked="{Binding ViewModel.ChatZoomEnabled, ElementName=Root, Mode=TwoWay}"
+                                IsEnabled="{Binding ViewModel.CanConfigure, ElementName=Root}" />
+                        </StackPanel>
+                    </common:Card>
+                    <common:Card
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="8"
+                        layout:ResponsiveGrid.ExpandedSpan="4"
+                        Header="Режим 10 FPS">
+                        <StackPanel>
+                            <TextBlock
+                                Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                                Text="Уменьшает нагрузку и битрейт трансляции."
+                                TextWrapping="Wrap" />
+                            <common:ToggleSwitch
+                                x:Name="StreamLowFpsToggle"
+                                Margin="0,16,0,0"
+                                HorizontalAlignment="Left"
+                                AutomationProperties.Name="Режим стрима 10 FPS"
+                                IsChecked="{Binding ViewModel.SnapshotModeEnabled, ElementName=Root, Mode=TwoWay}"
+                                IsEnabled="{Binding ViewModel.CanConfigure, ElementName=Root}" />
+                        </StackPanel>
+                    </common:Card>
+                </layout:ResponsiveGrid>
+
+                <common:ActionButton
+                    x:Name="StreamChatModeButton"
+                    Margin="0,24,0,0"
+                    HorizontalAlignment="Left"
+                    AutomationProperties.Name="Переключить режим чата стрима"
+                    Command="{Binding ViewModel.ToggleChatModeCommand, ElementName=Root}"
+                    Content="{Binding ViewModel.ChatModeActionText, ElementName=Root}"
+                    Role="Subtle" />
+            </StackPanel>
+        </common:PageContainer>
+    </common:PageScrollViewer>
+</UserControl>

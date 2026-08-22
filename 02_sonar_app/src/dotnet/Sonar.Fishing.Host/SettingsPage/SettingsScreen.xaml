@@ -1,0 +1,351 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.SettingsPage.SettingsScreen"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    xmlns:layout="clr-namespace:Sonar.UI.Wpf.Layout;assembly=Sonar.UI.Wpf"
+    AutomationProperties.Name="Настройки"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <common:PageScrollViewer x:Name="SettingsPageScrollViewer">
+        <common:PageContainer>
+            <StackPanel>
+                <common:PageHeader
+                    x:Name="SettingsHeader"
+                    Title="Настройки"
+                    Subtitle="Выберите поведение и горячие клавиши">
+                    <common:PageHeader.Actions>
+                        <StackPanel Orientation="Horizontal">
+                            <common:ActionButton
+                                x:Name="DiscardSettingsButton"
+                                AutomationProperties.Name="Отменить изменения настроек"
+                                Command="{Binding ViewModel.DiscardCommand, ElementName=Root}"
+                                Content="Отменить"
+                                Role="Subtle" />
+                            <common:ActionButton
+                                x:Name="SaveSettingsButton"
+                                Margin="8,0,0,0"
+                                AutomationProperties.Name="Сохранить настройки"
+                                Command="{Binding ViewModel.SaveCommand, ElementName=Root}"
+                                Content="Сохранить"
+                                Role="Primary" />
+                        </StackPanel>
+                    </common:PageHeader.Actions>
+                </common:PageHeader>
+
+                <common:NotificationBanner
+                    Margin="0,24,0,0"
+                    Header="{Binding ViewModel.SaveStatus, ElementName=Root}"
+                    Tone="Success">
+                    <common:NotificationBanner.Style>
+                        <Style
+                            BasedOn="{StaticResource {x:Type common:NotificationBanner}}"
+                            TargetType="{x:Type common:NotificationBanner}">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ViewModel.SaveStatus, ElementName=Root}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </common:NotificationBanner.Style>
+                </common:NotificationBanner>
+
+                <common:SettingsSection
+                    Margin="0,24,0,0"
+                    Header="Поведение"
+                    Description="Все изменения применятся после нажатия «Сохранить».">
+                    <StackPanel>
+                        <common:SettingItem Header="Автоматически использовать еду" Description="Восстанавливать показатели игрока по заданным порогам">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.AutoMeal, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem
+                            Header="Если еда закончилась"
+                            Description="Что делать, когда еда закончится"
+                            DependencyMessage="Включите автоматическое использование еды">
+                            <common:NonScrollingComboBox
+                                x:Name="FoodDepletedActionSelector"
+                                DisplayMemberPath="Label"
+                                IsEnabled="{Binding ViewModel.MealControlsEnabled, ElementName=Root}"
+                                ItemsSource="{Binding ViewModel.FoodOptions, ElementName=Root}"
+                                SelectedValue="{Binding ViewModel.FoodDepletedAction, ElementName=Root, Mode=TwoWay}"
+                                SelectedValuePath="Value" />
+                        </common:SettingItem>
+                        <common:SettingItem Header="Автоматически менять наживку" Description="Менять наживку, когда она закончится">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.AutoChangeBait, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem Header="Складывать рыбу в багажник" Description="Использовать багажник при переполнении">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.StoreInTrunk, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem Header="Звук запуска и остановки" Description="Проигрывать уведомление о смене состояния">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.StartStopSoundEnabled, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem Header="Если инвентарь переполнен" Description="Что делать при переполнении">
+                            <common:NonScrollingComboBox
+                                DisplayMemberPath="Label"
+                                ItemsSource="{Binding ViewModel.OverweightOptions, ElementName=Root}"
+                                SelectedValue="{Binding ViewModel.OverweightAction, ElementName=Root, Mode=TwoWay}"
+                                SelectedValuePath="Value" />
+                        </common:SettingItem>
+                        <common:SettingItem Header="Рыбачить без поводка" Description="Разрешить продолжение без поводка">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.FishWithoutLeader, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem
+                            Header="Если поводки закончились"
+                            Description="Действие при истощении поводков"
+                            DependencyMessage="Разрешите рыбалку без поводка">
+                            <common:NonScrollingComboBox
+                                DisplayMemberPath="Label"
+                                IsEnabled="{Binding ViewModel.LeaderFallbackEnabled, ElementName=Root}"
+                                ItemsSource="{Binding ViewModel.DepletedOptions, ElementName=Root}"
+                                SelectedValue="{Binding ViewModel.LeaderDepletedAction, ElementName=Root, Mode=TwoWay}"
+                                SelectedValuePath="Value" />
+                        </common:SettingItem>
+                        <common:SettingItem Header="Рыбачить без подсака" Description="Разрешить продолжение без подсака">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.FishWithoutNet, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem
+                            Header="Если подсак закончился"
+                            Description="Действие при истощении подсака"
+                            DependencyMessage="Разрешите рыбалку без подсака">
+                            <common:NonScrollingComboBox
+                                DisplayMemberPath="Label"
+                                IsEnabled="{Binding ViewModel.NetFallbackEnabled, ElementName=Root}"
+                                ItemsSource="{Binding ViewModel.DepletedOptions, ElementName=Root}"
+                                SelectedValue="{Binding ViewModel.NetDepletedAction, ElementName=Root, Mode=TwoWay}"
+                                SelectedValuePath="Value" />
+                        </common:SettingItem>
+                        <common:SettingItem Header="Если снасти закончились" Description="Действие при подтверждённом истощении снастей">
+                            <common:NonScrollingComboBox
+                                DisplayMemberPath="Label"
+                                ItemsSource="{Binding ViewModel.EquipmentOptions, ElementName=Root}"
+                                SelectedValue="{Binding ViewModel.EquipmentDepletedAction, ElementName=Root, Mode=TwoWay}"
+                                SelectedValuePath="Value" />
+                        </common:SettingItem>
+                    </StackPanel>
+                </common:SettingsSection>
+
+                <common:SettingsSection
+                    x:Name="ThresholdsSection"
+                    Margin="0,24,0,0"
+                    Header="Пороги восстановления">
+                    <layout:ResponsiveGrid>
+                        <common:SettingItem
+                            layout:ResponsiveGrid.CompactSpan="4"
+                            layout:ResponsiveGrid.MediumSpan="4"
+                            layout:ResponsiveGrid.ExpandedSpan="4"
+                            Header="Еда"
+                            Status="{Binding ViewModel.FoodThreshold, ElementName=Root, StringFormat={}{0}%}">
+                            <Slider
+                                x:Name="FoodThresholdSlider"
+                                AutomationProperties.Name="Порог еды"
+                                IsEnabled="{Binding ViewModel.MealControlsEnabled, ElementName=Root}"
+                                IsSnapToTickEnabled="True"
+                                LargeChange="5"
+                                Maximum="90"
+                                Minimum="1"
+                                SmallChange="1"
+                                Style="{DynamicResource Sonar.Input.Slider}"
+                                TickFrequency="1"
+                                Value="{Binding ViewModel.FoodThreshold, ElementName=Root, Mode=TwoWay}"
+                                Width="160" />
+                        </common:SettingItem>
+                        <common:SettingItem
+                            layout:ResponsiveGrid.CompactSpan="4"
+                            layout:ResponsiveGrid.MediumSpan="4"
+                            layout:ResponsiveGrid.ExpandedSpan="4"
+                            Header="Вода"
+                            Status="{Binding ViewModel.WaterThreshold, ElementName=Root, StringFormat={}{0}%}">
+                            <Slider
+                                x:Name="WaterThresholdSlider"
+                                AutomationProperties.Name="Порог воды"
+                                IsEnabled="{Binding ViewModel.MealControlsEnabled, ElementName=Root}"
+                                IsSnapToTickEnabled="True"
+                                LargeChange="5"
+                                Maximum="90"
+                                Minimum="1"
+                                SmallChange="1"
+                                Style="{DynamicResource Sonar.Input.Slider}"
+                                TickFrequency="1"
+                                Value="{Binding ViewModel.WaterThreshold, ElementName=Root, Mode=TwoWay}"
+                                Width="160" />
+                        </common:SettingItem>
+                        <common:SettingItem
+                            layout:ResponsiveGrid.CompactSpan="4"
+                            layout:ResponsiveGrid.MediumSpan="8"
+                            layout:ResponsiveGrid.ExpandedSpan="4"
+                            Header="Здоровье"
+                            Status="{Binding ViewModel.HealthThreshold, ElementName=Root, StringFormat={}{0}%}">
+                            <Slider
+                                x:Name="HealthThresholdSlider"
+                                AutomationProperties.Name="Порог здоровья"
+                                IsEnabled="{Binding ViewModel.MealControlsEnabled, ElementName=Root}"
+                                IsSnapToTickEnabled="True"
+                                LargeChange="5"
+                                Maximum="90"
+                                Minimum="1"
+                                SmallChange="1"
+                                Style="{DynamicResource Sonar.Input.Slider}"
+                                TickFrequency="1"
+                                Value="{Binding ViewModel.HealthThreshold, ElementName=Root, Mode=TwoWay}"
+                                Width="160" />
+                        </common:SettingItem>
+                    </layout:ResponsiveGrid>
+                </common:SettingsSection>
+
+                <common:SettingsSection
+                    x:Name="HotkeysSection"
+                    Margin="0,24,0,0"
+                    Header="Горячие клавиши"
+                    Description="Нажмите Escape или перейдите в другое поле, чтобы отменить ввод.">
+                    <StackPanel>
+                        <common:NotificationBanner
+                            Header="Конфликт горячих клавиш"
+                            Tone="Warning">
+                            <common:NotificationBanner.Style>
+                                <Style
+                                    BasedOn="{StaticResource {x:Type common:NotificationBanner}}"
+                                    TargetType="{x:Type common:NotificationBanner}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ViewModel.HasHotkeyConflicts, ElementName=Root}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </common:NotificationBanner.Style>
+                            <TextBlock
+                                Text="{Binding ViewModel.HotkeyConflictStatus, ElementName=Root}"
+                                TextWrapping="Wrap" />
+                        </common:NotificationBanner>
+                        <layout:ResponsiveGrid Margin="0,12,0,0">
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="4" Header="Старт / стоп">
+                            <common:HotkeyCapture AutomationLabel="Горячая клавиша старт и стоп" Shortcut="{Binding ViewModel.StartStopShortcut, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="4" Header="Инвентарь">
+                            <common:HotkeyCapture AutomationLabel="Горячая клавиша инвентаря" Shortcut="{Binding ViewModel.InventoryShortcut, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="4" Header="Использовать предмет">
+                            <common:HotkeyCapture AutomationLabel="Горячая клавиша использования предмета" Shortcut="{Binding ViewModel.UseItemShortcut, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="4" Header="Переместить в рюкзак">
+                            <common:HotkeyCapture AutomationLabel="Горячая клавиша перемещения в рюкзак" Shortcut="{Binding ViewModel.BackpackMoveShortcut, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="4" Header="Выбросить">
+                            <common:HotkeyCapture AutomationLabel="Горячая клавиша выбросить" Shortcut="{Binding ViewModel.DiscardShortcut, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="4" Header="Чат">
+                            <common:HotkeyCapture AutomationLabel="Горячая клавиша чата" Shortcut="{Binding ViewModel.ChatShortcut, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        </layout:ResponsiveGrid>
+                    </StackPanel>
+                </common:SettingsSection>
+
+                <common:SettingsSection
+                    x:Name="FishSelectionSection"
+                    Margin="0,24,0,0"
+                    Header="Какие виды оставлять"
+                    Description="Выбранную рыбу программа забирает, остальную отпускает.">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <common:ActionButton
+                                AutomationProperties.Name="Выбрать все виды рыб"
+                                Command="{Binding ViewModel.SelectAllFishCommand, ElementName=Root}"
+                                Content="Выбрать все"
+                                Role="Subtle"
+                                Size="Compact" />
+                            <common:ActionButton
+                                Margin="8,0,0,0"
+                                AutomationProperties.Name="Снять выбор со всех видов рыб"
+                                Command="{Binding ViewModel.ClearAllFishCommand, ElementName=Root}"
+                                Content="Снять выбор со всех"
+                                Role="Subtle"
+                                Size="Compact" />
+                        </StackPanel>
+                        <ScrollViewer
+                            x:Name="FishSelectionScrollViewer"
+                            Margin="0,16,0,0"
+                            MaxHeight="520"
+                            HorizontalScrollBarVisibility="Disabled"
+                            PanningMode="VerticalOnly"
+                            Style="{StaticResource Sonar.ContentScrollViewer}"
+                            VerticalScrollBarVisibility="Auto">
+                            <layout:ResponsiveGrid>
+                                <ItemsControl
+                                    layout:ResponsiveGrid.CompactSpan="4"
+                                    layout:ResponsiveGrid.MediumSpan="4"
+                                    layout:ResponsiveGrid.ExpandedSpan="6"
+                                    ItemsSource="{Binding ViewModel.FishColumnOne, ElementName=Root}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <common:DataListItem
+                                                Margin="0,0,0,8"
+                                                Subtitle="Оставлять"
+                                                Title="{Binding DisplayName}">
+                                                <common:DataListItem.Leading>
+                                                    <Image
+                                                        Width="72"
+                                                        Height="40"
+                                                        AutomationProperties.Name="{Binding DisplayName}"
+                                                        Source="{Binding ImageResourceUri}"
+                                                        Stretch="Uniform" />
+                                                </common:DataListItem.Leading>
+                                                <common:DataListItem.Trailing>
+                                                    <common:ToggleSwitch
+                                                        AutomationProperties.Name="{Binding KeepAutomationName}"
+                                                        IsChecked="{Binding Keep, Mode=TwoWay}" />
+                                                </common:DataListItem.Trailing>
+                                            </common:DataListItem>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <ItemsControl
+                                    layout:ResponsiveGrid.CompactSpan="4"
+                                    layout:ResponsiveGrid.MediumSpan="4"
+                                    layout:ResponsiveGrid.ExpandedSpan="6"
+                                    ItemsSource="{Binding ViewModel.FishColumnTwo, ElementName=Root}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <common:DataListItem
+                                                Margin="0,0,0,8"
+                                                Subtitle="Оставлять"
+                                                Title="{Binding DisplayName}">
+                                                <common:DataListItem.Leading>
+                                                    <Image
+                                                        Width="72"
+                                                        Height="40"
+                                                        AutomationProperties.Name="{Binding DisplayName}"
+                                                        Source="{Binding ImageResourceUri}"
+                                                        Stretch="Uniform" />
+                                                </common:DataListItem.Leading>
+                                                <common:DataListItem.Trailing>
+                                                    <common:ToggleSwitch
+                                                        AutomationProperties.Name="{Binding KeepAutomationName}"
+                                                        IsChecked="{Binding Keep, Mode=TwoWay}" />
+                                                </common:DataListItem.Trailing>
+                                            </common:DataListItem>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </layout:ResponsiveGrid>
+                        </ScrollViewer>
+                    </StackPanel>
+                </common:SettingsSection>
+
+                <common:Card Margin="0,24,0,0" Header="Удаление" Variant="Danger">
+                    <StackPanel>
+                        <TextBlock Text="Перед удалением остановите рыбалку и сохраните нужные настройки." TextWrapping="Wrap" />
+                        <common:ActionButton
+                            Margin="0,16,0,0"
+                            HorizontalAlignment="Left"
+                            AutomationProperties.Name="Удалить Sonar Fishing"
+                            Content="Удалить программу"
+                            IsEnabled="False"
+                            Role="Danger" />
+                    </StackPanel>
+                </common:Card>
+            </StackPanel>
+        </common:PageContainer>
+    </common:PageScrollViewer>
+</UserControl>

@@ -8,11 +8,13 @@
 
 ## Контекст
 
-Текущий Sonar Fishing является одним Python/PySide process. `MainWindow`
-одновременно создает config, license, statistics, history, bot, chat и
-streaming, а `FishingBot` владеет capture, memory, vision, state machines и
-input. Фактическое behavior дополнительно меняется import-hook и monkeypatch
-overrides, поэтому прямой rewrite одного `bot.py` не даст parity.
+Исходный Sonar Fishing был одним Python/PySide process. `MainWindow`
+одновременно создавал config, license, statistics, history, bot, chat и
+streaming, а `FishingBot` владел capture, memory, vision, state machines и
+input. Фактическое behavior дополнительно менялось import-hook и monkeypatch
+overrides, поэтому baseline сначала был зафиксирован как characterization
+evidence. Этот product owner удален после принятой parity; текущие исходники и
+entrypoints принадлежат только WPF/C# Host и C++ Engine.
 
 Требуется сохранить текущий design и behavior, перенести UI на C#, повысить
 стоимость reverse engineering product logic и не включить IPC в millisecond
@@ -86,18 +88,23 @@ Named Pipe. Hard native crash не гарантирует key-up; held-input cap
 
 ## Transitional architecture
 
-1. Зафиксировать effective Python behavior со всеми overrides.
+1. Зафиксировать effective Python behavior со всеми overrides и оставить его
+   только как nonshipping characterization oracle.
 2. Выделить `EngineFacade`, immutable config/events и composition root без
-   behavior change.
-3. Запустить Python LegacyEngine за final coarse Named Pipe contract.
-4. Перенести UI на WPF/MVVM против LegacyEngine.
-5. Портировать C++ capabilities через offline replay и read-only shadow.
-6. Переключать whole capability и затем final Engine только между sessions.
+   behavior change, чтобы измерять parity текущего owner.
+3. Портировать цельные read-only/domain capabilities в C++ через общий
+   deterministic corpus; Python production path остается oracle до cutover.
+4. Собрать WPF/MVVM Host против inert/contained C++ Engine и переносить
+   aggregate snapshots, pages и Host-only services без Python transport.
+5. Перенести observation, decision, final safety gate и side effect каждого
+   stateful episode целиком в C++ Engine; не разрезать episode fine RPC.
+6. После полной parity переключить authority только между sessions, удалить
+   Python/PySide runtime и проверить финальный bundle no-Python scan.
 
-Временный target-quality native module внутри Python LegacyEngine допустим
-только для whole atomic capability с coarse run/cancel/snapshot bridge. Он не
-является protection boundary, не вызывает Python на каждый sample и имеет
-removal criteria.
+Python worker, Named Pipe bridge, interpreter или wheel не входят в target и
+не являются промежуточным product workflow. После removal gate исполняемые
+oracle удалены; accepted observations сохранены в language-neutral fixtures,
+которые не попадают в release bundle.
 
 ## Build и rollback
 
@@ -130,14 +137,20 @@ Release pipeline обязан валить сборку, если allowlist на
 first activation, normal launch/exit, crash recovery, successful/interrupted
 update или remote rollback, либо если изменился `%TEMP%\.net`.
 
-Nuitka onefile остается operational release truth до фактического принятия
-нового pipeline.
+Legacy Nuitka pipeline удален из product graph. Package и smoke entrypoints
+теперь fail closed до фактического принятия нового signed two-EXE pipeline.
 
 ## Consequences и gates
 
 - C++ повышает стоимость анализа, но не хранит backend private keys.
 - Два toolchains и process contract увеличивают build/test complexity.
-- Python остается offline oracle/tooling после production removal.
-- WPF cutover и C++ Engine cutover могут происходить в разных releases.
+- Historical oracle outputs остаются только language-neutral test fixtures;
+  product-owned script/runtime fallback отсутствует.
+- WPF presentation можно принимать инкрементально, но production authority
+  переключается только на полный C++ Engine; shipping WPF-to-Python stage
+  запрещен.
 - UI redesign, resolution remediation и language port выполняются отдельно.
+- Startup/CPU/memory/IPC and hot paths измеряются после parity slice;
+  optimization выполняется отдельным semantics-preserving change только для
+  продемонстрированного hotspot с before/after evidence.
 - Детальный порядок и evidence находятся в [ENGINE_MIGRATION.md](ENGINE_MIGRATION.md).

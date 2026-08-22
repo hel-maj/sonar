@@ -1,0 +1,72 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-msvc-v143",
+      "displayName": "Windows x64 MSVC v143",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/../build/native/windows-msvc-v143",
+      "architecture": "x64",
+      "toolset": "v143",
+      "cacheVariables": {
+        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-native-windows/0.1.1",
+        "SONAR_COMMON_NATIVE_LICENSING_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-native-licensing/0.1.2"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc-v143-release",
+      "configurePreset": "windows-msvc-v143",
+      "configuration": "Release",
+      "targets": [
+        "SonarFishingCatchQualityTests",
+        "SonarFishingCatchDispositionTests",
+        "SonarFishingSessionStatisticsTests",
+        "SonarFishingFishIdentityTests",
+        "SonarFishingCatchObservationTests",
+        "SonarFishingRuntimeSettingsTests",
+        "SonarFishingLifecycleTests",
+        "SonarFishingReelingControlTests",
+        "SonarFishingReelingControlBenchmark",
+        "SonarFishingMealRecoveryTests",
+        "SonarFishingMealRecoveryBenchmark",
+        "SonarFishingGarbageDisposalTests",
+        "SonarFishingEquipmentRecoveryTests",
+        "SonarFishingRuntimePlatformTests",
+        "SonarFishingRuntimeSafetyTests",
+        "SonarFishingEntitlementTests",
+        "SonarFishingGameChatTests",
+        "SonarFishingGameChatBoundaryTests",
+        "SonarFishingGameChatPlatformMutationTests",
+        "SonarFishingGameChatVisualDetectorTests",
+        "SonarFishingStageDetectionTests",
+        "SonarFishingInventoryStoreTests",
+        "SonarFishingInventoryStoreBenchmark",
+        "SonarFishingMemoryObservationTests",
+        "SonarFishingMemoryObservationBenchmark",
+        "SonarFishingEpisodeTests",
+        "SonarFishingEpisodeBenchmark",
+        "SonarFishingMaintenanceEpisodeTests",
+        "SonarFishingMaintenanceEpisodeBenchmark",
+        "SonarFishingAutomationAdaptersTests",
+        "SonarFishingProductionAdaptersTests"
+      ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc-v143-release",
+      "configurePreset": "windows-msvc-v143",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

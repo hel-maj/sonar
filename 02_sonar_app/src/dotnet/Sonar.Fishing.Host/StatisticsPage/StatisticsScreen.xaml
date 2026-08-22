@@ -1,0 +1,172 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.StatisticsPage.StatisticsScreen"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:behaviors="clr-namespace:Sonar.UI.Wpf.Behaviors;assembly=Sonar.UI.Wpf"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    xmlns:layout="clr-namespace:Sonar.UI.Wpf.Layout;assembly=Sonar.UI.Wpf"
+    AutomationProperties.Name="Статистика"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <common:PageScrollViewer>
+        <common:PageContainer>
+            <StackPanel>
+                <common:PageHeader
+                    x:Name="StatisticsHeader"
+                    Title="Статистика"
+                    Subtitle="Данные текущей сессии сбрасываются после закрытия приложения">
+                    <common:PageHeader.Actions>
+                        <common:ActionButton
+                            AutomationProperties.Name="Начать новую сессию статистики"
+                            Command="{Binding ViewModel.ResetSessionCommand, ElementName=Root}"
+                            Content="Новая сессия"
+                            Role="Subtle" />
+                    </common:PageHeader.Actions>
+                </common:PageHeader>
+
+                <layout:ResponsiveGrid Margin="0,24,0,0">
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="2"
+                        Label="Время"
+                        Value="{Binding ViewModel.Current.Duration, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="2"
+                        Label="Поймано"
+                        Value="{Binding ViewModel.Current.Caught, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="2"
+                        Label="Оставлено"
+                        Value="{Binding ViewModel.Current.Kept, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="2"
+                        Label="Вес"
+                        Value="{Binding ViewModel.Current.KeptWeight, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="2"
+                        Label="Доход"
+                        Value="{Binding ViewModel.Current.Income, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="2"
+                        Label="Доход / час"
+                        Value="{Binding ViewModel.Current.IncomePerHour, ElementName=Root}" />
+                </layout:ResponsiveGrid>
+
+                <common:MasterDetail
+                    x:Name="StatisticsComposition"
+                    Margin="0,24,0,0"
+                    DetailWidth="2*"
+                    MasterWidth="3*"
+                    StackBreakpoint="1120">
+                    <common:MasterDetail.Master>
+                        <common:Card Header="Улов по видам">
+                            <Grid>
+                                <common:PageStatePresenter
+                                    State="Empty"
+                                    StateBadgeContent="Нет данных"
+                                    StateMessage="Таблица заполнится после первого улова."
+                                    StateTitle="Уловов пока нет">
+                                    <common:PageStatePresenter.Style>
+                                        <Style
+                                            BasedOn="{StaticResource {x:Type common:PageStatePresenter}}"
+                                            TargetType="{x:Type common:PageStatePresenter}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ViewModel.Current.HasCatches, ElementName=Root}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </common:PageStatePresenter.Style>
+                                </common:PageStatePresenter>
+                                <DataGrid
+                                    x:Name="FishStatisticsTable"
+                                    behaviors:DataGridBehavior.EnableTriStateSorting="True"
+                                    behaviors:DataGridBehavior.SelectRowOnContextClick="True"
+                                    AutoGenerateColumns="False"
+                                    IsReadOnly="False"
+                                    ItemsSource="{Binding ViewModel.Current.FishRows, ElementName=Root}">
+                                    <DataGrid.Style>
+                                        <Style BasedOn="{StaticResource Sonar.DataGrid}" TargetType="DataGrid">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ViewModel.Current.HasCatches, ElementName=Root}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.Style>
+                                    <DataGrid.Columns>
+                                        <DataGridTemplateColumn Header="Рыба" IsReadOnly="True" MinWidth="160" Width="1.5*">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Image
+                                                            Width="48"
+                                                            Height="28"
+                                                            Margin="0,0,8,0"
+                                                            AutomationProperties.Name="{Binding Name}"
+                                                            Source="{Binding ImageResourceUri}"
+                                                            Stretch="Uniform" />
+                                                        <TextBlock VerticalAlignment="Center" Text="{Binding Name}" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Binding="{Binding Caught}" Header="Поймано" IsReadOnly="True" MinWidth="96" Width="*" />
+                                        <DataGridTextColumn Binding="{Binding Kept}" Header="Оставлено" IsReadOnly="True" MinWidth="96" Width="*" />
+                                        <DataGridTextColumn Binding="{Binding BasePrice}" Header="Цена" IsReadOnly="True" MinWidth="240" Width="1.4*" />
+                                        <DataGridTemplateColumn Header="Своя цена" MinWidth="104" Width="*">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBox
+                                                        AutomationProperties.Name="{Binding Name, StringFormat=Своя цена для {0}}"
+                                                        IsEnabled="{Binding CanEditCustomPrice}"
+                                                        Style="{DynamicResource Sonar.Input.TextBox}"
+                                                        Text="{Binding CustomPrice, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Binding="{Binding Income}" Header="Доход" IsReadOnly="True" MinWidth="176" Width="1.2*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </common:Card>
+                    </common:MasterDetail.Master>
+                    <common:Card Header="Размер улова">
+                            <StackPanel>
+                                <common:MetricCard
+                                    Alignment="Center"
+                                    Label="Всего"
+                                    Value="{Binding ViewModel.Current.Caught, ElementName=Root}" />
+                                <ItemsControl
+                                    Margin="0,16,0,0"
+                                    ItemsSource="{Binding ViewModel.Current.CatchSizes, ElementName=Root}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <common:DataListItem
+                                                Detail="{Binding Percent, StringFormat={}{0:0.#}%}"
+                                                Status="{Binding Count}"
+                                                Title="{Binding Label}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                    </common:Card>
+                </common:MasterDetail>
+            </StackPanel>
+        </common:PageContainer>
+    </common:PageScrollViewer>
+</UserControl>

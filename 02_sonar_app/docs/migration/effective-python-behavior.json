@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "baseline_revision": "fe9b5ec1f0f38fa21ca1bc1b2099adc588faa000",
+  "recorded_at": "2026-08-22",
+  "production_authority": "Python/PySide6 runtime",
+  "purpose": "Freeze runtime behavior that is added after the apparent class definitions are loaded.",
+  "override_groups": [
+    {
+      "id": "fishing_bot_adjustments",
+      "source": "src/sonar/fishing/bot_adjustments.py",
+      "activation": "src/sonar/fishing/__init__.py:install",
+      "current_authority": "sonar.fishing.bot.FishingBot",
+      "target_owner": "Fishing C++ Engine",
+      "symbols": [
+        "_restart_fishing_after_bait_change",
+        "_do_change_bait",
+        "_prepare_fishing_start",
+        "_is_trophy_quality",
+        "_press_fishing_start",
+        "_save_debug_catch_snapshots"
+      ],
+      "conditions": [
+        "Installed through a meta-path hook before sonar.fishing.bot executes."
+      ],
+      "observable_behavior": "Changes bait restart, fishing preparation, trophy classification, start input, and debug catch artifact behavior.",
+      "side_effects": [
+        "Fishing state transition",
+        "Game input",
+        "Debug artifact write"
+      ],
+      "characterization_tests": [
+        "tests/test_bot_behaviour.py"
+      ],
+      "evidence_gap": "A single end-to-end trace of every adjusted method is not yet frozen.",
+      "removal_condition": "The corresponding whole C++ capabilities pass offline parity, read-only shadow where applicable, authority cutover, and rollback window."
+    },
+    {
+      "id": "chat_wip_main_window",
+      "source": "src/sonar/chat_wip_gate.py",
+      "activation": "src/sonar/app.py:apply_chat_wip_gate",
+      "current_authority": "sonar.ui.main_window.MainWindow",
+      "target_owner": "Fishing C# Host presentation and feature policy",
+      "symbols": [
+        "_build_stream_tab",
+        "_refresh_stream_tab",
+        "enable_chat_mode"
+      ],
+      "conditions": [
+        "Enabled only for direct non-frozen Python debug mode; otherwise chat UI is hidden and disabled."
+      ],
+      "observable_behavior": "Marks the stream chat UI as WIP when enabled and prevents chat-mode entry when disabled.",
+      "side_effects": [
+        "Qt presentation mutation",
+        "User command rejection"
+      ],
+      "characterization_tests": [],
+      "evidence_gap": "The debug-enabled and frozen UI variants do not yet have a dedicated visual characterization test.",
+      "removal_condition": "WPF feature policy reproduces the accepted enabled and disabled variants and the Python production UI has left its rollback window."
+    },
+    {
+      "id": "chat_wip_streaming_service",
+      "source": "src/sonar/chat_wip_gate.py",
+      "activation": "src/sonar/app.py:apply_chat_wip_gate",
+      "current_authority": "sonar.streaming.service.StreamingService",
+      "target_owner": "Fishing C# Host streaming application service",
+      "symbols": [
+        "enable_chat_mode",
+        "disable_chat_mode",
+        "set_chat_mode_enabled",
+        "set_chat_memory_enabled",
+        "send_chat_message",
+        "select_chat_tab",
+        "clear_chat_input",
+        "chat_snapshot"
+      ],
+      "conditions": [
+        "Mutating chat methods are replaced when the WIP gate is disabled."
+      ],
+      "observable_behavior": "Returns a stable unavailable snapshot, clears transient chat state, and prevents all chat mutations.",
+      "side_effects": [
+        "Streaming runtime state reset",
+        "User command rejection"
+      ],
+      "characterization_tests": [],
+      "evidence_gap": "The disabled-method replacement set is frozen structurally but its complete observable result matrix is not yet characterized.",
+      "removal_condition": "C# streaming policy has typed unavailable results and parity tests, then the Python Host rollback window expires."
+    },
+    {
+      "id": "chat_wip_notification_text",
+      "source": "src/sonar/chat_wip_gate.py",
+      "activation": "src/sonar/app.py:apply_chat_wip_gate",
+      "current_authority": "sonar.telegram.notifier.NotificationManager",
+      "target_owner": "Fishing C# Host Telegram adapter",
+      "symbols": [
+        "send_message",
+        "_send_or_edit_message"
+      ],
+      "conditions": [
+        "Applied for both enabled and disabled chat WIP modes."
+      ],
+      "observable_behavior": "Removes the Telegram chat-mode hint before sending or editing a message.",
+      "side_effects": [
+        "Telegram text normalization before network send"
+      ],
+      "characterization_tests": [],
+      "evidence_gap": "Exact multiline normalization examples are not yet covered by a dedicated test.",
+      "removal_condition": "The C# Telegram adapter owns the normalized message contract and Python Host production removal is complete."
+    },
+    {
+      "id": "streaming_snapshot_normalization",
+      "source": "src/sonar/streaming/__init__.py",
+      "activation": "Import sonar.streaming.StreamingService instead of the base service module class.",
+      "current_authority": "sonar.streaming.StreamingService",
+      "target_owner": "Fishing C# Host streaming application service",
+      "symbols": [
+        "_snapshot_locked"
+      ],
+      "conditions": [
+        "Base status is preparing, stream is inactive, and no public stream URL exists."
+      ],
+      "observable_behavior": "Exposes the semantic status offline instead of preparing.",
+      "side_effects": [
+        "Read-only snapshot normalization"
+      ],
+      "characterization_tests": [
+        "tests/test_streaming_service.py"
+      ],
+      "evidence_gap": "",
+      "removal_condition": "The C# streaming snapshot mapper passes semantic parity and the Python Host rollback window expires."
+    },
+    {
+      "id": "telegram_notifier_adjustments",
+      "source": "src/sonar/telegram/notifier_adjustments.py",
+      "activation": "src/sonar/telegram/__init__.py:install",
+      "current_authority": "sonar.telegram.notifier module",
+      "target_owner": "Fishing C# Host Telegram adapter",
+      "symbols": [
+        "apply_to_module"
+      ],
+      "conditions": [
+        "Installed through a meta-path hook before sonar.telegram.notifier executes."
+      ],
+      "observable_behavior": "Currently adds only an idempotent adjustment marker; the hook itself remains part of effective load behavior.",
+      "side_effects": [
+        "Module marker mutation"
+      ],
+      "characterization_tests": [
+        "tests/test_migration_effective_behavior.py"
+      ],
+      "evidence_gap": "",
+      "removal_condition": "Python Telegram production code and its import hook are removed after Host cutover and rollback."
+    }
+  ]
+}

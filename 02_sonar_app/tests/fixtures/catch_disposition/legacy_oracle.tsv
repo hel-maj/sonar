@@ -1,0 +1,12 @@
+case_id	fish_id_kind	fish_id	selected_fish_ids	inventory_full	expected_keep	expected_reason
+selected-exact	text	krasny_gorbyl	krasny_gorbyl	false	true	fish_selected
+not-selected	text	ruster	krasny_gorbyl	false	false	fish_not_selected
+inventory-overrides-selected	text	marlin	marlin	true	false	inventory_full
+inventory-overrides-unrecognized	none	-	-	true	false	inventory_full
+none-is-unrecognized	none	-	marlin	false	false	fish_unrecognized
+empty-is-unrecognized	empty	-	@empty	false	false	fish_unrecognized
+whitespace-is-truthy	text	 	marlin	false	false	fish_not_selected
+case-sensitive	text	Ruster	ruster	false	false	fish_not_selected
+multiple-selected	text	seriola	ruster|seriola|marlin	false	true	fish_selected
+arbitrary-truthy-selected	text	custom_fish	custom_fish	false	true	fish_selected
+empty-selection-entry-does-not-recognize-empty	empty	-	@empty|marlin	false	false	fish_unrecognized

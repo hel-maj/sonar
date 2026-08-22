@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "product": "fishing",
+  "displayName": "Sonar Fishing",
+  "runtime": "wpf-csharp-cpp",
+  "commands": [
+    {
+      "id": "fishing-native-setup",
+      "category": "fishing",
+      "kind": "setup",
+      "title": "Проверить инструменты сборки Fishing",
+      "description": "Проверяет .NET 10, MSVC, CMake, protoc и точные неизменяемые пакеты Common без обращения к игре.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\setup_native.ps1"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\setup_native.ps1", "{productRoot}\\native\\CMakeLists.txt", "{productRoot}\\src\\dotnet\\Sonar.Fishing.Host\\Sonar.Fishing.Host.csproj"]
+    },
+    {
+      "id": "fishing-native-test",
+      "category": "fishing",
+      "kind": "test",
+      "title": "Запустить тесты новой версии Fishing",
+      "description": "Запускает WPF STA, C++ CTest и типизированные проверки IPC между Host и Engine полностью без сети.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\test_native.ps1"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\test_native.ps1", "{productRoot}\\scripts\\test_dotnet.ps1", "{productRoot}\\scripts\\test_ipc.ps1"]
+    },
+    {
+      "id": "fishing-native-build",
+      "category": "fishing",
+      "kind": "build",
+      "title": "Собрать WPF Host и C++ Engine Fishing",
+      "description": "Собирает и проверяет текущую композицию Host и Engine без GTA, захвата экрана, ввода и сети.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\build_native.ps1"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\build_native.ps1"]
+    },
+    {
+      "id": "fishing-native-package",
+      "category": "fishing",
+      "kind": "package",
+      "title": "Собрать двухфайловый выпуск Fishing",
+      "description": "Строго контролируемая сборка выпуска; доступна только после полного перехода на новую архитектуру и проверки состава исходников.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\package_native.ps1"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\package_native.ps1", "{productRoot}\\docs\\migration\\runtime-authority.json"]
+    },
+    {
+      "id": "fishing-native-run-offline",
+      "category": "fishing",
+      "kind": "run",
+      "title": "Запустить Fishing без подключения к игре",
+      "description": "Открывает WPF Host с безопасно изолированным C++ Engine и не подключается к GTA.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\run_native.ps1", "-NoBuild"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\run_native.ps1", "{productRoot}\\build\\native\\windows-msvc-v143-ipc\\engine_ipc\\Release\\SonarFishingOfflineEngine.exe"]
+    },
+    {
+      "id": "fishing-native-smoke",
+      "category": "fishing",
+      "kind": "smoke",
+      "title": "Проверить выпуск Fishing",
+      "description": "Строго контролируемая проверка состава файлов, зависимостей, запуска, выхода и восстановления после сбоя; доступна только после полного перехода на новую архитектуру.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\smoke_native.ps1"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\smoke_native.ps1", "{productRoot}\\docs\\migration\\runtime-authority.json"]
+    }
+  ]
+}

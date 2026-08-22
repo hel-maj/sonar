@@ -1,0 +1,177 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.TelegramPage.TelegramScreen"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    xmlns:layout="clr-namespace:Sonar.UI.Wpf.Layout;assembly=Sonar.UI.Wpf"
+    AutomationProperties.Name="Telegram"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <common:PageScrollViewer>
+        <common:PageContainer>
+            <StackPanel>
+                <common:PageHeader
+                    x:Name="TelegramHeader"
+                    Title="Telegram"
+                    Subtitle="Удалённые уведомления и команды">
+                    <common:PageHeader.Status>
+                        <common:StatusBadge Content="{Binding ViewModel.StatusText, ElementName=Root}" />
+                    </common:PageHeader.Status>
+                    <common:PageHeader.Actions>
+                        <StackPanel Orientation="Horizontal">
+                            <common:ActionButton
+                                AutomationProperties.Name="Отменить изменения Telegram"
+                                Command="{Binding ViewModel.DiscardCommand, ElementName=Root}"
+                                Content="Отменить"
+                                Role="Subtle" />
+                            <common:ActionButton
+                                x:Name="SaveTelegramButton"
+                                Margin="8,0,0,0"
+                                AutomationProperties.Name="Сохранить настройки Telegram"
+                                Command="{Binding ViewModel.SaveCommand, ElementName=Root}"
+                                Content="Сохранить"
+                                Role="Primary" />
+                        </StackPanel>
+                    </common:PageHeader.Actions>
+                </common:PageHeader>
+
+                <common:NotificationBanner
+                    x:Name="TelegramInteractionBanner"
+                    Margin="0,24,0,0"
+                    Header="Готовность Telegram"
+                    Tone="Info">
+                    <common:NotificationBanner.Style>
+                        <Style
+                            BasedOn="{StaticResource {x:Type common:NotificationBanner}}"
+                            TargetType="{x:Type common:NotificationBanner}">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger
+                                    Binding="{Binding ViewModel.InteractionMessage, ElementName=Root}"
+                                    Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </common:NotificationBanner.Style>
+                    <TextBlock
+                        Text="{Binding ViewModel.InteractionMessage, ElementName=Root}"
+                        TextWrapping="Wrap" />
+                </common:NotificationBanner>
+
+                <common:SettingsSection
+                    Margin="0,24,0,0"
+                    Header="Подключение"
+                    Description="Токен хранится только на этом компьютере.">
+                    <StackPanel>
+                        <common:SettingItem
+                            Header="Включить Telegram"
+                            Description="Заполните токен и ID администраторов, затем сохраните настройки"
+                            DependencyMessage="{Binding ViewModel.EnableBlockReason, ElementName=Root}">
+                            <common:ToggleSwitch
+                                IsChecked="{Binding ViewModel.Enabled, ElementName=Root, Mode=TwoWay}"
+                                IsEnabled="{Binding ViewModel.CanEnable, ElementName=Root}" />
+                        </common:SettingItem>
+                        <common:SettingItem
+                            Header="Токен бота"
+                            Description="Получите токен у BotFather"
+                            DependencyMessage="Отключите Telegram, чтобы изменить токен">
+                            <Grid MinWidth="240">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <common:IconPresenter
+                                    x:Name="BotTokenIcon"
+                                    Margin="0,0,8,0"
+                                    AutomationLabel="Защищённый токен"
+                                    Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                                    Glyph="●"
+                                    IconSize="16" />
+                                <PasswordBox
+                                    x:Name="BotTokenEditor"
+                                    Grid.Column="1"
+                                    AutomationProperties.Name="Токен Telegram-бота"
+                                    IsEnabled="{Binding ViewModel.CredentialsEditable, ElementName=Root}"
+                                    PasswordChanged="OnBotTokenChanged"
+                                    Style="{DynamicResource Sonar.Input.PasswordBox}" />
+                            </Grid>
+                        </common:SettingItem>
+                        <common:SettingItem
+                            Header="ID администраторов"
+                            Description="Несколько ID разделяются запятыми"
+                            DependencyMessage="Отключите Telegram, чтобы изменить ID">
+                            <Grid MinWidth="240">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <common:IconPresenter
+                                    x:Name="AdminIdsIcon"
+                                    Margin="0,0,8,0"
+                                    AutomationLabel="Идентификаторы администраторов"
+                                    Foreground="{DynamicResource Sonar.Brush.TextMuted}"
+                                    Glyph="#"
+                                    IconSize="16" />
+                                <TextBox
+                                    x:Name="AdminIdsEditor"
+                                    Grid.Column="1"
+                                    AutomationProperties.Name="ID администраторов Telegram"
+                                    IsEnabled="{Binding ViewModel.CredentialsEditable, ElementName=Root}"
+                                    Style="{DynamicResource Sonar.Input.TextBox}"
+                                    Text="{Binding ViewModel.AdminIdsText, ElementName=Root, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </Grid>
+                        </common:SettingItem>
+                        <TextBlock Margin="0,12,0,0">
+                            <Hyperlink NavigateUri="https://t.me/BotFather">Открыть BotFather</Hyperlink>
+                            <Run Text="  •  " />
+                            <Hyperlink NavigateUri="https://t.me/Getmyid_bot">Узнать свой ID</Hyperlink>
+                        </TextBlock>
+                    </StackPanel>
+                </common:SettingsSection>
+
+                <common:SettingsSection
+                    Margin="0,24,0,0"
+                    Header="Уведомления"
+                    Description="Каждый тип сообщения и звук сохраняются отдельно.">
+                    <layout:ResponsiveGrid>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="6" Header="Поймана рыба">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.NotifyCatch, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="6" Header="Запуск и остановка">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.NotifyStartStop, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="6" Header="Закончилась еда">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.NotifyMeal, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="6" Header="Инвентарь заполнен">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.NotifyInventoryFull, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="6" Header="Мало места в инвентаре">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.NotifyInventorySpaceLow, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="6" Header="Рыба устала от приманки">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.NotifyBaitTired, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem layout:ResponsiveGrid.CompactSpan="4" layout:ResponsiveGrid.MediumSpan="4" layout:ResponsiveGrid.ExpandedSpan="6" Header="Потерян фокус игры">
+                            <common:ToggleSwitch IsChecked="{Binding ViewModel.NotifyFocusLost, ElementName=Root, Mode=TwoWay}" />
+                        </common:SettingItem>
+                        <common:SettingItem
+                            layout:ResponsiveGrid.CompactSpan="4"
+                            layout:ResponsiveGrid.MediumSpan="4"
+                            layout:ResponsiveGrid.ExpandedSpan="6"
+                            Header="Порог свободного места"
+                            Description="Минимум 1.00 кг">
+                            <TextBox
+                                x:Name="InventoryThresholdEditor"
+                                AutomationProperties.Name="Порог свободного места"
+                                Style="{DynamicResource Sonar.Input.TextBox}"
+                                Text="{Binding ViewModel.InventorySpaceLowThresholdText, ElementName=Root, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                        </common:SettingItem>
+                    </layout:ResponsiveGrid>
+                </common:SettingsSection>
+            </StackPanel>
+        </common:PageContainer>
+    </common:PageScrollViewer>
+</UserControl>

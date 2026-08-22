@@ -1,0 +1,12 @@
+<Window
+    x:Class="Sonar.Fishing.Host.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:shell="clr-namespace:Sonar.Fishing.Host.Shell"
+    AutomationProperties.Name="Sonar Fishing"
+    Height="760"
+    Title="Sonar Fishing"
+    Width="1120"
+    WindowStartupLocation="CenterScreen">
+    <shell:FishingHostShell ViewModel="{Binding}" />
+</Window>

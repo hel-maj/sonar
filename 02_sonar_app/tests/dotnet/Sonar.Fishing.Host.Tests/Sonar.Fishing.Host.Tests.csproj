@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Sonar.Fishing.Host.Tests</AssemblyName>
+    <RootNamespace>Sonar.Fishing.Host.Tests</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\dotnet\Sonar.Fishing.Host\Sonar.Fishing.Host.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\fixtures\telegram\inbound_router.tsv"
+          Link="Fixtures\telegram\inbound_router.tsv"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\fixtures\licensing\signed-entitlement-v1.properties"
+          Link="Fixtures\Licensing\signed-entitlement-v1.properties"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\fixtures\licensing\signed-entitlement-v1-body.hex"
+          Link="Fixtures\Licensing\signed-entitlement-v1-body.hex"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\fixtures\licensing\signed-entitlement-v1-public.pem"
+          Link="Fixtures\Licensing\signed-entitlement-v1-public.pem"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\fixtures\licensing\keygen-response-v1.properties"
+          Link="Fixtures\Licensing\keygen-response-v1.properties"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\fixtures\licensing\keygen-response-v1-body.hex"
+          Link="Fixtures\Licensing\keygen-response-v1-body.hex"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\fixtures\licensing\keygen-response-v1-public.pem"
+          Link="Fixtures\Licensing\keygen-response-v1-public.pem"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

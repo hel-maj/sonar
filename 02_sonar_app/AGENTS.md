@@ -60,17 +60,19 @@
 - During implementation, run only the smallest relevant set of tests for the
   changed module, bug, contract, and immediate consumers. Do not repeatedly run
   the full suite after intermediate edits.
-- Prefer the project test wrapper for focused feedback:
+- Prefer the owning managed or native target for focused feedback. The stable
+  product wrapper runs the complete offline WPF/C++ suite:
 
   ```powershell
-  python scripts\run_tests.py tests\test_target.py
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
   ```
 
 - After all code and documentation for the task are complete and focused tests
   pass, run the full relevant offline suite once as the final quality gate:
 
   ```powershell
-  python scripts\run_tests.py
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_native.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_native.ps1
   ```
 
 - If the final suite exposes a failure, fix it, rerun the affected focused
@@ -109,10 +111,10 @@
   repetition counts. State the exact meaning and order before every capture;
   always use clearly announced start and finish cues.
 
-## GTA/Majestic Memory Dumps
+## GTA/Majestic observations
 
-- Use `python -m sonar.tools.dump_process_memory` from `02_sonar_app` for repeatable process memory snapshots.
-- Prefer `--mode map`, `--mode cache`, `--mode near-player`, or a small `--max-total-mb` before any full `GTA5.exe` dump. Full readable GTA memory can be many gigabytes.
-- Use `--interactive` for manual before/after game actions and `--compare LEFT RIGHT` for JSON diffs.
-- Dumps are written under the repository-local `logs\chat_memory` directory by default.
-- See `docs/guides/memory_dump_utility.md` for command examples and caveats.
+- Product Python memory/capture utilities were retired with the native cutover.
+- Use only the C++ observation adapters and frozen language-neutral fixtures
+  documented by the owning native capability.
+- Live target attach, capture or input always requires a fresh readiness gate;
+  ordinary setup, test and build commands remain offline.

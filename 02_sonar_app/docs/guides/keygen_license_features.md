@@ -32,7 +32,8 @@
 
 ## Доступные группы
 
-Группы задаются в коде в `src\sonar\license\features.py`.
+Группы задаются в
+`src/dotnet/Sonar.Fishing.Host/Licensing/FishingKeygenLicenseVerifier.cs`.
 
 Текущая схема:
 
@@ -43,7 +44,8 @@
 - `promo` - сейчас копирует `premium`.
 - `admin` и `owner` - полный доступ.
 
-Если группы надо поменять, править надо `GROUP_FEATURES` в `features.py`.
+Если группы надо поменять, изменяется product-owned `GroupFeatures` catalog в
+этом managed verifier и повторяются licensing tests.
 
 ## Доступные features
 

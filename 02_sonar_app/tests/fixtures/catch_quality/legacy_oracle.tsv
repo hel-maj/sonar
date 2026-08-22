@@ -1,0 +1,32 @@
+case_id	operation	input_kind	input	expected_kind	expected
+normalize-none	normalize	none	-	none	-
+normalize-empty	normalize	empty	-	none	-
+normalize-whitespace	normalize	text	   	empty	-
+normalize-modest-label	normalize	text	Скромный улов	text	Скромный улов
+normalize-modest-fragment	normalize	text	скромнЫЙ	text	Скромный улов
+normalize-good-label	normalize	text	Хороший улов	text	Хороший улов
+normalize-good-punctuation	normalize	text	ХО-РОШИЙ	text	Хороший улов
+normalize-record-fragment	normalize	text	Рекорд	text	Рекордный улов
+normalize-trophy-label	normalize	text	Трофейная	text	Трофейная
+normalize-trophy-spaced	normalize	text	Т Р О Ф	text	Трофейная
+normalize-trophy-underscore	normalize	text	троф_ейная	text	Трофейная
+normalize-unknown-collapse	normalize	text	  Неизвестный   улов  	text	Неизвестный улов
+normalize-unknown-punctuation	normalize	text	  ???  	text	???
+normalize-latin-unknown	normalize	text	GOOD	text	GOOD
+normalize-cyrillic-yo-unknown	normalize	text	ЁЛКА	text	ЁЛКА
+normalize-priority-good-before-trophy	normalize	text	Трофейная и хороший	text	Хороший улов
+normalize-priority-modest-first	normalize	text	Рекордный, скромный	text	Скромный улов
+key-none	key	none	-	text	unknown
+key-empty	key	empty	-	text	unknown
+key-modest	key	text	Скромный улов	text	modest
+key-good	key	text	Хороший улов	text	good
+key-record	key	text	Рекордный улов	text	record
+key-trophy	key	text	Трофейная	text	trophy
+key-case-sensitive	key	text	трофейная	text	unknown
+key-whitespace-sensitive	key	text	 Трофейная 	text	unknown
+label-modest	label	text	modest	text	Скромный улов
+label-good	label	text	good	text	Хороший улов
+label-record	label	text	record	text	Рекордный улов
+label-trophy	label	text	trophy	text	Трофейная
+label-empty	label	empty	-	text	Не распознано
+label-unknown	label	text	legendary	text	Не распознано

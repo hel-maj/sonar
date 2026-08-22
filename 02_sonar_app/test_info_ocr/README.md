@@ -1,28 +1,9 @@
-# test_info_ocr
+# Historical item-info OCR evidence
 
-Диагностический прогон OCR описаний предметов.
+Этот каталог хранит только nonshipping language-neutral screenshots и
+результаты старого characterization прогона. Исполняемый legacy detector
+удален; каталог не входит в build graph или release bundle.
 
-Скрипт не содержит своей копии логики обрезки/чтения. Он напрямую использует `sonar.fishing.item_info.ItemInfoDetector`, то есть тот же детектор, что использует бот при наведении на предмет.
-
-## Как использовать
-
-1. Положи скриншоты в `test_info_ocr/screenshots`.
-2. Запусти из корня проекта:
-
-```bash
-python test_info_ocr/run.py
-```
-
-Результаты появятся в `test_info_ocr/results`:
-
-- `results/slices` - нарезанные описания предметов;
-- `results/results.csv` - табличный результат;
-- `results/results.json` - полный результат;
-- `results/results.txt` - быстрый текстовый просмотр;
-- `results/mismatch_report.txt` и `results/mismatch_report.csv` - сравнение с `tests/fixtures/inventory_item_info/metadata.csv`, если эталонные данные есть в проекте.
-
-## Важно
-
-В `screenshots` надо класть именно полноэкранные скриншоты инвентаря, а не готовые кропы описаний. Скрипт сам ищет блок описания предмета, нарезает его и складывает результат в `results/slices`.
-
-Если результат в `results.txt` или `results.csv` отличается от текста на скриншоте, значит проблема находится в общей логике `ItemInfoDetector`, а не в диагностическом скрипте.
+Канонические test inputs находятся в
+`tests/fixtures/inventory_item_info`. Новая production capability должна
+потреблять их через C++ detector tests и не добавлять script/runtime adapter.

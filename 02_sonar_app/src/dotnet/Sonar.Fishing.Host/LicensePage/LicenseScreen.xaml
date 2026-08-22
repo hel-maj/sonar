@@ -1,0 +1,85 @@
+<UserControl
+    x:Class="Sonar.Fishing.Host.LicensePage.LicenseScreen"
+    x:Name="Root"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
+    xmlns:layout="clr-namespace:Sonar.UI.Wpf.Layout;assembly=Sonar.UI.Wpf"
+    AutomationProperties.Name="Лицензия"
+    HorizontalContentAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
+    <common:PageScrollViewer>
+        <common:PageContainer>
+            <StackPanel>
+                <common:PageHeader
+                    x:Name="LicenseHeader"
+                    Title="Лицензия"
+                    Subtitle="Активируйте ключ и проверьте доступные функции">
+                    <common:PageHeader.Status>
+                        <common:StatusBadge
+                            Content="{Binding ViewModel.StatusText, ElementName=Root}"
+                            Tone="{Binding ViewModel.StatusTone, ElementName=Root}" />
+                    </common:PageHeader.Status>
+                </common:PageHeader>
+
+                <common:NotificationBanner
+                    Margin="0,24,0,0"
+                    Header="Проверка лицензии"
+                    Tone="{Binding ViewModel.ActivationTone, ElementName=Root}">
+                    <TextBlock
+                        Text="{Binding ViewModel.ActivationMessage, ElementName=Root}"
+                        TextWrapping="Wrap" />
+                </common:NotificationBanner>
+
+                <common:SettingsSection
+                    Margin="0,24,0,0"
+                    Header="Ключ лицензии"
+                    Description="Введите ключ с активной подпиской.">
+                    <StackPanel>
+                        <PasswordBox
+                            x:Name="LicenseKeyEditor"
+                            AutomationProperties.Name="Ключ лицензии"
+                            IsEnabled="{Binding ViewModel.CanActivate, ElementName=Root}"
+                            Style="{DynamicResource Sonar.Input.PasswordBox}" />
+                        <common:ActionButton
+                            x:Name="ActivateLicenseButton"
+                            Margin="0,12,0,0"
+                            HorizontalAlignment="Left"
+                            AutomationProperties.Name="Активировать лицензию"
+                            Click="OnActivateLicense"
+                            Content="{Binding ViewModel.ActivateButtonText, ElementName=Root}"
+                            IsEnabled="{Binding ViewModel.CanActivate, ElementName=Root}"
+                            Role="Primary" />
+                    </StackPanel>
+                </common:SettingsSection>
+
+                <layout:ResponsiveGrid Margin="0,24,0,0">
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="4"
+                        Label="Лицензия"
+                        Value="{Binding ViewModel.LicenseId, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="4"
+                        layout:ResponsiveGrid.ExpandedSpan="4"
+                        Label="Подписка"
+                        Value="{Binding ViewModel.Subscription, ElementName=Root}" />
+                    <common:MetricCard
+                        layout:ResponsiveGrid.CompactSpan="4"
+                        layout:ResponsiveGrid.MediumSpan="8"
+                        layout:ResponsiveGrid.ExpandedSpan="4"
+                        Label="Действует до"
+                        Value="{Binding ViewModel.ExpiresAt, ElementName=Root}" />
+                </layout:ResponsiveGrid>
+
+                <common:Card Margin="0,24,0,0" Header="Доступные функции">
+                    <TextBlock
+                        Text="{Binding ViewModel.FeatureSummary, ElementName=Root}"
+                        TextWrapping="Wrap" />
+                </common:Card>
+            </StackPanel>
+        </common:PageContainer>
+    </common:PageScrollViewer>
+</UserControl>
