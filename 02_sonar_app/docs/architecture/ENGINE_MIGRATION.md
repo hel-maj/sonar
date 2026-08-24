@@ -538,6 +538,17 @@ SonarFishingOfflineEngine
   -> installed Sonar::PlatformIpcTransport 0.1.1
 ```
 
+Private Engine executable composition is capability-first inside
+`native/engine_ipc/src`: `engine_bootstrap` owns environment admission and
+pair identity, `engine_protocol` owns framing/handshake/header validation,
+`settings_commands` and `entitlement_commands` own their typed command
+mapping, `session_commands` owns start/stop and aggregate snapshot projection,
+`diagnostic_commands` owns read-only migration diagnostics, and
+`engine_runtime` owns the serialized dispatch loop. `main.cpp` is only the
+process entrypoint. These files are compiled into both production and explicit
+offline targets with their existing target-specific authority definitions;
+they do not add a public library or another runtime owner.
+
 Native CMake использует только immutable installed prefix, переданный через
 `SONAR_COMMON_NATIVE_PACKAGE`; Common source/include checkout paths отсутствуют.
 Если parameter/environment не заданы, product test entrypoint использует
@@ -600,10 +611,10 @@ Phase 5 removed temporary Common duplicates:
   validation удалена;
 - child назначается в `Sonar.Platform.Processes.KillOnCloseJob` до handshake;
   product-local `Process.Kill` cleanup удален;
-- native `main.cpp` пока локально читает bootstrap environment; это остается
-  product composition до отдельного safe bootstrap API. Generic accepted и
-  session-header validation уже принадлежат Common. Fishing сохраняет typed
-  request handler и catch-quality invariant;
+- private `engine_ipc/engine_bootstrap.cpp` читает product bootstrap
+  environment; это остается product composition до отдельного safe bootstrap
+  API. Generic accepted и session-header validation уже принадлежат Common.
+  Fishing сохраняет typed command handlers и catch-quality invariant;
 - Host сохраняет только product process arguments/environment composition,
   typed Fishing command/result, correlation и operation ordering.
 

@@ -110,9 +110,20 @@ target_compile_options(SonarFishingProductionComposition
     PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
 )
 
+set(SONAR_FISHING_ENGINE_RUNTIME_SOURCES
+    src/main.cpp
+    src/diagnostic_commands.cpp
+    src/engine_bootstrap.cpp
+    src/engine_protocol.cpp
+    src/engine_runtime.cpp
+    src/entitlement_commands.cpp
+    src/session_commands.cpp
+    src/settings_commands.cpp
+)
+
 if(SONAR_FISHING_BUILD_OFFLINE_IPC)
     add_executable(SonarFishingOfflineEngine
-        src/main.cpp
+        ${SONAR_FISHING_ENGINE_RUNTIME_SOURCES}
     )
     target_compile_features(SonarFishingOfflineEngine PRIVATE cxx_std_20)
     target_link_libraries(SonarFishingOfflineEngine
@@ -139,7 +150,7 @@ if(SONAR_FISHING_BUILD_OFFLINE_IPC)
 endif()
 
 add_executable(SonarFishingEngine
-    src/main.cpp
+    ${SONAR_FISHING_ENGINE_RUNTIME_SOURCES}
 )
 set_target_properties(SonarFishingEngine PROPERTIES OUTPUT_NAME "Sonar.Engine")
 target_compile_features(SonarFishingEngine PRIVATE cxx_std_20)
