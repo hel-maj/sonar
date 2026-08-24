@@ -51,7 +51,7 @@ struct inventory_observation final {
 };
 
 struct inventory_store_request final {
-  std::string inventory_hotkey{"i"};
+  std::string inventory_hotkey{"tab"};
   std::string fishing_entry_hotkey{"e"};
   std::vector<std::string> fish_to_store;
   bool open_inventory{true};

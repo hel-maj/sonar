@@ -18,6 +18,7 @@ internal static class FishingProductModelTests
         new("settings_draft_updates_fish_policy_without_losing_other_policy", SettingsDraftPreservesPolicy),
         new("settings_draft_defers_newer_external_revision_until_discard", SettingsDraftDefersExternalRevision),
         new("settings_draft_blocks_semantically_duplicate_hotkeys", SettingsDraftBlocksHotkeyConflict),
+        new("production_default_inventory_hotkey_is_tab", ProductionDefaultInventoryHotkeyIsTab),
         new("common_hotkey_shortcut_round_trips_unmodified_product_defaults", PlainHotkeysUseCommonShortcut),
     ];
 
@@ -211,12 +212,22 @@ internal static class FishingProductModelTests
 
         TestAssert.True(
             shortcuts.Select(shortcut => shortcut.ToInvariantString()).SequenceEqual(
-                ["I", "E", "R", "Q", "T"],
+                ["Tab", "E", "R", "Q", "T"],
                 StringComparer.OrdinalIgnoreCase),
             "Common shortcut contract did not preserve the unmodified product hotkeys");
         TestAssert.True(
             shortcuts.All(shortcut => !string.IsNullOrWhiteSpace(shortcut.ToDisplayString())),
             "Common shortcut contract rendered an unmodified product hotkey as empty");
+    }
+
+    private static void ProductionDefaultInventoryHotkeyIsTab()
+    {
+        var defaults = FishingRuntimeSettings.CreateDefault();
+
+        TestAssert.Equal("Tab", defaults.Hotkeys.Inventory,
+            "Production inventory hotkey default is not the confirmed Majestic binding");
+        TestAssert.Equal("Tab", HotkeyGesture.ParseInvariant(defaults.Hotkeys.Inventory).ToInvariantString(),
+            "Common hotkey contract changed the canonical inventory binding");
     }
 
     private static FishingEventSnapshot CreateEvent(ulong sequence) => new(

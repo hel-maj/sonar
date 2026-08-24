@@ -82,7 +82,7 @@ public sealed class LegacyJsonSettingsMigrator
                 Boolean(source, "stream_snapshot_mode", false)),
             new FishingHotkeys(
                 Hotkey(source, "hotkey", "F9"),
-                Hotkey(source, "inventory_hotkey", "i"),
+                Hotkey(source, "inventory_hotkey", "Tab"),
                 Hotkey(source, "use_item_hotkey", "e"),
                 Hotkey(source, "backpack_move_hotkey", "r"),
                 Hotkey(source, "discard_key", "q"),

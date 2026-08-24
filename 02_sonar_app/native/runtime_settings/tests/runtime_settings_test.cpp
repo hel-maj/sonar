@@ -38,6 +38,13 @@ void hotkey_contract_is_strict_and_stable() {
   require(!settings::IsValidHotkey("ctrl + t"), "spacey_wire_value_accepted");
 }
 
+void production_defaults_use_canonical_inventory_tab() {
+  const settings::RuntimeSettingsSnapshot defaults;
+  require(
+      defaults.inventory_hotkey == "tab",
+      "production_inventory_hotkey_default_changed");
+}
+
 void full_snapshot_applies_atomically() {
   settings::RuntimeSettingsOwner owner;
   auto first = valid_snapshot(1);
@@ -117,6 +124,7 @@ void invalid_policy_values_fail_closed() {
 
 int run() {
   hotkey_contract_is_strict_and_stable();
+  production_defaults_use_canonical_inventory_tab();
   full_snapshot_applies_atomically();
   stale_and_equal_revisions_are_rejected();
   invalid_policy_values_fail_closed();

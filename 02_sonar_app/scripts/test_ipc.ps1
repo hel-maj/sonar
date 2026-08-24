@@ -602,7 +602,7 @@ $inventoryStoreFixture = Join-Path $productRoot "tests\fixtures\inventory_store\
 if (-not (Test-Path -LiteralPath $inventoryStoreFixture -PathType Leaf)) {
     throw "Pinned inventory-store episode fixture is missing: $inventoryStoreFixture"
 }
-$expectedInventoryStoreFixtureHash = "FE747957DC7CEE960CB13BFC25D4D4725A9491F7D33A6E98C4A132688088E062"
+$expectedInventoryStoreFixtureHash = "CE748E406FC4CD65FAA5B136BBAD7A8E0BE1B592F2953F1754451955614DF92D"
 $actualInventoryStoreFixtureHash =
     (Get-FileHash -LiteralPath $inventoryStoreFixture -Algorithm SHA256).Hash
 if ($actualInventoryStoreFixtureHash -ne $expectedInventoryStoreFixtureHash) {
@@ -670,7 +670,7 @@ $maintenanceEpisodeFixture = Join-Path $productRoot "tests\fixtures\maintenance_
 if (-not (Test-Path -LiteralPath $maintenanceEpisodeFixture -PathType Leaf)) {
     throw "Pinned maintenance-episode fixture is missing: $maintenanceEpisodeFixture"
 }
-$expectedMaintenanceEpisodeFixtureHash = "F4ED4238EEDB677620C4AFEABCAAEEA62F61EA97F33775567643269376BF7BBA"
+$expectedMaintenanceEpisodeFixtureHash = "11A96DCC27B652E33143A8BDB031B01FC85D450890A524C4D59060709AEBB472"
 $actualMaintenanceEpisodeFixtureHash =
     (Get-FileHash -LiteralPath $maintenanceEpisodeFixture -Algorithm SHA256).Hash
 if ($actualMaintenanceEpisodeFixtureHash -ne $expectedMaintenanceEpisodeFixtureHash) {

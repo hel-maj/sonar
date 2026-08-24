@@ -52,7 +52,7 @@ struct RuntimeSettingsSnapshot {
   FoodDepletedAction food_depleted_action =
       FoodDepletedAction::continue_fishing;
   std::string start_stop_hotkey = "F9";
-  std::string inventory_hotkey = "i";
+  std::string inventory_hotkey = "tab";
   std::string use_item_hotkey = "e";
   std::string backpack_move_hotkey = "r";
   std::string discard_hotkey = "q";

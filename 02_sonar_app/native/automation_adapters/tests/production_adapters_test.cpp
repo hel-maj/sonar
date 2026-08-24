@@ -563,12 +563,13 @@ void one_session_lease_guards_catch_and_inventory(IWICImagingFactory& factory) {
   const auto inventory_result = mutation->apply({
       .kind = inventory::inventory_intent_kind::press_key,
       .expected_observation_sequence = 2U,
-      .key = "i",
+      .key = "tab",
       .packet_count = 2U,
   }, {});
   require(inventory_result.applied && gate.claims.size() == 2U &&
           sink.intents.size() == 2U &&
-          sink.intents.back().kind == platform::mutation_kind::press_key,
+          sink.intents.back().kind == platform::mutation_kind::press_key &&
+          sink.intents.back().primary == "tab",
       "production_inventory_mutation_not_guarded");
   mutation.reset();
   require(!leases.owned() && !sink.intents.empty() &&

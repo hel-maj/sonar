@@ -70,7 +70,9 @@ OCR/template assets, Common packet budget, entitlement transport или Host UI.
   требует bounded HUD/status confirmation. `continue` отключает дальнейший
   meal search до ручного restart; `stop`, `exit_game`, `shutdown_pc` становятся
   typed terminal intent и подавляют fishing resume.
-- Закрытие использует фактический `inventory_hotkey`, а не literal `i`.
+- Production default открытия и закрытия inventory — canonical `tab`. Эпизод
+  всегда использует фактически сохранённый `inventory_hotkey`, поэтому валидная
+  пользовательская перенастройка не подменяется default-значением.
 
 ### E17 garbage disposal
 

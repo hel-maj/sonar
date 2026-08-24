@@ -555,7 +555,7 @@ void test_other_item_loss_does_not_confirm_target_removal() {
           "wrong_item_loss_recovery_changed");
 }
 
-void test_open_retry_is_bounded() {
+void test_default_inventory_tab_open_retry_is_bounded() {
   std::vector<inventory::inventory_observation> source;
   for (std::uint64_t sequence = 1; sequence <= 9; ++sequence) {
     source.push_back(observation(
@@ -577,9 +577,9 @@ void test_open_retry_is_bounded() {
           mutation.intents.end(),
           [](const auto& intent) {
             return intent.kind == inventory::inventory_intent_kind::press_key &&
-                intent.key == "i";
+                intent.key == "tab";
           }) == 2,
-      "open_retry_attempt_bound_changed");
+      "default_inventory_tab_open_retry_changed");
 }
 
 void test_cancellation_and_invalid_request_are_input_free() {
@@ -623,7 +623,7 @@ int main() {
     test_disabled_adapter_is_fail_closed();
     test_removal_timeout_runs_bounded_cleanup();
     test_other_item_loss_does_not_confirm_target_removal();
-    test_open_retry_is_bounded();
+    test_default_inventory_tab_open_retry_is_bounded();
     test_cancellation_and_invalid_request_are_input_free();
     std::cout << "inventory store tests passed\n";
     return 0;

@@ -109,7 +109,7 @@ static async Task OfflineHostNativeEngineRoundTrip()
             AutoMeal = false,
             OverweightAction = OverweightPolicyAction.Release,
         },
-        new FishingHotkeys("F10", "i", "e", "r", "q", "t"),
+        new FishingHotkeys("F10", "Tab", "e", "r", "q", "t"),
         new FishingSelectionPolicy(
             new Dictionary<string, bool> { ["marlin"] = true },
             new Dictionary<string, bool> { ["bag"] = true },

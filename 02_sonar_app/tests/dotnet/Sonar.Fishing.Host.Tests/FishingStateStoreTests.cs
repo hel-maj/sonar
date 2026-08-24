@@ -21,6 +21,7 @@ internal static class FishingStateStoreTests
         new("state_dat_schema_v1_defaults_telegram_sound_policy", SchemaV1DefaultsTelegramSounds),
         new("dpapi_current_user_secret_round_trip", DpapiRoundTrip),
         new("legacy_json_settings_migrate_once_into_state_dat", LegacyJsonMigration),
+        new("legacy_json_inventory_hotkey_preserves_nonempty_value", LegacyInventoryHotkeyIsPreserved),
         new("host_startup_owns_exact_config_state_dat_path", HostStartupOwnsExactStatePath),
         new("host_startup_error_hides_internal_storage_path", HostStartupErrorHidesInternalPath),
         new("state_coordinator_serializes_custom_price_revision", CoordinatorSerializesCustomPrice),
@@ -216,6 +217,8 @@ internal static class FishingStateStoreTests
         TestAssert.Equal(1, migrated.Fishing.Thresholds.Health, "Legacy health reconstruction changed");
         TestAssert.Equal(OverweightPolicyAction.Release, migrated.Fishing.Behavior.OverweightAction, "Overweight action changed");
         TestAssert.Equal(FoodDepletedPolicyAction.ShutdownPc, migrated.Fishing.Behavior.FoodDepletedAction, "Food action changed");
+        TestAssert.Equal("Tab", migrated.Fishing.Hotkeys.Inventory,
+            "Missing legacy inventory hotkey did not use the confirmed production fallback");
         TestAssert.True(!migrated.Fishing.Selection.FishKeep["marlin"], "Fish policy changed");
         TestAssert.Equal(701.5, migrated.Fishing.Selection.CustomFishPrices["marlin"], "Custom price changed");
         TestAssert.True(!migrated.Fishing.Selection.CustomFishPrices.ContainsKey("bad"), "Invalid custom price migrated");
@@ -232,6 +235,25 @@ internal static class FishingStateStoreTests
         TestAssert.True(
             !Directory.EnumerateFiles(sandbox.Path, "*_settings.json").Any(),
             "Legacy JSON files remained after verified migration");
+    }
+
+    private static void LegacyInventoryHotkeyIsPreserved()
+    {
+        using var sandbox = new TemporaryDirectory();
+        File.WriteAllText(
+            System.IO.Path.Combine(sandbox.Path, "fishing_settings.json"),
+            """
+            {
+              "inventory_hotkey": "i"
+            }
+            """);
+        var store = new FishingStateStore(sandbox.Path, new TestSecretProtector());
+
+        var migrated = new LegacyJsonSettingsMigrator(sandbox.Path)
+            .LoadMigrateOrCreate(store);
+
+        TestAssert.Equal("i", migrated.Fishing.Hotkeys.Inventory,
+            "Valid nonempty legacy inventory hotkey was overwritten by the new fallback");
     }
 
     private static void HostStartupOwnsExactStatePath()

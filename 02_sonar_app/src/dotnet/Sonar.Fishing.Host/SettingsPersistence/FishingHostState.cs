@@ -180,7 +180,7 @@ public sealed record FishingRuntimeSettings(
             EquipmentDepletedPolicyAction.Stop,
             FoodDepletedPolicyAction.Continue,
             StreamSnapshotMode: false),
-        new FishingHotkeys("F9", "i", "e", "r", "q", "t"),
+        new FishingHotkeys("F9", "Tab", "e", "r", "q", "t"),
         new FishingSelectionPolicy(
             FishingFishCatalog.AllIds.Select(fishId =>
                 new KeyValuePair<string, bool>(fishId, true)),
