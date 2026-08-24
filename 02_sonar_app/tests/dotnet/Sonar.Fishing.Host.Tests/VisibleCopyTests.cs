@@ -38,6 +38,9 @@ internal static class VisibleCopyAudit
             @"(?i)(?:эта\s+[^.]{0,40}страниц\w*\s+(?:показыва|отображ)|" +
             @"на\s+этой\s+страниц\w*|здесь\s+(?:показыва|отображ))",
             RegexOptions.CultureInvariant)),
+        ("manual-restart", new Regex(
+            @"(?i)перезапустите\s+(?:приложение|программу)",
+            RegexOptions.CultureInvariant)),
         ("unlocalized-state", new Regex(
             @"(?i)^\s*(?:Empty|Loading|Error|Unavailable)\s*$",
             RegexOptions.CultureInvariant)),

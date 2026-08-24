@@ -219,6 +219,9 @@ class readonly_memory_session {
   [[nodiscard]] virtual bool read_exact(
       std::uintptr_t address,
       std::span<std::byte> destination) noexcept = 0;
+  [[nodiscard]] virtual std::optional<
+      sonar::platform::windows::memory_region_snapshot>
+  query_region(std::uintptr_t address) noexcept = 0;
   [[nodiscard]] virtual bool generation_current() noexcept = 0;
 };
 
@@ -282,9 +285,9 @@ class memory_observer final {
   std::uint64_t last_sequence_{};
 };
 
-inline constexpr std::uint32_t embedded_build_profile_schema_version = 1U;
+inline constexpr std::uint32_t embedded_build_profile_schema_version = 2U;
 inline constexpr std::string_view embedded_build_profile_registry_sha256 =
-    "C75D8FD4F07C33D59E97F3C1D675EECF2AE7D9AEFCAB6FAA85F2207DB3817331";
+    "A49D7CE5FE04EB3E5B24DCC717A5AF160E315D0C9449DA725B1578A643F9EB8C";
 
 // Product-owned, immutable pattern data for one exact game image. The
 // registry is embedded into Sonar.Engine.exe; no loose profile or mutable
@@ -294,6 +297,33 @@ struct relative_pointer_pattern final {
   std::size_t displacement_offset{};
   std::size_t instruction_length{};
   std::vector<std::size_t> dereference_offsets;
+};
+
+struct masked_memory_pattern final {
+  std::vector<std::int16_t> bytes;
+};
+
+struct embedded_inventory_signal final {
+  std::size_t offset{};
+  inventory_candidate candidate;
+};
+
+// A binding is admitted only as part of one exact executable profile. Empty
+// optional state means that the build has no production inventory authority;
+// it is not permission to reuse a loose development profile or stale address.
+struct embedded_inventory_binding final {
+  std::uintptr_t minimum_address_inclusive{};
+  std::uintptr_t maximum_address_exclusive{};
+  std::size_t maximum_scanned_bytes{};
+  std::size_t maximum_region_bytes{};
+  std::size_t maximum_enumerated_regions{};
+  std::size_t maximum_pattern_hits{};
+  std::size_t slot_stride{};
+  std::size_t slot_count{};
+  masked_memory_pattern slot_pattern;
+  std::vector<embedded_inventory_signal> signals;
+  std::size_t minimum_votes{6U};
+  double minimum_confidence{0.85};
 };
 
 struct embedded_memory_build_profile final {
@@ -307,6 +337,7 @@ struct embedded_memory_build_profile final {
   std::size_t fish_active_offset{};
   std::vector<relative_pointer_pattern> world_patterns;
   relative_pointer_pattern replay_pattern;
+  std::optional<embedded_inventory_binding> inventory_binding;
 };
 
 struct build_profile_selection final {
@@ -323,11 +354,38 @@ embedded_memory_build_profiles() noexcept;
     std::wstring_view image_name,
     std::string_view image_sha256) noexcept;
 
+[[nodiscard]] build_profile_selection select_memory_build_profile(
+    std::span<const embedded_memory_build_profile> profiles,
+    std::wstring_view image_name,
+    std::string_view image_sha256) noexcept;
+
 [[nodiscard]] std::string embedded_memory_build_profile_canonical_tsv();
 
 struct resolved_memory_capture final {
   std::optional<memory_observation_profile> profile;
   std::optional<capture_plan> plan;
+  std::string registry_sha256;
+  std::string reason;
+
+  [[nodiscard]] bool ready() const noexcept;
+};
+
+enum class inventory_binding_failure : std::uint8_t {
+  none,
+  profile_unavailable,
+  region_enumeration_failed,
+  scan_incomplete,
+  signature_unresolved,
+  signature_ambiguous,
+  signature_changed,
+  process_changed,
+  internal_error,
+};
+
+struct resolved_inventory_capture final {
+  std::optional<memory_observation_profile> profile;
+  std::optional<capture_plan> plan;
+  inventory_binding_failure failure{inventory_binding_failure::none};
   std::string registry_sha256;
   std::string reason;
 
@@ -340,8 +398,17 @@ struct resolved_memory_capture final {
 class memory_capture_plan_resolver final {
  public:
   explicit memory_capture_plan_resolver(memory_connector& connector) noexcept;
+  memory_capture_plan_resolver(
+      memory_connector& connector,
+      std::span<const embedded_memory_build_profile> profiles) noexcept;
 
   [[nodiscard]] resolved_memory_capture resolve_reeling(
+      std::uint64_t sequence,
+      std::uint64_t captured_at_steady_ns,
+      const sonar::platform::windows::process_generation& game_generation)
+      noexcept;
+
+  [[nodiscard]] resolved_inventory_capture resolve_inventory(
       std::uint64_t sequence,
       std::uint64_t captured_at_steady_ns,
       const sonar::platform::windows::process_generation& game_generation)
@@ -350,7 +417,12 @@ class memory_capture_plan_resolver final {
   void reset() noexcept;
 
  private:
+  [[nodiscard]] std::string prepare_session(
+      const sonar::platform::windows::process_generation& game_generation)
+      noexcept;
+
   memory_connector& connector_;
+  std::span<const embedded_memory_build_profile> profiles_;
   std::unique_ptr<readonly_memory_session> session_;
   const embedded_memory_build_profile* build_profile_{};
   sonar::platform::windows::process_generation generation_;
@@ -361,8 +433,14 @@ class memory_capture_plan_resolver final {
   std::uintptr_t fish_address_{};
   std::uintptr_t fish_hash_address_{};
   std::size_t player_right_offset_{};
+  std::vector<std::uintptr_t> inventory_signature_hits_;
+  inventory_binding_failure inventory_last_failure_{
+      inventory_binding_failure::none};
+  std::uint64_t inventory_retry_after_steady_ns_{};
 };
 
 [[nodiscard]] std::string_view to_string(capture_failure value) noexcept;
+[[nodiscard]] std::string_view to_string(
+    inventory_binding_failure value) noexcept;
 
 }  // namespace sonar::fishing::memory_observation

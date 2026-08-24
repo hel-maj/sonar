@@ -210,7 +210,7 @@ public sealed class EngineHealthViewModel : ObservableObject
             SetState(
                 EngineHealthPhase.Failed,
                 "Проверка не пройдена",
-                "Перезапустите приложение и повторите проверку.",
+                "Восстановление продолжается автоматически. Повторите проверку через несколько секунд.",
                 "Ошибка",
                 SemanticTone.Danger);
         }

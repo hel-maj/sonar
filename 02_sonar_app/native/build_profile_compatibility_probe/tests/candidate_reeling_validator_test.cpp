@@ -120,6 +120,12 @@ class fake_session final : public memory::readonly_memory_session {
     return state_->generation_current;
   }
 
+  [[nodiscard]] std::optional<
+      sonar::platform::windows::memory_region_snapshot>
+  query_region(std::uintptr_t) noexcept override {
+    return std::nullopt;
+  }
+
  private:
   std::shared_ptr<fake_state> state_;
 };

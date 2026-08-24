@@ -189,6 +189,7 @@ inventory_store::inventory_observation production_frame_observer::observe(
   // owner of item/context geometry, but OCR/title pixels never authorize an
   // open or closed state and unknown is never collapsed into closed.
   const auto memory = implementation_->memory.capture(
+      memory_capture_scope::inventory_state,
       frame->sequence,
       frame->captured_at_steady_ns,
       frame->target.process);
@@ -240,10 +241,9 @@ inventory_store::inventory_observation production_frame_observer::observe(
       .changed_bait_visible = visual.changed_bait_visible,
       .gear_visible = visual.gear_visible,
   };
-  // The supported build profile decodes player/inventory state coherently in
-  // every stage, not only while reeling. Reeling evidence remains optional;
-  // player status is retained for the immediately following maintenance
-  // decision without a Host round trip.
+  // Inventory state uses its own memory scope and never depends on an active
+  // fish. Geometry still comes from the frame; absent exact build binding stays
+  // unknown instead of falling back to OCR/title pixels.
   if (coherent_memory) {
     implementation_->current.reeling = memory.snapshot->reeling;
     implementation_->current.player_status = memory.snapshot->player_status;

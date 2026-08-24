@@ -128,10 +128,12 @@ class guarded_fishing_mutation_session final
 }  // namespace
 
 memory_snapshot_result unavailable_fishing_memory_source::capture(
+    const memory_capture_scope scope,
     const std::uint64_t sequence,
     const std::uint64_t captured_at_steady_ns,
     const sonar::platform::windows::process_generation& game_generation)
     noexcept {
+  static_cast<void>(scope);
   static_cast<void>(sequence);
   static_cast<void>(captured_at_steady_ns);
   static_cast<void>(game_generation);
@@ -150,6 +152,7 @@ resolved_fishing_memory_source::resolved_fishing_memory_source(
 }
 
 memory_snapshot_result resolved_fishing_memory_source::capture(
+    const memory_capture_scope scope,
     const std::uint64_t sequence,
     const std::uint64_t captured_at_steady_ns,
     const sonar::platform::windows::process_generation& game_generation)
@@ -157,14 +160,39 @@ memory_snapshot_result resolved_fishing_memory_source::capture(
   if (!resolver_ || !observer_) {
     return {.reason = "production_memory_connector_unavailable"};
   }
-  auto resolved = resolver_->resolve_reeling(
-      sequence, captured_at_steady_ns, game_generation);
-  if (!resolved.ready()) {
-    return {.reason = resolved.reason.empty()
-        ? "production_memory_profile_unavailable"
-        : std::move(resolved.reason)};
+  std::optional<memory_observation::memory_observation_profile> profile;
+  std::optional<memory_observation::capture_plan> plan;
+  std::string resolution_reason;
+  switch (scope) {
+    case memory_capture_scope::reeling: {
+      auto resolved = resolver_->resolve_reeling(
+          sequence, captured_at_steady_ns, game_generation);
+      if (resolved.ready()) {
+        profile = std::move(resolved.profile);
+        plan = std::move(resolved.plan);
+      } else {
+        resolution_reason = std::move(resolved.reason);
+      }
+      break;
+    }
+    case memory_capture_scope::inventory_state: {
+      auto resolved = resolver_->resolve_inventory(
+          sequence, captured_at_steady_ns, game_generation);
+      if (resolved.ready()) {
+        profile = std::move(resolved.profile);
+        plan = std::move(resolved.plan);
+      } else {
+        resolution_reason = std::move(resolved.reason);
+      }
+      break;
+    }
   }
-  auto captured = observer_->capture(*resolved.profile, *resolved.plan);
+  if (!profile.has_value() || !plan.has_value()) {
+    return {.reason = resolution_reason.empty()
+        ? "production_memory_profile_unavailable"
+        : std::move(resolution_reason)};
+  }
+  auto captured = observer_->capture(*profile, *plan);
   if (!captured.ready()) {
     return {.reason = captured.reason.empty()
         ? "production_memory_capture_unavailable"
@@ -223,6 +251,7 @@ frame_fishing_observer::observe(const std::stop_token stop_token) {
       stage.observation->stage ==
           stage_detection::observed_fishing_stage::reeling) {
     auto memory = memory_.capture(
+        memory_capture_scope::reeling,
         frame.sequence,
         frame.captured_at_steady_ns,
         frame.target.process);

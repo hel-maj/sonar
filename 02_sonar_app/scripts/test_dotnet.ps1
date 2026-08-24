@@ -3,6 +3,7 @@ param(
     [string]$CommonFeed = $env:SONAR_COMMON_FEED,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
     [string]$RenderUiDirectory = "",
+    [switch]$DeveloperFullAccess,
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release"
 )
@@ -22,7 +23,7 @@ $expectedPackages = @{
     "Sonar.Platform.Ipc.NamedPipes.0.1.1.nupkg" = "0CF50FDAFFF00608F0B5742C39A15B3AB24CF79329DA8B07A01404E9F7A45214"
     "Sonar.Platform.Processes.0.1.0.nupkg" = "03DEE12DCB7F2C30A21921A9198CA5388D93A682B8CCE69658CAD0E1996AE5EB"
     "Sonar.Licensing.Verification.0.1.3.nupkg" = "CA1DAC5C5220872F15130C863AB5D12E85709AC19D4972AFC7193C8223FA7518"
-    "Sonar.UI.Wpf.0.2.18.nupkg" = "737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6"
+    "Sonar.UI.Wpf.0.2.19.nupkg" = "37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33"
     "emoji.wpf.0.3.4.nupkg" = "A9C0570F97961E3DC2B2BA9E41EB7B28808733D194742D837653478EECE7D191"
     "stfu.0.1.1.nupkg" = "BDD1BAEEEC5FF16B74D0354B88393D002A6E8ECBB19793AB900B9151CE686B3A"
     "jeremyansel.hlsl.targets.1.0.13.nupkg" = "4F4CC76E9EFD35F605042FB6D8BD64EF1203F2174DED65217779BB049CFB22E8"
@@ -92,7 +93,8 @@ if ($actualProtocHash -ne $expectedProtocHash) {
 $commonFeedProperty = "-p:CommonFeed=$resolvedFeed"
 $protocProperty = "-p:SonarProtocExecutable=$ProtocExecutable"
 $packageCacheProperty = "-p:RestorePackagesPath=$packageCache"
-Invoke-Dotnet @("restore", $testProject, "--nologo", $commonFeedProperty, $protocProperty, $packageCacheProperty)
+$developerProperty = "-p:SonarFishingDeveloperFullAccess=$($DeveloperFullAccess.IsPresent.ToString().ToLowerInvariant())"
+Invoke-Dotnet @("restore", $testProject, "--nologo", $commonFeedProperty, $protocProperty, $packageCacheProperty, $developerProperty)
 foreach ($package in $expectedPackages.GetEnumerator()) {
     $match = [regex]::Match($package.Key, "^(?<id>.+)\.(?<version>\d+\.\d+\.\d+)\.nupkg$")
     if (-not $match.Success) {
@@ -117,7 +119,7 @@ $communityToolkitHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $communityT
 if ($communityToolkitHash -ne $expectedCommunityToolkitHash) {
     throw "Pinned CommunityToolkit.Mvvm package hash mismatch: $communityToolkitHash"
 }
-Invoke-Dotnet @("build", $testProject, "--configuration", $Configuration, "--no-restore", "--nologo", $commonFeedProperty, $protocProperty, $packageCacheProperty)
+Invoke-Dotnet @("build", $testProject, "--configuration", $Configuration, "--no-restore", "--nologo", $commonFeedProperty, $protocProperty, $packageCacheProperty, $developerProperty)
 Invoke-Dotnet @(
     "run",
     "--project", $testProject,
@@ -126,7 +128,8 @@ Invoke-Dotnet @(
     "--no-restore",
     $commonFeedProperty,
     $protocProperty,
-    $packageCacheProperty
+    $packageCacheProperty,
+    $developerProperty
 )
 if (-not [string]::IsNullOrWhiteSpace($RenderUiDirectory)) {
     if (-not [IO.Path]::IsPathRooted($RenderUiDirectory)) {
@@ -142,6 +145,7 @@ if (-not [string]::IsNullOrWhiteSpace($RenderUiDirectory)) {
         $commonFeedProperty,
         $protocProperty,
         $packageCacheProperty,
+        $developerProperty,
         "--",
         "--render-ui", $RenderUiDirectory
     )

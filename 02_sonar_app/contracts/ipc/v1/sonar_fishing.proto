@@ -26,6 +26,7 @@ message Envelope {
     ApplySignedEntitlementResult apply_signed_entitlement_result = 19;
     RevokeSignedEntitlementRequest revoke_signed_entitlement_request = 20;
     RevokeSignedEntitlementResult revoke_signed_entitlement_result = 21;
+    FishingNotificationEvent fishing_notification_event = 22;
   }
 }
 
@@ -256,4 +257,62 @@ message FishingSessionSnapshot {
   uint64 accepted_settings_revision = 9;
   repeated FishStatisticsRowSnapshot fish_rows = 10;
   repeated CatchSizeStatisticsSnapshot catch_sizes = 11;
+}
+
+// Non-authoritative, bounded occurrence events. Common EnvelopeHeader owns the
+// Engine session generation, sequence and capture timestamp. The Engine never
+// persists or replays this stream across a process generation.
+message FishingNotificationEvent {
+  oneof detail {
+    CatchNotification catch_observed = 1;
+    SessionStartedNotification session_started = 2;
+    SessionStoppedNotification session_stopped = 3;
+    MealRecoveredNotification meal_recovered = 4;
+    InventoryFullNotification inventory_full = 5;
+    PlayerStatusNotification player_status = 6;
+    BaitTiredNotification bait_tired = 7;
+    FocusLostNotification focus_lost = 8;
+  }
+}
+
+message CatchNotification {
+  string fish_name = 1;
+  optional double weight_kg = 2;
+  optional string quality_text = 3;
+  bool released = 4;
+  FishingSessionTotals totals = 5;
+  optional uint64 xp_current = 6;
+  optional uint64 xp_total = 7;
+}
+
+message SessionStartedNotification {
+  FishingSessionTotals totals = 1;
+}
+
+message SessionStoppedNotification {
+  FishingSessionTotals totals = 1;
+  optional string reason = 2;
+}
+
+message MealRecoveredNotification {
+  uint32 affected_count = 1;
+  optional PlayerStatusNotification player_status = 2;
+}
+
+message InventoryFullNotification {}
+
+message PlayerStatusNotification {
+  optional int32 food = 1;
+  optional int32 water = 2;
+  optional int32 health = 3;
+  optional double inventory_weight = 4;
+  optional double inventory_weight_max = 5;
+  optional double backpack_weight = 6;
+  optional double backpack_weight_max = 7;
+}
+
+message BaitTiredNotification {}
+
+message FocusLostNotification {
+  string reason = 1;
 }

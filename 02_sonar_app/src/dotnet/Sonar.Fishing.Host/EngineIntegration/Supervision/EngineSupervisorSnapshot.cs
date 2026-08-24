@@ -10,4 +10,5 @@ internal sealed record EngineSupervisorSnapshot(
     TimeSpan BootstrapDuration,
     int RestartCount,
     int FailuresInWindow,
+    TimeSpan LastRestartDelay,
     FishingSessionStateSnapshot SessionState);

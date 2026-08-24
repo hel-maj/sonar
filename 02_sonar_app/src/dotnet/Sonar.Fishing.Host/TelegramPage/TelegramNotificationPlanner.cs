@@ -190,8 +190,7 @@ public static class TelegramNotificationPlanner
             settings.Notifications.FocusLost,
             settings.Sounds.FocusLost,
             "⚠️🎮 <b>Фокус ушёл с игры</b>\n\n" +
-            "Ввод поставлен на паузу, чтобы клавиши не нажимались в другом окне. " +
-            "Откройте меню Telegram и нажмите «Вернуть фокус игре».");
+            "Ввод поставлен на паузу. Переключитесь на окно игры, чтобы продолжить.");
 
     public static TelegramNotificationPlan? PlanFishingFailed(TelegramHostSettings settings) =>
         Simple(

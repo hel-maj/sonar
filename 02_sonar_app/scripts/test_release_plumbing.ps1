@@ -83,6 +83,55 @@ try {
         throw "release_test_manifest_determinism_lost"
     }
 
+    $developerManifest = New-FishingBundleManifestData `
+        $productRoot `
+        $bundle `
+        "0.0.0-owner-test" `
+        "developer-full-access-unsigned" `
+        $hostHash `
+        $engineHash `
+        $hostHash `
+        $engineHash `
+        $true `
+        "NotRequired" `
+        "NotRequired" `
+        $true
+    Write-FishingBundleManifest $manifestPath $developerManifest
+    Assert-Throws {
+        Read-FishingBundleManifest `
+            $productRoot $bundle "developer-full-access-unsigned"
+    } "release_manifest_developer_full_access_forbidden"
+    $acceptedDeveloper = Read-FishingBundleManifest `
+        $productRoot `
+        $bundle `
+        "developer-full-access-unsigned" `
+        -AllowDeveloperFullAccess
+    if ($acceptedDeveloper.schemaVersion -ne 2 -or
+        $acceptedDeveloper.developerFullAccess -ne $true) {
+        throw "release_test_developer_manifest_marker_lost"
+    }
+    $acceptedDeveloper.determinism.verified = $false
+    Write-FishingBundleManifest $manifestPath $acceptedDeveloper
+    Assert-Throws {
+        & (Join-Path $PSScriptRoot "verify_developer_full_access.ps1") `
+            -BundleDirectory $bundle
+    } "developer_bundle_determinism_unverified"
+    $acceptedDeveloper.determinism.verified = $true
+    Write-FishingBundleManifest $manifestPath $acceptedDeveloper
+    & (Join-Path $PSScriptRoot "run_developer_full_access.ps1") `
+        -BundleDirectory $bundle `
+        -VerifyOnly
+    $acceptedDeveloper.developerFullAccess = $false
+    Write-FishingBundleManifest $manifestPath $acceptedDeveloper
+    Assert-Throws {
+        Read-FishingBundleManifest `
+            $productRoot `
+            $bundle `
+            "developer-full-access-unsigned" `
+            -AllowDeveloperFullAccess
+    } "release_manifest_developer_authority_invalid"
+    Write-FishingBundleManifest $manifestPath $manifest
+
     $gitIgnoreLines = @(Get-Content -LiteralPath (Join-Path $productRoot ".gitignore"))
     if ($gitIgnoreLines -notcontains "build/") {
         throw "release_build_root_not_ignored"
@@ -301,7 +350,9 @@ try {
         (Join-Path $PSScriptRoot "build_release_native.ps1")
     if (-not $releaseBuilderText.Contains('"--artifacts-path"') -or
         $releaseBuilderText -notmatch 'PathMap=.*%2C\$BuildRoot=/_/out' -or
-        $releaseBuilderText -notmatch 'Sonar\.Fishing\.Host\.exe') {
+        $releaseBuilderText -notmatch 'Sonar\.Fishing\.Host\.exe' -or
+        $releaseBuilderText -notmatch 'SonarFishingDeveloperFullAccess=true' -or
+        $releaseBuilderText -notmatch 'SONAR_FISHING_DEVELOPER_FULL_ACCESS') {
         throw "release_clean_build_contract_invalid"
     }
 
@@ -326,6 +377,13 @@ try {
         $productRunnerText -match '\.ArgumentList\.Add|\.Arguments\s*=') {
         throw "release_normal_runner_contract_invalid"
     }
+    $developerRunnerText = Get-Content -Raw -LiteralPath `
+        (Join-Path $PSScriptRoot "run_developer_full_access.ps1")
+    if ($developerRunnerText -match '\.ArgumentList\.Add' -or
+        $developerRunnerText -notmatch '\.Arguments\s*=\s*"--developer-full-access"' -or
+        $developerRunnerText -notmatch '\[switch\]\$VerifyOnly') {
+        throw "release_developer_runner_contract_invalid"
+    }
     $normalLifecycleText = Get-Content -Raw -LiteralPath `
         (Join-Path $PSScriptRoot "test_product_lifecycle.ps1")
     if ($normalLifecycleText -notmatch 'Intentionally no arguments' -or
@@ -344,6 +402,9 @@ try {
         "smoke_native.ps1",
         "run_dotnet.ps1",
         "run_product.ps1",
+        "build_developer_full_access.ps1",
+        "verify_developer_full_access.ps1",
+        "run_developer_full_access.ps1",
         "invoke_local_release_maintenance.ps1",
         "test_product_lifecycle.ps1",
         "test_no_python_runtime.ps1",

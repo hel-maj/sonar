@@ -8,6 +8,7 @@ internal enum EngineProcessAuthorityMode
 {
     OfflineDiagnostics,
     Production,
+    DeveloperFullAccess,
 }
 
 internal static class OfflineEngineProcessBootstrap
@@ -31,8 +32,7 @@ internal static class OfflineEngineProcessBootstrap
         EngineProcessAuthorityMode authorityMode = EngineProcessAuthorityMode.OfflineDiagnostics)
     {
         ArgumentNullException.ThrowIfNull(identity);
-        if (identity.Production !=
-            (authorityMode == EngineProcessAuthorityMode.Production))
+        if (identity.AuthorityMode != authorityMode)
         {
             throw new InvalidOperationException("engine_session_identity_mode_mismatch");
         }
@@ -43,13 +43,24 @@ internal static class OfflineEngineProcessBootstrap
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(enginePath)!,
         };
+        startInfo.Environment.Remove("SONAR_FISHING_OFFLINE_GATE");
+        startInfo.Environment.Remove("SONAR_FISHING_ENGINE_MODE");
+        startInfo.Environment.Remove("SONAR_FISHING_HOST_BUILD_ID");
+        startInfo.Environment.Remove("SONAR_FISHING_ENGINE_BUILD_ID");
+        startInfo.Environment.Remove("SONAR_FISHING_BUNDLE_MANIFEST_HASH");
         if (authorityMode == EngineProcessAuthorityMode.OfflineDiagnostics)
         {
             startInfo.Environment["SONAR_FISHING_OFFLINE_GATE"] = "1";
         }
         else
         {
-            startInfo.Environment["SONAR_FISHING_ENGINE_MODE"] = "production";
+            startInfo.Environment["SONAR_FISHING_ENGINE_MODE"] = authorityMode switch
+            {
+                EngineProcessAuthorityMode.Production => "production",
+                EngineProcessAuthorityMode.DeveloperFullAccess =>
+                    "developer-full-access",
+                _ => throw new ArgumentOutOfRangeException(nameof(authorityMode)),
+            };
             startInfo.Environment["SONAR_FISHING_HOST_BUILD_ID"] = identity.HostBuildId;
             startInfo.Environment["SONAR_FISHING_ENGINE_BUILD_ID"] = identity.EngineBuildId;
             startInfo.Environment["SONAR_FISHING_BUNDLE_MANIFEST_HASH"] =

@@ -3,6 +3,7 @@ namespace Sonar.Fishing.Host.HostRuntime;
 public enum HostRunMode
 {
     Production,
+    DeveloperFullAccess,
     Demo,
     OfflineEngine,
 }
@@ -25,6 +26,17 @@ public sealed record HostRunOptions(
         {
             return new HostRunOptions(HostRunMode.Demo, null);
         }
+
+#if SONAR_FISHING_DEVELOPER_FULL_ACCESS
+        if (arguments.Count == 1 &&
+            string.Equals(
+                arguments[0],
+                "--developer-full-access",
+                StringComparison.Ordinal))
+        {
+            return new HostRunOptions(HostRunMode.DeveloperFullAccess, null);
+        }
+#endif
 
         if (arguments.Count == 2 &&
             string.Equals(arguments[0], "--offline-engine", StringComparison.Ordinal) &&

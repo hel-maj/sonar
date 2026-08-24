@@ -10,6 +10,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <IsPackable>false</IsPackable>
+    <SonarFishingDeveloperFullAccess Condition="'$(SonarFishingDeveloperFullAccess)' == ''">false</SonarFishingDeveloperFullAccess>
+    <DefineConstants Condition="'$(SonarFishingDeveloperFullAccess)' == 'true'">$(DefineConstants);SONAR_FISHING_DEVELOPER_FULL_ACCESS</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(SonarFishingReleaseBundle)' == 'true'">
@@ -36,7 +38,7 @@
     <PackageReference Include="Sonar.Platform.Ipc.Contracts" Version="[0.1.1]" />
     <PackageReference Include="Sonar.Platform.Ipc.NamedPipes" Version="[0.1.1]" />
     <PackageReference Include="Sonar.Platform.Processes" Version="[0.1.0]" />
-    <PackageReference Include="Sonar.UI.Wpf" Version="[0.2.18]" />
+    <PackageReference Include="Sonar.UI.Wpf" Version="[0.2.19]" />
   </ItemGroup>
 
   <ItemGroup>

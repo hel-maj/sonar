@@ -69,6 +69,15 @@ void handshake_is_mode_specific() {
   require(
       production_policy.side_effects_may_be_enabled,
       "production_acceptance_cannot_enable_side_effects");
+
+  sonar::platform::ipc::v1::HandshakeHello developer;
+  sonar::fishing::engine_ipc::apply_handshake_mode(
+      developer, engine_authority_mode::developer_full_access);
+  require(!developer.diagnostic_mode(), "developer_handshake_diagnostic");
+  require(developer.side_effect_support(), "developer_side_effects_missing");
+  require(
+      developer.capabilities_size() == 1,
+      "developer_capability_count_changed");
 }
 
 void production_start_gates_fail_closed() {
@@ -165,6 +174,23 @@ void start_and_stop_are_coarse_and_bounded() {
       "idempotent_stop_reason_changed");
 }
 
+void developer_authority_is_compile_isolated() {
+  auto context = valid_context();
+  context.authority_mode = engine_authority_mode::developer_full_access;
+  fishing_session_lifecycle lifecycle;
+  const auto result = lifecycle.start(context);
+#if defined(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
+  require(result.accepted, "compiled_developer_authority_rejected");
+  require(lifecycle.running(), "compiled_developer_session_not_running");
+#else
+  require(!result.accepted, "production_build_accepted_developer_authority");
+  require(
+      result.reason == "production_authority_required",
+      "production_developer_rejection_reason_changed");
+  require(!lifecycle.running(), "production_developer_rejection_mutated_state");
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -172,6 +198,7 @@ int main() {
     handshake_is_mode_specific();
     production_start_gates_fail_closed();
     start_and_stop_are_coarse_and_bounded();
+    developer_authority_is_compile_isolated();
     std::cout << "PASS Fishing Engine mode handshake and session lifecycle\n";
     return 0;
   } catch (const std::exception& error) {

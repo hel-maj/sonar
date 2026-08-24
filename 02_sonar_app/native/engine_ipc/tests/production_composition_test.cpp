@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <variant>
 #include <vector>
 
 #include "sonar/fishing/engine_ipc/production_composition.h"
@@ -51,6 +52,9 @@ class fixture_progress final : public engine::production_session_progress_sink {
       const sonar::fishing::equipment_recovery::TackleCounts&) noexcept
       override {}
 
+  void publish_notification(
+      engine::production_notification_event) noexcept override {}
+
   std::size_t phase_calls{};
 };
 
@@ -85,6 +89,38 @@ class fixture_session final : public engine::production_automation_session {
     state_->episode_identity = request.lifecycle_revision;
     state_->auto_meal = request.settings.auto_meal;
     progress.publish_phase(engine::production_phase::fishing, "fixture");
+    sonar::fishing::catch_observation::CatchObservation observed{
+        .valid_content = true,
+        .fish_text = "Марлин",
+        .quality_label = "Трофейная",
+        .quality_key = "trophy",
+        .weight_kg = 12.5,
+    };
+    progress.record_catch(observed, false);
+    progress.publish_notification(
+        engine::production_meal_recovered_notification{
+            .affected_count = 1U,
+        });
+    progress.publish_notification(
+        engine::production_inventory_full_notification{});
+    progress.publish_notification(
+        engine::production_player_status_notification{
+            .food = 80,
+            .inventory_weight = 39.0,
+            .inventory_weight_max = 40.0,
+        });
+    progress.publish_notification(
+        engine::production_bait_tired_notification{});
+    progress.publish_notification(
+        engine::production_focus_lost_notification{
+            .reason = "window_not_foreground",
+        });
+    for (std::size_t index = 0U;
+         index < engine::maximum_pending_production_notifications;
+         ++index) {
+      progress.publish_notification(
+          engine::production_bait_tired_notification{});
+    }
     ++state_->progress_phase_calls;
     ++state_->run_calls;
     return {
@@ -210,6 +246,35 @@ void fixture_platform_runs_one_coarse_cancellable_episode() {
           snapshot.progress_revision >= 3U &&
           snapshot.cycles_completed == 1U,
       "coarse_progress_aggregate_not_published");
+  require(
+      snapshot.pending_notification_count ==
+          engine::maximum_pending_production_notifications &&
+          snapshot.dropped_notification_count == 6U,
+      "production_notification_queue_not_bounded");
+  const auto notifications = composition.take_pending_notifications();
+  require(
+      notifications.size() == engine::maximum_pending_production_notifications &&
+          std::holds_alternative<engine::production_catch_notification>(
+              notifications[0]) &&
+          std::holds_alternative<
+              engine::production_meal_recovered_notification>(
+              notifications[1]) &&
+          std::holds_alternative<
+              engine::production_inventory_full_notification>(
+              notifications[2]) &&
+          std::holds_alternative<
+              engine::production_player_status_notification>(
+              notifications[3]) &&
+          std::holds_alternative<
+              engine::production_bait_tired_notification>(
+              notifications[4]) &&
+          std::holds_alternative<
+              engine::production_focus_lost_notification>(
+              notifications[5]),
+      "production_notification_order_or_type_changed");
+  require(
+      composition.snapshot().pending_notification_count == 0U,
+      "production_notification_drain_replayed_events");
   require(!composition.start_session().accepted,
       "completed_worker_restarted_without_new_session");
   composition.stop();

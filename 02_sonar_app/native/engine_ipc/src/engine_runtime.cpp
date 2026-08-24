@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iostream>
 #include <optional>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -81,6 +82,13 @@ int run_engine_runtime() {
       });
   std::uint64_t snapshot_revision = 0;
   sonar::fishing::engine_ipc::accepted_entitlement accepted_entitlement;
+#if defined(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
+  if (bootstrap.authority_mode == engine_authority_mode::developer_full_access) {
+    accepted_entitlement.generation = 1U;
+    accepted_entitlement.expires_unix_seconds =
+        std::numeric_limits<std::int64_t>::max();
+  }
+#endif
   sonar::fishing::engine_ipc::fishing_session_lifecycle session_lifecycle;
   sonar::fishing::engine_ipc::production_capability_composition
       production_capabilities;

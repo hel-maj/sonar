@@ -3,10 +3,11 @@
 Статус: native source/build/runtime cutover выполнен. WPF/C# Host и C++20
 Engine являются единственным product runtime; no-argument launch выбирает
 manifest-bound production composition без Python. Оставшиеся задачи относятся
-к live GTA acceptance, streaming adapters, signing/install/update/rollback и
-release evidence, а не к возврату legacy runtime.
+к live GTA acceptance, незавершённым Telegram/streaming adapters, production
+Authenticode и remote signed activation/install/update/uninstall/rollback,
+а также release evidence, а не к возврату legacy runtime.
 
-Ниже сохранён последовательный implementation log: Phase 1 Python isolation,
+Ниже сохранён исторический implementation log: Phase 1 Python isolation,
 Phase 2 C++ offline parity, Phase 3 inert WPF shell, Phase 4 offline Host/Engine IPC, Phase 5 Common
 boundary hardening, Phase 6 catch-disposition parity, Phase 7 product UI parity
 ledger и inert session summary, Phase 8 runnable offline WPF Host, Phase 9
@@ -27,14 +28,16 @@ chat mutation boundary, Phase 31 bounded signed startup admission and Phase 32
 bounded embedded-only Host streaming lifecycle, Phase 33 native fishing-stage
 visual detection, Phase 34 signed Host release transaction core, Phase 35
 native inventory/menu/store-fish episode, Phase 36 native coherent memory
-observation, Phase 39 native whole fishing episode and Phase 40 native
-meal/garbage/equipment whole episodes. Эти phase-описания исторические; текущий
+observation plus separated inventory-state recovery/characterization, Phase 39 native whole fishing episode, Phase 40 native
+meal/garbage/equipment whole episodes, Phase 47 compile-isolated local-access
+authority и Phase 48 bounded typed notification stream. Эти phase-описания
+исторические; текущий
 authoritative статус capability находится в
 [production cutover checklist](PRODUCTION_CUTOVER_CHECKLIST.md).
 
 Дата аудита: 2026-07-23
 
-Дата последней implementation проверки: 2026-08-23
+Дата последней implementation проверки: 2026-08-24
 
 Managed migration builds pin .NET SDK 10.0.400 through root `global.json`;
 package/feed hashes remain enforced by the product-owned test entrypoints.
@@ -156,7 +159,7 @@ Target: WPF Host создает secured pipes, запускает exact signed F
 cleanup.
 
 Gate: inert lifecycle, ACL, mismatch, saturation, disconnect, graceful
-shutdown, forced unknown cleanup и read-only restart circuit breaker.
+shutdown, forced unknown cleanup и indefinite capped read-only restart recovery.
 
 ### F1. Settings/hotkeys
 
@@ -426,7 +429,7 @@ Dependency direction проверена по restore assets:
 
 ```text
 Sonar.Fishing.Host
-  -> exact PackageReference Sonar.UI.Wpf [0.2.18]
+  -> exact PackageReference Sonar.UI.Wpf [0.2.19]
   -> Phase 4 Platform IPC PackageReference, currently pinned [0.1.1]
   -> product Sonar.Fishing.Ipc.Contracts ProjectReference
   -> Microsoft Windows Desktop Runtime/SDK references
@@ -434,8 +437,8 @@ Sonar.Fishing.Host
 
 `ProjectReference` или source copy из Common отсутствуют. Product-local
 `ProjectReference` на Fishing contracts добавлен только в Phase 4. Текущий
-UI package 0.2.18 проверен из candidate feed с SHA-256
-`737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6`.
+UI package 0.2.19 проверен из accepted feed с SHA-256
+`37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33`.
 Phase 3 WPF tests ссылаются через `ProjectReference` только на product Host
 project.
 
@@ -599,8 +602,8 @@ Managed package hashes frozen workspace feed `.artifacts/sonar-feed` (его м�
   `0CF50FDAFFF00608F0B5742C39A15B3AB24CF79329DA8B07A01404E9F7A45214`;
 - `Sonar.Platform.Processes.0.1.0.nupkg` -
   `03DEE12DCB7F2C30A21921A9198CA5388D93A682B8CCE69658CAD0E1996AE5EB`;
-- `Sonar.UI.Wpf.0.2.18.nupkg` -
-  `737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6`.
+- `Sonar.UI.Wpf.0.2.19.nupkg` -
+  `37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33`.
 
 Phase 5 removed temporary Common duplicates:
 
@@ -1070,7 +1073,7 @@ operation was added and no measured hotspot exists.
 
 ### Phase 20-22 - Common UI, mutable statistics and Windows safety boundary
 
-The complete eight-page WPF composition consumes frozen `Sonar.UI.Wpf 0.2.18`
+The complete eight-page WPF composition consumes frozen `Sonar.UI.Wpf 0.2.19`
 without copied Common source. It uses the shared responsive AppShell/AppBrand,
 4/8/12 grid and page/settings/table/master-detail/state patterns, embeds the
 Fishing logo and 31 fish images, preserves plain-letter hotkeys through the
@@ -1197,8 +1200,8 @@ The read-only session snapshot uses this real writer rather than writing the
 events pipe inline. Focused outbox/writer tests cover priority order, snapshot
 coalescing, explicit safety saturation, drain and closed admission. Native
 CTest is 16/16 and managed IPC remains 5/5; no GTA/window/capture/input/network
-action ran. Production event producers and the supervisor restart/circuit
-breaker matrix remain required before authority cutover.
+action ran. Production notification producers and generation recovery were
+closed later in Phase 48; this phase remains the historical transport baseline.
 
 ### Phase 26 - native coarse game-chat episode
 
@@ -1241,15 +1244,28 @@ cross-episode lease consumers and terminal/key-up confirmation remain before
 The Host now routes its long-lived session through one product-owned
 `EngineSessionSupervisor`; Common `KillOnCloseJob` remains the sole generic
 process-containment mechanism. A healthy generation is reused, every heartbeat
-has the existing bounded IPC deadline, and a dead process or failed heartbeat
-retires the whole pipe/process generation before replacement. Three failures in
-one rolling minute open a stable fail-closed circuit. Caller cancellation does
-not consume that failure budget, while terminal cancellation prevents all later
-starts and concurrent stops dispose the session once.
+has the existing bounded IPC deadline, and a dead process, failed heartbeat or
+completed/faulted event pump retires the whole pipe/process generation before
+replacement. There is no permanent circuit-open state: the heartbeat owner
+starts before the first attempt, stays alive after any number of consecutive
+failures and retries indefinitely with bounded delay. The rolling failure window
+is telemetry/backoff input only. Caller cancellation does not count as a runtime
+failure, while terminal cancellation prevents all later starts and concurrent
+stops dispose the session once.
 
-The deterministic matrix covers healthy reuse, unexpected exit, failed
-replacement/circuit, caller cancellation, uncontained candidate, in-flight
-bootstrap cancellation and concurrent terminal cleanup. The managed/native
+Current recovery policy withdraws the crashed generation's runtime authority
+and publishes an empty fail-closed session snapshot before replacement. Restart
+attempts use exponential `250 ms` -> `2 s` capped backoff. A successful
+replacement restores the latest complete settings revision and reapplies the
+still-valid signed entitlement once; it remains idle and does not replay a
+previous automation start/stop command or any input lease.
+
+The deterministic matrix covers healthy reuse, unexpected exit with authority
+withdrawal/settings restoration/no command replay, more failures than the old
+three-attempt limit followed by automatic recovery without another external
+check, event-pump death with no old notification replay, caller cancellation,
+uncontained candidate, in-flight bootstrap cancellation and concurrent terminal
+cleanup. The managed/native
 integration test also kills only the inert offline Engine and proves a new
 Common-contained PID with the same complete runtime-settings revision. No GTA,
 external window, capture, input or network action ran.
@@ -1472,29 +1488,39 @@ replayed sequences return no snapshot; no cached field is promoted to fresh
 evidence.
 
 The Windows adapter reuses frozen Common `readonly_process` for least-rights
-process access and exact memory reads. Fishing adds only product image-hash and
-decoder/profile policy; it contains no local `OpenProcess`, `ReadProcessMemory`
-or process-enumeration clone. Process sessions and verified image hashes are
-retained only for the matching generation. The production Engine does not
-instantiate this adapter, and `disabled_memory_connector` is the only ready
-default composition seam, so this slice performed no GTA attach or live read.
+process access, region enumeration and exact memory reads. Fishing adds only
+product image-hash, bounded scan and decoder/profile policy; it contains no
+local `OpenProcess`, `ReadProcessMemory` or process-enumeration clone. Normal
+Engine instantiates this adapter. Reeling and inventory-state are explicit
+separate scopes, so an inventory query no longer requires active fish.
+
+Inventory binding state machine validates a cached masked signature on every
+plan and performs one bounded cold rediscovery after drift. Incomplete scan,
+ambiguous run or generation change stays fail-closed; failed cold discovery is
+throttled for five seconds instead of rescanning every frame. Registry schema `2`
+currently encodes no admitted inventory binding. The actual current hash first
+returns `memory_game_build_unsupported`; the sole older admitted profile returns
+`memory_inventory_binding_unavailable`. Decoder parity is not falsely reported
+as production state authority.
 
 The five-row language-neutral fixture
 `tests/fixtures/memory_observation/e11-v1.tsv` has SHA-256
 `ACB3FA6C1D9E7983344E53906E748DB9C7EED67E07695013A7D77166FF6DE8DD`.
-MSVC v143 `/W4 /WX` focused CTest is `1/1`; the Python migration oracle is
-`4/4`. Negative coverage includes image/profile and process-generation drift,
+MSVC v143 `/W4 /WX` focused CTest covers decoder plus inventory discovery,
+cached-plan reuse, automatic relocation recovery, absent-profile and ambiguous
+signature blockers. Negative coverage includes image/profile and process-generation drift,
 short/oversize reads, unknown fish hash, ambiguous inventory vote, invalid
 UTF-8 and sequence replay. Five equal Release decoder benchmark runs measured
 a median `79.573 ms` for 250,000 aggregates (`318.290 ns` each), with no IPC.
 No hotspot was demonstrated, so no semantic optimization followed parity.
 
-E11 remains partial until an approved signed production profile and bounded
-target resolver supply real build hashes/generations/address plans, then the
-aggregate is composed inside the whole Engine episode behind entitlement,
-readiness and shared input-lease gates. Live multi-build/profile-drift and
-target-loss evidence require a later explicit readiness review. The full
-boundary is [MEMORY_OBSERVATION_NATIVE.md](MEMORY_OBSERVATION_NATIVE.md).
+E11 remains partial until the prepared non-shipping C++ characterization tool
+collects one controlled current-build `CLOSED/OPEN` sequence and offline review
+promotes a unique immutable binding. The tool never presses `TAB`, activates a
+window or captures a frame. Player-status/chat and live target-loss remain
+separate gates. The full boundary is
+[MEMORY_OBSERVATION_NATIVE.md](MEMORY_OBSERVATION_NATIVE.md) and
+[inventory characterization](INVENTORY_STATE_CHARACTERIZATION.md).
 
 The first guarded read-only pass on 2026-08-24 confirmed target, executable
 hash-read and capture, but the current GTA executable did not match the sole
@@ -1505,6 +1531,11 @@ complete unique anchor scans, bounded entity count, exact active-fish identity,
 coherent snapshot and post-capture revalidation. It is not linked into Engine,
 does not reuse registry admission identity/SHA semantics and cannot add a
 profile or authorize input.
+
+An additional zero-input read-only inventory scan found `0` exact legacy masked
+signature matches on current hash, including all `13490` readable regions up to
+16 MiB. The legacy anchor also had no module-rooted pointer and admitted several
+sliding bases, so neither its address nor its pattern was copied into shipping.
 
 ### Phase 39 - native whole fishing episode
 
@@ -1649,3 +1680,56 @@ remain open. The detailed contract is
 Runnable WPF Host и C++ Engine production authority cutover выполнен. Эти gaps
 блокируют утверждение signed/live release readiness для конкретного окружения,
 но не normal no-argument product launch и не explicit demo/offline diagnostics.
+
+### Phase 47 - compile-isolated local-access authority
+
+Локальная проверка владельца теперь имеет отдельные Host/C++ compile symbols,
+явный `--developer-full-access`, schema 2 manifest с exact marker/channel и
+собственные build/verify/run entrypoints. Production binaries не принимают этот
+режим, ordinary run/install/update/rollback не принимают его bundle. Режим
+снимает только внешние licensing/entitlement и signed startup
+availability/update-block admission gates; exact supported GTA build,
+coherent memory/capture, window/foreground, input lease, packet budget и final
+safety gates не меняются.
+
+Host supervisor при неожиданном завершении Engine сначала отзывает runtime
+authority и публикует fail-closed idle state. Replacement получает только
+последнюю settings snapshot и новое exact bootstrap authority после handshake;
+automation start/stop, runtime commands и input leases не воспроизводятся.
+Regression coverage выполняется в обычной production compile и отдельной
+developer compile. Архитектурное решение и команды находятся в
+[ADR-0002](ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md).
+
+Product presentation for this local build is intentionally non-technical. The
+license page shows active `Локальный доступ`, hides key activation and maps
+feature IDs to product labels. The default local bundle version is
+`1.0.0-local`; compile/channel provenance remains in manifest and diagnostics.
+
+### Phase 48 - bounded typed notification stream
+
+Production Engine now emits typed occurrence events for catch, session
+start/stop, meal recovery, inventory full/player status, bait tired and focus
+loss. Facts originate inside the existing coarse production composition; Host
+does not perform parallel GTA memory, capture, focus or input work. Product IPC
+advertises exact capability `fishing-notifications.events`.
+
+The native occurrence queue is in-memory, FIFO and capped at 64. It drops a new
+notification under pressure with a diagnostic count, clears at new session
+preparation and never persists/replays history. All notification frames use one
+Common normal-priority FIFO. Aggregate snapshots keep their existing separate
+latest-only coalescing. Host validates monotonic sequence independently for
+notification and snapshot streams, then supervisor adds current Engine
+generation and rejects late callbacks from a retired session.
+
+The production Telegram generation owns a second bounded queue, deduplicates
+`(generation, sequence)`, discards queued events from older Engine generations
+and sends sequentially to configured admins through the existing planners.
+Producer, projection, planner and individual transport failures cannot stop
+Host or fishing runtime. Event-pump failure does withdraw the whole generation
+and enters the same indefinite capped recovery from Phase 27.
+
+Focused acceptance is native CTest 45/45, managed IPC 7/7 and WPF/managed
+209/209. It covers bounded native order/no-replay, typed mapping, generation
+dedupe, delivery failure isolation, inventory-low edge behavior, event-pump
+recovery and local-access UI. No GTA, capture, focus, input, credentials or
+network action ran. Architecture contract: [ADR-0003](ADR-0003-BOUNDED-ENGINE-NOTIFICATION-EVENTS.md).

@@ -181,6 +181,16 @@ class common_windows_memory_session final : public readonly_memory_session {
     }
   }
 
+  [[nodiscard]] std::optional<
+      sonar::platform::windows::memory_region_snapshot>
+  query_region(const std::uintptr_t address) noexcept override {
+    try {
+      return process_.query_region(address);
+    } catch (...) {
+      return std::nullopt;
+    }
+  }
+
   [[nodiscard]] bool generation_current() noexcept override {
     try {
       return process_.generation_matches(identity_.generation);
@@ -207,7 +217,7 @@ class common_windows_memory_connector final : public memory_connector {
     try {
       auto process = sonar::platform::windows::readonly_process::open(
           process_id,
-          sonar::platform::windows::process_access_profile::memory);
+          sonar::platform::windows::process_access_profile::memory_regions);
       const auto generation = process.generation();
       const auto path = process.image_path();
       const auto hash = sha256_file(path);

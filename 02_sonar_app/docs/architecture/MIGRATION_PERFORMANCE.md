@@ -27,8 +27,8 @@ Release configuration и одинаковом corpus.
   `695B6BFAD82A3052A5021BA55F9F833D81672DA755BF98626CC66CFB3DACAE0C`.
 - Common native Windows: immutable 0.1.1 manifest SHA-256
   `EE61031CBC06550FD478892EFECD250FD4786790C5687F260B2D40B85B5C9446`.
-- Common WPF: immutable `Sonar.UI.Wpf 0.2.18` package SHA-256
-  `737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6`.
+- Common WPF: immutable `Sonar.UI.Wpf 0.2.19` package SHA-256
+  `37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33`.
 - Common managed licensing: immutable `Sonar.Licensing.Verification 0.1.3`
   package SHA-256
   `CA1DAC5C5220872F15130C863AB5D12E85709AC19D4972AFC7193C8223FA7518`.
@@ -191,7 +191,7 @@ startup/CPU/memory/IPC hotspot was demonstrated and no optimization was made.
 
 ## Phase 20-22 Common UI, statistics mutation and Windows safety baseline
 
-These slices add the complete eight-page Common 0.2.18 composition, 132-image
+These slices add the complete eight-page Common 0.2.19 composition, 180-image
 offscreen render matrix, atomic custom-price revisions, semantic hotkey
 conflict checks and the exact Common Windows process/window/input-budget
 dependency. The runtime-safety test uses only the current test process and an

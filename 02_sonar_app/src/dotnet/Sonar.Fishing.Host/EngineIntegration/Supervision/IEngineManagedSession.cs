@@ -1,4 +1,5 @@
 using Sonar.Fishing.Host.FishingSessionState;
+using Sonar.Fishing.Host.EngineIntegration.Notifications;
 
 namespace Sonar.Fishing.Host.EngineIntegration.Supervision;
 
@@ -22,4 +23,14 @@ internal interface IEngineManagedSession : IAsyncDisposable
 internal interface IEngineSessionStateSource
 {
     event Action<FishingSessionStateSnapshot>? SessionStateChanged;
+}
+
+internal interface IEngineNotificationFrameSource
+{
+    event Action<FishingEngineNotificationFrame>? NotificationReceived;
+}
+
+internal interface IEngineBootstrapAuthoritySession
+{
+    bool HasBootstrapRuntimeAuthority { get; }
 }

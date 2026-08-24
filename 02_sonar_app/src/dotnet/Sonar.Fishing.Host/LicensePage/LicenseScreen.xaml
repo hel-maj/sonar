@@ -8,13 +8,16 @@
     AutomationProperties.Name="Лицензия"
     HorizontalContentAlignment="Stretch"
     VerticalContentAlignment="Stretch">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </UserControl.Resources>
     <common:PageScrollViewer>
         <common:PageContainer>
             <StackPanel>
                 <common:PageHeader
                     x:Name="LicenseHeader"
                     Title="Лицензия"
-                    Subtitle="Активируйте ключ и проверьте доступные функции">
+                    Subtitle="{Binding ViewModel.HeaderSubtitle, ElementName=Root}">
                     <common:PageHeader.Status>
                         <common:StatusBadge
                             Content="{Binding ViewModel.StatusText, ElementName=Root}"
@@ -23,8 +26,10 @@
                 </common:PageHeader>
 
                 <common:NotificationBanner
+                    x:Name="ActivationBanner"
                     Margin="0,24,0,0"
                     Header="Проверка лицензии"
+                    Visibility="{Binding ViewModel.ShowActivationControls, ElementName=Root, Converter={StaticResource BooleanToVisibilityConverter}}"
                     Tone="{Binding ViewModel.ActivationTone, ElementName=Root}">
                     <TextBlock
                         Text="{Binding ViewModel.ActivationMessage, ElementName=Root}"
@@ -32,8 +37,10 @@
                 </common:NotificationBanner>
 
                 <common:SettingsSection
+                    x:Name="ActivationSettingsSection"
                     Margin="0,24,0,0"
                     Header="Ключ лицензии"
+                    Visibility="{Binding ViewModel.ShowActivationControls, ElementName=Root, Converter={StaticResource BooleanToVisibilityConverter}}"
                     Description="Введите ключ с активной подпиской.">
                     <StackPanel>
                         <PasswordBox

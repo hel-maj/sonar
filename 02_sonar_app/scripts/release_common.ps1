@@ -2,7 +2,8 @@ Set-StrictMode -Version Latest
 
 $script:FishingReleaseModes = @(
     "development-unsigned",
-    "production-signed"
+    "production-signed",
+    "developer-full-access-unsigned"
 )
 
 function Get-FishingCanonicalVersion([string]$Version) {
@@ -110,10 +111,15 @@ function New-FishingBundleManifestData(
     [string]$SecondEngineSha256,
     [bool]$DeterminismVerified,
     [string]$HostSignatureStatus,
-    [string]$EngineSignatureStatus) {
+    [string]$EngineSignatureStatus,
+    [bool]$DeveloperFullAccess = $false) {
     $Version = Get-FishingCanonicalVersion $Version
     if ($script:FishingReleaseModes -notcontains $ReleaseMode) {
         throw "release_mode_invalid: $ReleaseMode"
+    }
+    if ($DeveloperFullAccess -ne
+        ($ReleaseMode -ceq "developer-full-access-unsigned")) {
+        throw "release_developer_authority_marker_invalid"
     }
     $bundle = Get-FishingCanonicalPath $BundleDirectory
     $hostPath = Join-Path $bundle "Sonar.exe"
@@ -132,48 +138,52 @@ function New-FishingBundleManifestData(
         }
     }
     $source = Get-FishingSourceIdentity $ProductRoot
-    return [pscustomobject][ordered]@{
-        schemaVersion = 1
+    $manifest = [ordered]@{
+        schemaVersion = if ($DeveloperFullAccess) { 2 } else { 1 }
         product = "fishing"
         releaseMode = $ReleaseMode
-        version = $Version
-        source = [pscustomobject][ordered]@{
-            commitSha = $source.commitSha
-            dirty = $source.dirty
-        }
-        ipc = [pscustomobject][ordered]@{
-            schema = "ipc/v1/sonar_fishing.proto"
-            schemaSha256 = $schemaHash
-        }
-        host = [pscustomobject][ordered]@{
-            path = "Sonar.exe"
-            sha256 = $hostHash
-            unsignedSha256 = $UnsignedHostSha256.ToUpperInvariant()
-            buildId = "fishing-host-$($UnsignedHostSha256.Substring(0, 16).ToLowerInvariant())"
-        }
-        engine = [pscustomobject][ordered]@{
-            path = "Sonar.Engine.exe"
-            sha256 = $engineHash
-            unsignedSha256 = $UnsignedEngineSha256.ToUpperInvariant()
-            buildId = "fishing-engine-$($UnsignedEngineSha256.Substring(0, 16).ToLowerInvariant())"
-        }
-        requiredRuntime = [pscustomobject][ordered]@{
-            family = "Microsoft.WindowsDesktop.App"
-            majorVersion = 10
-            architecture = "x64"
-            deployment = "framework-dependent-single-file"
-        }
-        determinism = [pscustomobject][ordered]@{
-            verified = $DeterminismVerified
-            secondHostSha256 = $SecondHostSha256.ToUpperInvariant()
-            secondEngineSha256 = $SecondEngineSha256.ToUpperInvariant()
-        }
-        authenticode = [pscustomobject][ordered]@{
-            required = [bool]($ReleaseMode -eq "production-signed")
-            hostStatus = $HostSignatureStatus
-            engineStatus = $EngineSignatureStatus
-        }
     }
+    if ($DeveloperFullAccess) {
+        $manifest.developerFullAccess = $true
+    }
+    $manifest.version = $Version
+    $manifest.source = [pscustomobject][ordered]@{
+        commitSha = $source.commitSha
+        dirty = $source.dirty
+    }
+    $manifest.ipc = [pscustomobject][ordered]@{
+        schema = "ipc/v1/sonar_fishing.proto"
+        schemaSha256 = $schemaHash
+    }
+    $manifest.host = [pscustomobject][ordered]@{
+        path = "Sonar.exe"
+        sha256 = $hostHash
+        unsignedSha256 = $UnsignedHostSha256.ToUpperInvariant()
+        buildId = "fishing-host-$($UnsignedHostSha256.Substring(0, 16).ToLowerInvariant())"
+    }
+    $manifest.engine = [pscustomobject][ordered]@{
+        path = "Sonar.Engine.exe"
+        sha256 = $engineHash
+        unsignedSha256 = $UnsignedEngineSha256.ToUpperInvariant()
+        buildId = "fishing-engine-$($UnsignedEngineSha256.Substring(0, 16).ToLowerInvariant())"
+    }
+    $manifest.requiredRuntime = [pscustomobject][ordered]@{
+        family = "Microsoft.WindowsDesktop.App"
+        majorVersion = 10
+        architecture = "x64"
+        deployment = "framework-dependent-single-file"
+    }
+    $manifest.determinism = [pscustomobject][ordered]@{
+        verified = $DeterminismVerified
+        secondHostSha256 = $SecondHostSha256.ToUpperInvariant()
+        secondEngineSha256 = $SecondEngineSha256.ToUpperInvariant()
+    }
+    $manifest.authenticode = [pscustomobject][ordered]@{
+        required = [bool]($ReleaseMode -eq "production-signed")
+        hostStatus = $HostSignatureStatus
+        engineStatus = $EngineSignatureStatus
+    }
+    return [pscustomobject]$manifest
 }
 
 function ConvertTo-FishingCanonicalManifestJson([object]$Manifest) {
@@ -212,7 +222,8 @@ function Assert-FishingHash([string]$Value, [string]$Context) {
 function Read-FishingBundleManifest(
     [string]$ProductRoot,
     [string]$BundleDirectory,
-    [string]$ExpectedReleaseMode = "") {
+    [string]$ExpectedReleaseMode = "",
+    [switch]$AllowDeveloperFullAccess) {
     $bundle = Get-FishingCanonicalPath $BundleDirectory
     $path = Join-Path $bundle "bundle-manifest.json"
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -226,10 +237,27 @@ function Read-FishingBundleManifest(
         throw "release_manifest_json_invalid"
     }
 
-    Assert-FishingPropertyOrder $manifest @(
-        "schemaVersion", "product", "releaseMode", "version", "source", "ipc",
-        "host", "engine", "requiredRuntime", "determinism", "authenticode"
-    ) "root"
+    $developerManifest = $manifest.schemaVersion -eq 2 -and
+        $manifest.releaseMode -ceq "developer-full-access-unsigned"
+    if ($developerManifest) {
+        if (-not $AllowDeveloperFullAccess) {
+            throw "release_manifest_developer_full_access_forbidden"
+        }
+        Assert-FishingPropertyOrder $manifest @(
+            "schemaVersion", "product", "releaseMode", "developerFullAccess",
+            "version", "source", "ipc", "host", "engine", "requiredRuntime",
+            "determinism", "authenticode"
+        ) "root"
+    }
+    else {
+        if ($AllowDeveloperFullAccess) {
+            throw "release_manifest_developer_full_access_required"
+        }
+        Assert-FishingPropertyOrder $manifest @(
+            "schemaVersion", "product", "releaseMode", "version", "source", "ipc",
+            "host", "engine", "requiredRuntime", "determinism", "authenticode"
+        ) "root"
+    }
     Assert-FishingPropertyOrder $manifest.source @("commitSha", "dirty") "source"
     Assert-FishingPropertyOrder $manifest.ipc @("schema", "schemaSha256") "ipc"
     Assert-FishingPropertyOrder $manifest.host @(
@@ -252,9 +280,20 @@ function Read-FishingBundleManifest(
     if ($raw -cne ($canonical + "`n")) {
         throw "release_manifest_not_canonical"
     }
-    if ($manifest.schemaVersion -ne 1 -or $manifest.product -cne "fishing" -or
+    $expectedSchemaVersion = if ($developerManifest) { 2 } else { 1 }
+    if ($manifest.schemaVersion -ne $expectedSchemaVersion -or
+        $manifest.product -cne "fishing" -or
         $script:FishingReleaseModes -notcontains $manifest.releaseMode) {
         throw "release_manifest_identity_invalid"
+    }
+    if ($developerManifest -and
+        ($manifest.developerFullAccess -isnot [bool] -or
+         $manifest.developerFullAccess -ne $true)) {
+        throw "release_manifest_developer_authority_invalid"
+    }
+    if (-not $developerManifest -and
+        $manifest.releaseMode -ceq "developer-full-access-unsigned") {
+        throw "release_manifest_developer_authority_invalid"
     }
     [void](Get-FishingCanonicalVersion ([string]$manifest.version))
     if (-not [string]::IsNullOrWhiteSpace($ExpectedReleaseMode) -and

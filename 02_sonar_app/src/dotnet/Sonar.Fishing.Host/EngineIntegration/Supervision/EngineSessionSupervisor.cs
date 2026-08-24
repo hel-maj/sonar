@@ -1,6 +1,7 @@
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.SettingsPersistence;
+using Sonar.Fishing.Host.EngineIntegration.Notifications;
 
 namespace Sonar.Fishing.Host.EngineIntegration.Supervision;
 
@@ -8,24 +9,32 @@ namespace Sonar.Fishing.Host.EngineIntegration.Supervision;
 /// Product policy for one long-lived Engine session. Generic process containment
 /// remains owned by Sonar.Platform.Processes.
 /// </summary>
-internal sealed class EngineSessionSupervisor : IAsyncDisposable
+internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngineNotificationSource
 {
     private readonly IEngineManagedSessionFactory factory;
     private readonly EngineRestartPolicy policy;
     private readonly TimeProvider timeProvider;
     private readonly SemaphoreSlim lifecycleGate = new(1, 1);
+    private readonly object eventForwardingGate = new();
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly Queue<DateTimeOffset> failures = new();
     private readonly TaskCompletionSource disposalCompletion = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
 
     private IEngineManagedSession? session;
+    private EngineGenerationBinding? activeEventBinding;
+    private IEngineSessionStateSource? sessionStateSource;
+    private Action<FishingSessionStateSnapshot>? sessionStateHandler;
+    private IEngineNotificationFrameSource? notificationFrameSource;
+    private Action<FishingEngineNotificationFrame>? notificationFrameHandler;
     private Task? monitorTask;
     private Exception? lastMonitorFailure;
     private ulong generation;
     private FishingSignedEntitlementEnvelope? currentEntitlement;
+    private bool runtimeAuthorityActive;
     private int restartCount;
-    private bool circuitOpen;
+    private bool restartDelayRequired;
+    private TimeSpan lastRestartDelay;
     private volatile bool stopRequested;
     private volatile bool disposed;
     private int disposeStarted;
@@ -43,6 +52,8 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
 
     internal event Action<FishingSessionStateSnapshot>? SessionStateChanged;
 
+    public event Action<FishingEngineNotificationReceipt>? NotificationReceived;
+
     internal async Task<EngineSupervisorSnapshot> CheckAsync(
         CancellationToken cancellationToken)
     {
@@ -55,11 +66,8 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
         try
         {
             ThrowIfStopped();
+            EnsureMonitorRunning();
             PruneFailures();
-            if (circuitOpen)
-            {
-                throw CreateCircuitOpenException();
-            }
 
             if (session is not null)
             {
@@ -87,20 +95,11 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
                 }
             }
 
-            if (circuitOpen)
-            {
-                throw CreateCircuitOpenException();
-            }
-
             if (session is null)
             {
-                await StartSessionAsync(token).ConfigureAwait(false);
+                await StartSessionWithBackoffAsync(token).ConfigureAwait(false);
             }
 
-            if (monitorTask is null || monitorTask.IsCompleted)
-            {
-                monitorTask = MonitorAsync(lifetimeCancellation.Token);
-            }
             return CreateSnapshot();
         }
         finally
@@ -123,14 +122,7 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
         try
         {
             ThrowIfStopped();
-            if (session is null || !session.IsAlive)
-            {
-                if (session is not null)
-                {
-                    await RetireSessionAsync().ConfigureAwait(false);
-                }
-                await StartSessionAsync(token).ConfigureAwait(false);
-            }
+            await EnsureSessionAsync(token).ConfigureAwait(false);
             if (session is not IEngineEntitlementSession entitlementSession)
             {
                 throw new InvalidOperationException("engine_entitlement_capability_missing");
@@ -139,9 +131,15 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
                 entitlement,
                 token).ConfigureAwait(false);
             currentEntitlement = receipt.Accepted ? entitlement : null;
+            Volatile.Write(ref runtimeAuthorityActive, receipt.Accepted);
             return receipt;
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidOperationException exception)
+            when (IsRegisteredLifecycleFailure(exception))
         {
             throw;
         }
@@ -168,6 +166,7 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
         try
         {
             currentEntitlement = null;
+            Volatile.Write(ref runtimeAuthorityActive, false);
             if (session is IEngineEntitlementSession entitlementSession && session.IsAlive)
             {
                 try
@@ -205,7 +204,7 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
             cancellationToken);
 
     internal bool HasActiveEntitlement =>
-        Volatile.Read(ref currentEntitlement) is not null;
+        Volatile.Read(ref runtimeAuthorityActive);
 
     internal Task<FishingSessionStateSnapshot> StopAutomationAsync(
         CancellationToken cancellationToken) =>
@@ -274,8 +273,18 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
                 throw new InvalidOperationException(reason);
             }
 
+            var restoredAuthority = candidate is IEngineBootstrapAuthoritySession
+            {
+                HasBootstrapRuntimeAuthority: true,
+            };
             if (currentEntitlement is not null)
             {
+                if (restoredAuthority)
+                {
+                    await candidate.DisposeAsync().ConfigureAwait(false);
+                    throw new InvalidOperationException(
+                        "engine_runtime_authority_mode_conflict");
+                }
                 if (candidate is not IEngineEntitlementSession entitlementSession)
                 {
                     await candidate.DisposeAsync().ConfigureAwait(false);
@@ -286,22 +295,49 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
                     cancellationToken).ConfigureAwait(false);
                 if (!receipt.Accepted)
                 {
-                    await candidate.DisposeAsync().ConfigureAwait(false);
-                    throw new InvalidOperationException("engine_cached_entitlement_rejected");
+                    // A lease can expire or be superseded while the Engine is
+                    // being replaced. Keep the fresh process fail-closed so an
+                    // already verified replacement envelope can be applied.
+                    currentEntitlement = null;
+                }
+                else
+                {
+                    restoredAuthority = true;
                 }
             }
 
-            session = candidate;
-            if (candidate is IEngineSessionStateSource stateSource)
-            {
-                stateSource.SessionStateChanged += OnSessionStateChanged;
-            }
             if (generation != 0)
             {
                 restartCount++;
             }
-            generation++;
+            var candidateGeneration = generation + 1;
+            var binding = new EngineGenerationBinding(candidate, candidateGeneration);
+            Action<FishingSessionStateSnapshot>? candidateStateHandler = null;
+            if (candidate is IEngineSessionStateSource stateSource)
+            {
+                candidateStateHandler = snapshot => OnSessionStateChanged(binding, snapshot);
+                stateSource.SessionStateChanged += candidateStateHandler;
+            }
+            Action<FishingEngineNotificationFrame>? candidateFrameHandler = null;
+            if (candidate is IEngineNotificationFrameSource frameSource)
+            {
+                candidateFrameHandler = frame => OnNotificationReceived(binding, frame);
+                frameSource.NotificationReceived += candidateFrameHandler;
+            }
+            lock (eventForwardingGate)
+            {
+                session = candidate;
+                generation = candidateGeneration;
+                activeEventBinding = binding;
+                sessionStateSource = candidate as IEngineSessionStateSource;
+                sessionStateHandler = candidateStateHandler;
+                notificationFrameSource = candidate as IEngineNotificationFrameSource;
+                notificationFrameHandler = candidateFrameHandler;
+            }
+            restartDelayRequired = false;
             lastMonitorFailure = null;
+            Volatile.Write(ref runtimeAuthorityActive, restoredAuthority);
+            OnSessionStateChanged(binding, candidate.SessionState);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -309,14 +345,49 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
         }
         catch (Exception exception)
         {
+            Volatile.Write(ref runtimeAuthorityActive, false);
             RegisterFailure(exception);
-            if (circuitOpen)
-            {
-                throw CreateCircuitOpenException();
-            }
             throw new InvalidOperationException(
                 "engine_supervisor_start_failed",
                 exception);
+        }
+    }
+
+    private async Task StartSessionWithBackoffAsync(
+        CancellationToken cancellationToken)
+    {
+        if (restartDelayRequired)
+        {
+            PruneFailures();
+            lastRestartDelay = policy.DelayForFailureCount(failures.Count);
+            if (lastRestartDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(
+                    lastRestartDelay,
+                    timeProvider,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            lastRestartDelay = TimeSpan.Zero;
+        }
+        await StartSessionAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task EnsureSessionAsync(CancellationToken cancellationToken)
+    {
+        PruneFailures();
+        if (session is not null && !session.IsAlive)
+        {
+            await RetireSessionAsync().ConfigureAwait(false);
+            RegisterFailure(new InvalidOperationException(
+                "engine_supervisor_process_exited"));
+        }
+        if (session is null)
+        {
+            await StartSessionWithBackoffAsync(cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -329,30 +400,49 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             lifetimeCancellation.Token);
-        var token = operationCancellation.Token;
+        using var deadlineCancellation = new CancellationTokenSource(
+            policy.AutomationCommandTimeout,
+            timeProvider);
+        using var boundedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            operationCancellation.Token,
+            deadlineCancellation.Token);
+        var token = boundedCancellation.Token;
         await lifecycleGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
             ThrowIfStopped();
-            if (session is null || !session.IsAlive)
-            {
-                if (session is not null)
-                {
-                    await RetireSessionAsync().ConfigureAwait(false);
-                }
-                await StartSessionAsync(token).ConfigureAwait(false);
-            }
+            await EnsureSessionAsync(token).ConfigureAwait(false);
             if (session is not IEngineAutomationSession automation)
             {
                 throw new InvalidOperationException("engine_automation_capability_missing");
             }
-            return await operation(automation, token).ConfigureAwait(false);
+            return await operation(automation, token)
+                .WaitAsync(token)
+                .ConfigureAwait(false);
         }
         catch (EngineCommandRejectedException)
         {
             throw;
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        catch (OperationCanceledException exception)
+            when (deadlineCancellation.IsCancellationRequested &&
+                  !operationCancellation.IsCancellationRequested)
+        {
+            await RetireSessionAsync().ConfigureAwait(false);
+            var timeout = new TimeoutException(
+                "engine_automation_command_timeout",
+                exception);
+            RegisterFailure(timeout);
+            throw new InvalidOperationException(
+                "engine_automation_command_timeout",
+                timeout);
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidOperationException exception)
+            when (IsRegisteredLifecycleFailure(exception))
         {
             throw;
         }
@@ -382,10 +472,12 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
                 catch (InvalidOperationException exception)
                 {
                     lastMonitorFailure = exception;
-                    if (circuitOpen)
-                    {
-                        return;
-                    }
+                }
+                catch (Exception exception)
+                {
+                    // Cleanup or adapter failures must not terminate the
+                    // heartbeat owner. The next bounded cycle retries.
+                    RegisterFailure(exception);
                 }
             }
         }
@@ -396,20 +488,75 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
 
     private async ValueTask RetireSessionAsync()
     {
-        var retiring = session;
-        session = null;
+        IEngineManagedSession? retiring;
+        lock (eventForwardingGate)
+        {
+            retiring = session;
+            session = null;
+            activeEventBinding = null;
+        }
         if (retiring is not null)
         {
-            if (retiring is IEngineSessionStateSource stateSource)
+            Volatile.Write(ref runtimeAuthorityActive, false);
+            if (sessionStateSource is not null && sessionStateHandler is not null)
             {
-                stateSource.SessionStateChanged -= OnSessionStateChanged;
+                sessionStateSource.SessionStateChanged -= sessionStateHandler;
+            }
+            if (notificationFrameSource is not null && notificationFrameHandler is not null)
+            {
+                notificationFrameSource.NotificationReceived -= notificationFrameHandler;
+            }
+            notificationFrameSource = null;
+            notificationFrameHandler = null;
+            sessionStateSource = null;
+            sessionStateHandler = null;
+            lock (eventForwardingGate)
+            {
+                SessionStateChanged?.Invoke(FishingSessionStateSnapshot.Empty);
             }
             await retiring.DisposeAsync().ConfigureAwait(false);
         }
     }
 
-    private void OnSessionStateChanged(FishingSessionStateSnapshot snapshot) =>
-        SessionStateChanged?.Invoke(snapshot);
+    private void OnSessionStateChanged(
+        EngineGenerationBinding binding,
+        FishingSessionStateSnapshot snapshot)
+    {
+        lock (eventForwardingGate)
+        {
+            if (!ReferenceEquals(activeEventBinding, binding))
+            {
+                return;
+            }
+            SessionStateChanged?.Invoke(snapshot);
+        }
+    }
+
+    private void OnNotificationReceived(
+        EngineGenerationBinding binding,
+        FishingEngineNotificationFrame frame)
+    {
+        lock (eventForwardingGate)
+        {
+            if (!ReferenceEquals(activeEventBinding, binding))
+            {
+                return;
+            }
+            try
+            {
+                NotificationReceived?.Invoke(new FishingEngineNotificationReceipt(
+                    binding.Generation,
+                    frame.Sequence,
+                    frame.CapturedAtUnixMs,
+                    frame.Notification));
+            }
+            catch
+            {
+                // Notification consumers are observational and cannot own Engine
+                // session lifecycle or runtime authority.
+            }
+        }
+    }
 
     private EngineSupervisorSnapshot CreateSnapshot()
     {
@@ -424,6 +571,7 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
             current.BootstrapDuration,
             restartCount,
             failures.Count,
+            lastRestartDelay,
             current.SessionState);
     }
 
@@ -433,7 +581,7 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
         var now = timeProvider.GetUtcNow();
         PruneFailures(now);
         failures.Enqueue(now);
-        circuitOpen = failures.Count >= policy.MaximumFailures;
+        restartDelayRequired = true;
     }
 
     private void PruneFailures() => PruneFailures(timeProvider.GetUtcNow());
@@ -445,15 +593,23 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable
         {
             _ = failures.Dequeue();
         }
-        if (failures.Count < policy.MaximumFailures)
+    }
+
+    private void EnsureMonitorRunning()
+    {
+        if (monitorTask is null || monitorTask.IsCompleted)
         {
-            circuitOpen = false;
+            monitorTask = MonitorAsync(lifetimeCancellation.Token);
         }
     }
 
-    private InvalidOperationException CreateCircuitOpenException() => new(
-        "engine_supervisor_restart_circuit_open",
-        lastMonitorFailure);
+    private static bool IsRegisteredLifecycleFailure(
+        InvalidOperationException exception) =>
+        exception.Message is "engine_supervisor_start_failed";
+
+    private sealed record EngineGenerationBinding(
+        IEngineManagedSession Session,
+        ulong Generation);
 
     private void ThrowIfStopped()
     {

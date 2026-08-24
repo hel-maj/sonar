@@ -14,7 +14,11 @@ void accepted_entitlement::clear() noexcept {
 
 session_transition fishing_session_lifecycle::validate_start(
     const start_session_context& context) const noexcept {
-  if (context.authority_mode != engine_authority_mode::production) {
+  if (context.authority_mode != engine_authority_mode::production
+#if defined(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
+      && context.authority_mode != engine_authority_mode::developer_full_access
+#endif
+  ) {
     return {false, "rejected", "production_authority_required"};
   }
   if (!context.side_effects_negotiated) {

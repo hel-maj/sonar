@@ -1,11 +1,16 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <variant>
+#include <vector>
 
 #include "sonar/fishing/catch_observation/catch_observation.h"
 #include "sonar/fishing/equipment_recovery/equipment_recovery.h"
@@ -24,6 +29,48 @@ enum class production_phase : std::uint8_t {
   stopping,
 };
 
+inline constexpr std::size_t maximum_pending_production_notifications = 64U;
+
+struct production_player_status_notification final {
+  std::optional<int> food;
+  std::optional<int> water;
+  std::optional<int> health;
+  std::optional<double> inventory_weight;
+  std::optional<double> inventory_weight_max;
+  std::optional<double> backpack_weight;
+  std::optional<double> backpack_weight_max;
+};
+
+struct production_catch_notification final {
+  std::string fish_name;
+  std::optional<double> weight_kg;
+  std::optional<std::string> quality_text;
+  bool released{};
+  session_statistics::SessionTotals totals{};
+  std::optional<std::uint64_t> xp_current;
+  std::optional<std::uint64_t> xp_total;
+};
+
+struct production_meal_recovered_notification final {
+  std::size_t affected_count{};
+  std::optional<production_player_status_notification> player_status;
+};
+
+struct production_inventory_full_notification final {};
+struct production_bait_tired_notification final {};
+
+struct production_focus_lost_notification final {
+  std::string reason;
+};
+
+using production_notification_event = std::variant<
+    production_catch_notification,
+    production_meal_recovered_notification,
+    production_inventory_full_notification,
+    production_player_status_notification,
+    production_bait_tired_notification,
+    production_focus_lost_notification>;
+
 class production_session_progress_sink {
  public:
   virtual ~production_session_progress_sink() = default;
@@ -35,6 +82,8 @@ class production_session_progress_sink {
       bool kept) noexcept = 0;
   virtual void publish_tackle(
       const equipment_recovery::TackleCounts& counts) noexcept = 0;
+  virtual void publish_notification(
+      production_notification_event notification) noexcept = 0;
 };
 
 struct production_capability_snapshot final {
@@ -58,6 +107,8 @@ struct production_capability_snapshot final {
   std::size_t catches_processed{};
   std::size_t inventory_episodes_completed{};
   std::size_t maintenance_episodes_completed{};
+  std::size_t pending_notification_count{};
+  std::uint64_t dropped_notification_count{};
   session_statistics::SessionStatisticsSnapshot statistics;
 
   [[nodiscard]] bool complete_native_graph() const noexcept;
@@ -120,6 +171,8 @@ class production_capability_composition final
       const production_capability_composition&) = delete;
 
   [[nodiscard]] production_capability_snapshot snapshot() const;
+  [[nodiscard]] std::vector<production_notification_event>
+  take_pending_notifications() noexcept;
 
   [[nodiscard]] production_capability_admission prepare_session(
       runtime_settings::RuntimeSettingsSnapshot settings,
@@ -144,6 +197,10 @@ class production_capability_composition final
       bool kept) noexcept override;
   void publish_tackle(
       const equipment_recovery::TackleCounts& counts) noexcept override;
+  void publish_notification(
+      production_notification_event notification) noexcept override;
+  void enqueue_notification(
+      production_notification_event notification) noexcept;
   void advance_progress_revision() noexcept;
 
   std::unique_ptr<production_automation_session_factory> factory_;
@@ -163,6 +220,8 @@ class production_capability_composition final
   production_phase phase_{production_phase::idle};
   std::string detected_stage_;
   production_session_result last_result_;
+  std::deque<production_notification_event> pending_notifications_;
+  std::uint64_t dropped_notification_count_{};
   session_statistics::SessionStatistics statistics_{
       session_statistics::DefaultPriceCatalog()};
 };

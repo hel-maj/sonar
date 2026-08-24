@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <stop_token>
@@ -20,10 +21,16 @@ struct memory_snapshot_result final {
   std::string reason;
 };
 
+enum class memory_capture_scope : std::uint8_t {
+  reeling,
+  inventory_state,
+};
+
 class fishing_memory_source {
  public:
   virtual ~fishing_memory_source() = default;
   [[nodiscard]] virtual memory_snapshot_result capture(
+      memory_capture_scope scope,
       std::uint64_t sequence,
       std::uint64_t captured_at_steady_ns,
       const sonar::platform::windows::process_generation& game_generation)
@@ -33,6 +40,7 @@ class fishing_memory_source {
 class unavailable_fishing_memory_source final : public fishing_memory_source {
  public:
   [[nodiscard]] memory_snapshot_result capture(
+      memory_capture_scope scope,
       std::uint64_t sequence,
       std::uint64_t captured_at_steady_ns,
       const sonar::platform::windows::process_generation& game_generation)
@@ -45,6 +53,7 @@ class resolved_fishing_memory_source final : public fishing_memory_source {
       std::unique_ptr<memory_observation::memory_connector> connector);
 
   [[nodiscard]] memory_snapshot_result capture(
+      memory_capture_scope scope,
       std::uint64_t sequence,
       std::uint64_t captured_at_steady_ns,
       const sonar::platform::windows::process_generation& game_generation)

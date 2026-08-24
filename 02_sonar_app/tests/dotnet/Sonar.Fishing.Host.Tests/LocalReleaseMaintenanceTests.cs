@@ -11,6 +11,7 @@ internal static class LocalReleaseMaintenanceTests
     public static IReadOnlyList<TestCase> Create() =>
     [
         new("local_release_bundle_verification_rejects_tampering", BundleVerificationIsExact),
+        new("local_release_rejects_developer_authority_bundle_contamination", DeveloperBundleIsNotInstallable),
         new("local_release_install_update_and_rollback_preserve_user_state", LifecyclePreservesState),
         new("local_release_interrupted_swap_recovers_previous_pair", InterruptedSwapRecovers),
         new("local_release_after_exit_command_is_explicit_and_bounded", CommandContractIsBounded),
@@ -94,6 +95,23 @@ internal static class LocalReleaseMaintenanceTests
             !Directory.EnumerateDirectories(install, ".update-*").Any() &&
             !Directory.EnumerateDirectories(install, ".rollback-*").Any(),
             "Local lifecycle left transaction residue");
+    }
+
+    private static void DeveloperBundleIsNotInstallable()
+    {
+        using var scope = TempScope.Create();
+        var bundle = scope.CreateBundle("developer", "1.0.0", "host-dev", "engine-dev");
+        var manifestPath = Path.Combine(bundle, "bundle-manifest.json");
+        var manifest = File.ReadAllText(manifestPath, Encoding.UTF8)
+            .Replace(
+                "\"schemaVersion\":1,\"product\":\"fishing\",\"releaseMode\":\"development-unsigned\"",
+                "\"schemaVersion\":2,\"product\":\"fishing\",\"releaseMode\":\"developer-full-access-unsigned\",\"developerFullAccess\":true",
+                StringComparison.Ordinal);
+        File.WriteAllText(manifestPath, manifest, new UTF8Encoding(false));
+
+        TestAssert.Throws<InvalidOperationException>(
+            () => DevelopmentBundleVerifier.Verify(bundle),
+            "Local maintenance accepted a developer authority bundle");
     }
 
     private static void InterruptedSwapRecovers()

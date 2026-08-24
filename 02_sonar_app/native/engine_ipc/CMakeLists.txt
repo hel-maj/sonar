@@ -81,6 +81,11 @@ target_link_libraries(SonarFishingSessionControl
 target_compile_options(SonarFishingSessionControl
     PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
 )
+if(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
+    target_compile_definitions(SonarFishingSessionControl
+        PUBLIC SONAR_FISHING_DEVELOPER_FULL_ACCESS=1
+    )
+endif()
 
 add_library(SonarFishingProductionComposition STATIC
     src/production_composition.cpp
@@ -172,6 +177,11 @@ target_compile_definitions(SonarFishingEngine
         SONAR_FISHING_SCHEMA_SHA256="${SONAR_FISHING_SCHEMA_SHA256}"
         SONAR_FISHING_ENABLE_OFFLINE_DIAGNOSTICS=0
 )
+if(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
+    target_compile_definitions(SonarFishingEngine
+        PRIVATE SONAR_FISHING_DEVELOPER_FULL_ACCESS=1
+    )
+endif()
 target_compile_options(SonarFishingEngine
     PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
 )
@@ -255,5 +265,18 @@ add_test(
     COMMAND "${CMAKE_COMMAND}"
         "-DENGINE_EXECUTABLE=$<TARGET_FILE:SonarFishingEngine>"
         "-DEXPECTED_REASON=production_host_build_id_missing"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_engine_failure.cmake"
+)
+if(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
+    set(SONAR_FISHING_DEVELOPER_GATE_REASON "developer_host_build_id_missing")
+else()
+    set(SONAR_FISHING_DEVELOPER_GATE_REASON "production_authority_gate_closed")
+endif()
+add_test(
+    NAME sonar_fishing.ipc.developer_authority_gate
+    COMMAND "${CMAKE_COMMAND}"
+        "-DENGINE_EXECUTABLE=$<TARGET_FILE:SonarFishingEngine>"
+        "-DENGINE_MODE=developer-full-access"
+        "-DEXPECTED_REASON=${SONAR_FISHING_DEVELOPER_GATE_REASON}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_engine_failure.cmake"
 )

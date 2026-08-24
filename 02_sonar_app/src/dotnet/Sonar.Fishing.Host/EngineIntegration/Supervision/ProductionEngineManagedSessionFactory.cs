@@ -1,4 +1,5 @@
 using Sonar.Fishing.Host.FishingSessionState;
+using Sonar.Fishing.Host.EngineIntegration.Notifications;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.SettingsPersistence;
 
@@ -9,11 +10,13 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
     private readonly string engineExecutable;
     private readonly TimeSpan timeout;
     private readonly Func<FishingRuntimeSettings> runtimeSettings;
+    private readonly EngineProcessAuthorityMode authorityMode;
 
     internal ProductionEngineManagedSessionFactory(
         string engineExecutable,
         TimeSpan timeout,
-        Func<FishingRuntimeSettings> runtimeSettings)
+        Func<FishingRuntimeSettings> runtimeSettings,
+        EngineProcessAuthorityMode authorityMode = EngineProcessAuthorityMode.Production)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(engineExecutable);
         if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromSeconds(30))
@@ -21,28 +24,59 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
             throw new ArgumentOutOfRangeException(nameof(timeout));
         }
         ArgumentNullException.ThrowIfNull(runtimeSettings);
+#if !SONAR_FISHING_DEVELOPER_FULL_ACCESS
+        if (authorityMode == EngineProcessAuthorityMode.DeveloperFullAccess)
+        {
+            throw new ArgumentException(
+                "developer_full_access_not_compiled",
+                nameof(authorityMode));
+        }
+#endif
+        if (authorityMode == EngineProcessAuthorityMode.OfflineDiagnostics)
+        {
+            throw new ArgumentOutOfRangeException(nameof(authorityMode));
+        }
         this.engineExecutable = engineExecutable;
         this.timeout = timeout;
         this.runtimeSettings = runtimeSettings;
+        this.authorityMode = authorityMode;
     }
 
     public async Task<IEngineManagedSession> StartAsync(CancellationToken cancellationToken)
     {
-        var identity = BundleSessionIdentityLoader.Load(engineExecutable);
-        var candidate = await OfflineEngineSession.StartProductionAsync(
-            engineExecutable,
-            timeout,
-            identity,
-            cancellationToken).ConfigureAwait(false);
+        var identity = BundleSessionIdentityLoader.Load(engineExecutable, authorityMode);
+        var candidate = authorityMode == EngineProcessAuthorityMode.DeveloperFullAccess
+            ? await OfflineEngineSession.StartDeveloperFullAccessAsync(
+                engineExecutable,
+                timeout,
+                identity,
+                cancellationToken).ConfigureAwait(false)
+            : await OfflineEngineSession.StartProductionAsync(
+                engineExecutable,
+                timeout,
+                identity,
+                cancellationToken).ConfigureAwait(false);
         try
         {
             var settings = runtimeSettings();
             settings.Validate();
-            _ = await candidate.ApplyRuntimeSettingsAsync(
+            var acceptedSettingsRevision = await candidate.ApplyRuntimeSettingsAsync(
                 settings,
                 cancellationToken).ConfigureAwait(false);
             _ = await candidate.PingAsync(cancellationToken).ConfigureAwait(false);
-            return new ProductionEngineManagedSession(candidate, timeout);
+            var restoredIdleState = new FishingSessionStateSnapshot(
+                revision: 0,
+                running: false,
+                stopping: false,
+                detectedStage: string.Empty,
+                totals: new FishingSessionTotalsSnapshot(0, 0, 0, 0, 0, 0, 0),
+                tackleItems: [],
+                acceptedSettingsRevision: acceptedSettingsRevision);
+            return new ProductionEngineManagedSession(
+                candidate,
+                timeout,
+                restoredIdleState,
+                authorityMode == EngineProcessAuthorityMode.DeveloperFullAccess);
         }
         catch
         {
@@ -55,7 +89,9 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
         : IEngineManagedSession,
           IEngineEntitlementSession,
           IEngineAutomationSession,
-          IEngineSessionStateSource
+          IEngineSessionStateSource,
+          IEngineNotificationFrameSource,
+          IEngineBootstrapAuthoritySession
     {
         private readonly OfflineEngineSession session;
         private readonly TimeSpan heartbeatTimeout;
@@ -63,14 +99,22 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
 
         internal ProductionEngineManagedSession(
             OfflineEngineSession session,
-            TimeSpan heartbeatTimeout)
+            TimeSpan heartbeatTimeout,
+            FishingSessionStateSnapshot restoredIdleState,
+            bool hasBootstrapRuntimeAuthority)
         {
             this.session = session ?? throw new ArgumentNullException(nameof(session));
             this.heartbeatTimeout = heartbeatTimeout;
+            sessionState = restoredIdleState ??
+                throw new ArgumentNullException(nameof(restoredIdleState));
+            HasBootstrapRuntimeAuthority = hasBootstrapRuntimeAuthority;
             session.SessionSnapshotReceived += OnSessionSnapshotReceived;
+            session.NotificationReceived += OnNotificationReceived;
         }
 
         public event Action<FishingSessionStateSnapshot>? SessionStateChanged;
+
+        public event Action<FishingEngineNotificationFrame>? NotificationReceived;
 
         public int ProcessId => session.ProcessId;
 
@@ -83,6 +127,8 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
         public TimeSpan BootstrapDuration => session.BootstrapDuration;
 
         public FishingSessionStateSnapshot SessionState => Volatile.Read(ref sessionState);
+
+        public bool HasBootstrapRuntimeAuthority { get; }
 
         public async Task PingAsync(CancellationToken cancellationToken)
         {
@@ -127,6 +173,7 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
         public ValueTask DisposeAsync()
         {
             session.SessionSnapshotReceived -= OnSessionSnapshotReceived;
+            session.NotificationReceived -= OnNotificationReceived;
             return session.DisposeAsync();
         }
 
@@ -135,5 +182,8 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
             Volatile.Write(ref sessionState, snapshot);
             SessionStateChanged?.Invoke(snapshot);
         }
+
+        private void OnNotificationReceived(FishingEngineNotificationFrame notification) =>
+            NotificationReceived?.Invoke(notification);
     }
 }

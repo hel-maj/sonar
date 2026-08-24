@@ -3,6 +3,7 @@ param(
     [string]$Version = "",
     [string]$OutputDirectory = "",
     [switch]$DevelopmentUnsigned,
+    [switch]$DeveloperFullAccess,
     [switch]$SkipOfflineTests,
     [string]$CommonFeed = $env:SONAR_COMMON_FEED,
     [string]$CommonNativePackage = $env:SONAR_COMMON_NATIVE_PACKAGE,
@@ -21,11 +22,17 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "release_common.ps1")
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
-$releaseMode = if ($DevelopmentUnsigned) {
+$releaseMode = if ($DeveloperFullAccess) {
+    "developer-full-access-unsigned"
+}
+elseif ($DevelopmentUnsigned) {
     "development-unsigned"
 }
 else {
     "production-signed"
+}
+if ($DeveloperFullAccess -and -not $DevelopmentUnsigned) {
+    throw "developer_full_access_requires_unsigned_build"
 }
 if ([string]::IsNullOrWhiteSpace($Version)) {
     if ($DevelopmentUnsigned) {
@@ -40,7 +47,12 @@ if ($SkipOfflineTests -and -not $DevelopmentUnsigned) {
     throw "release_tests_cannot_be_skipped_in_production"
 }
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $productRoot "build\release\bundle"
+    $OutputDirectory = if ($DeveloperFullAccess) {
+        Join-Path $productRoot "build\developer-full-access\bundle"
+    }
+    else {
+        Join-Path $productRoot "build\release\bundle"
+    }
 }
 elseif (-not [IO.Path]::IsPathRooted($OutputDirectory)) {
     $OutputDirectory = Join-Path $productRoot $OutputDirectory
@@ -167,6 +179,9 @@ function Publish-FishingHost(
         "-p:NuGetAudit=false",
         "-p:SonarProtocExecutable=$ResolvedProtoc"
     )
+    if ($DeveloperFullAccess) {
+        $arguments += "-p:SonarFishingDeveloperFullAccess=true"
+    }
     Invoke-Checked "dotnet" $arguments
     $publishedFiles = @(Get-ChildItem -LiteralPath $publishDirectory -File -Force)
     if ($publishedFiles.Count -ne 1 -or
@@ -187,6 +202,7 @@ function Build-FishingEngine(
     $nativeSource = Join-Path $productRoot "native"
     $nativeBuild = Join-Path $BuildRoot "native-build"
     $target = "SonarFishingEngine"
+    $developerCMakeValue = if ($DeveloperFullAccess) { "ON" } else { "OFF" }
     Invoke-Checked $ResolvedCMake @(
         "-S", $nativeSource,
         "-B", $nativeBuild,
@@ -197,6 +213,7 @@ function Build-FishingEngine(
         "-DSONAR_FISHING_BUILD_PRODUCTION_ENGINE=ON",
         "-DSONAR_FISHING_BUILD_LIVE_OBSERVATION_PREFLIGHT=OFF",
         "-DSONAR_FISHING_BUILD_PROFILE_COMPATIBILITY_PROBE=OFF",
+        "-DSONAR_FISHING_DEVELOPER_FULL_ACCESS=$developerCMakeValue",
         "-DSONAR_COMMON_NATIVE_PACKAGE=$ResolvedNativePackage",
         "-DSONAR_COMMON_NATIVE_WINDOWS_PACKAGE=$ResolvedNativeWindowsPackage",
         "-DSONAR_COMMON_NATIVE_LICENSING_PACKAGE=$ResolvedNativeLicensingPackage",
@@ -321,7 +338,8 @@ $firstEngineHash = Get-FishingSha256 $firstEngine
 $secondEngineHash = Get-FishingSha256 $secondEngine
 $determinismVerified = $firstHostHash -ceq $secondHostHash -and
     $firstEngineHash -ceq $secondEngineHash
-if (-not $determinismVerified -and -not $DevelopmentUnsigned) {
+if (-not $determinismVerified -and
+    ($DeveloperFullAccess -or -not $DevelopmentUnsigned)) {
     throw "release_unsigned_inputs_not_deterministic"
 }
 if (-not $determinismVerified) {
@@ -364,9 +382,16 @@ $manifest = New-FishingBundleManifestData `
     $secondEngineHash `
     $determinismVerified `
     $hostSignatureStatus `
-    $engineSignatureStatus
+    $engineSignatureStatus `
+    $DeveloperFullAccess
 Write-FishingBundleManifest (Join-Path $bundle "bundle-manifest.json") $manifest
-[void](Read-FishingBundleManifest $productRoot $bundle $releaseMode)
+if ($DeveloperFullAccess) {
+    [void](Read-FishingBundleManifest `
+        $productRoot $bundle $releaseMode -AllowDeveloperFullAccess)
+}
+else {
+    [void](Read-FishingBundleManifest $productRoot $bundle $releaseMode)
+}
 & $noPythonGate `
     -ProductRoot $productRoot `
     -BundleDirectory $bundle `

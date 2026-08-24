@@ -286,6 +286,8 @@ void test_language_neutral_fixture_parity(
 struct fake_process_state final {
   observation::process_identity identity;
   std::map<std::uintptr_t, std::vector<std::byte>> memory;
+  std::vector<sonar::platform::windows::memory_region_snapshot> regions;
+  std::size_t region_queries{};
   bool generation_current{true};
 };
 
@@ -302,13 +304,36 @@ class fake_session final : public observation::readonly_memory_session {
   [[nodiscard]] bool read_exact(
       const std::uintptr_t address,
       const std::span<std::byte> destination) noexcept override {
-    const auto found = state_->memory.find(address);
-    if (found == state_->memory.end() ||
-        found->second.size() != destination.size()) {
+    auto found = state_->memory.upper_bound(address);
+    if (found == state_->memory.begin()) {
       return false;
     }
-    std::copy(found->second.begin(), found->second.end(), destination.begin());
+    --found;
+    const auto offset = static_cast<std::size_t>(address - found->first);
+    if (offset > found->second.size() ||
+        destination.size() > found->second.size() - offset) {
+      return false;
+    }
+    std::copy_n(
+        found->second.begin() + static_cast<std::ptrdiff_t>(offset),
+        destination.size(),
+        destination.begin());
     return true;
+  }
+
+  [[nodiscard]] std::optional<
+      sonar::platform::windows::memory_region_snapshot>
+  query_region(const std::uintptr_t address) noexcept override {
+    ++state_->region_queries;
+    const auto found = std::ranges::find_if(
+        state_->regions,
+        [address](const auto& region) {
+          return address >= region.base_address &&
+              address - region.base_address < region.size;
+        });
+    return found == state_->regions.end()
+        ? std::nullopt
+        : std::optional(*found);
   }
 
   [[nodiscard]] bool generation_current() noexcept override {
@@ -516,13 +541,14 @@ void test_embedded_build_registry_contract() {
   require(profiles.size() == 1U, "build_profile_count_changed");
   const auto& profile = profiles.front();
   require(
-      profile.schema_version == 1U &&
+      profile.schema_version == 2U &&
           profile.profile_id == "majestic-gta5-677e4e35-v1" &&
           profile.profile_revision == 1U &&
           profile.fish_model_hash == 802685111U &&
           profile.fish_active_offset == 0x189U &&
           profile.world_patterns.size() == 5U &&
-          profile.replay_pattern.bytes.size() == 36U,
+          profile.replay_pattern.bytes.size() == 36U &&
+          !profile.inventory_binding.has_value(),
       "build_profile_payload_changed");
   const auto selected = observation::select_embedded_memory_build_profile(
       L"gta5.EXE", profile.game.image_sha256);
@@ -534,6 +560,227 @@ void test_embedded_build_registry_contract() {
       !unsupported.ready() &&
           unsupported.reason == "memory_game_build_unsupported",
       "unsupported_build_not_fail_closed");
+}
+
+constexpr std::uintptr_t inventory_scan_base = 0x10000000000ULL;
+
+[[nodiscard]] observation::embedded_inventory_binding
+fixture_inventory_binding() {
+  observation::masked_memory_pattern pattern;
+  pattern.bytes.assign(34U, 0x5AU);
+  pattern.bytes[16U] = -1;
+  pattern.bytes[17U] = -1;
+  return {
+      .minimum_address_inclusive = inventory_scan_base,
+      .maximum_address_exclusive = inventory_scan_base + 0x2000U,
+      .maximum_scanned_bytes = 0x1000U,
+      .maximum_region_bytes = 0x1000U,
+      .maximum_enumerated_regions = 4U,
+      .maximum_pattern_hits = 12U,
+      .slot_stride = 0x100U,
+      .slot_count = 3U,
+      .slot_pattern = std::move(pattern),
+      .signals = {
+          {16U, {0U, 128U, 1.0}},
+          {17U, {0U, 63U, 1.0}},
+      },
+      .minimum_votes = 6U,
+      .minimum_confidence = 0.85,
+  };
+}
+
+void materialize_inventory_slot(
+    std::vector<std::byte>& region,
+    const std::size_t offset,
+    const observation::embedded_inventory_binding& binding,
+    const bool open) {
+  require(
+      offset <= region.size() &&
+          binding.slot_pattern.bytes.size() <= region.size() - offset,
+      "inventory_slot_fixture_range_invalid");
+  for (std::size_t index = 0U;
+       index < binding.slot_pattern.bytes.size();
+       ++index) {
+    const auto value = binding.slot_pattern.bytes[index];
+    region[offset + index] = value < 0
+        ? std::byte{0U}
+        : static_cast<std::byte>(value);
+  }
+  for (const auto& signal : binding.signals) {
+    region[offset + signal.offset] = static_cast<std::byte>(
+        open ? signal.candidate.open_value : signal.candidate.closed_value);
+  }
+}
+
+[[nodiscard]] std::shared_ptr<fake_process_state>
+make_inventory_binding_process(
+    const observation::embedded_memory_build_profile& profile,
+    const observation::embedded_inventory_binding& binding,
+    const bool ambiguous) {
+  auto game = std::make_shared<fake_process_state>();
+  game->identity = {
+      .role = observation::process_role::game,
+      .generation = {303U, 333U},
+      .image_name = L"GTA5.exe",
+      .image_sha256 = profile.game.image_sha256,
+      .modules = {{
+          L"GTA5.exe", L"C:\\fixture\\GTA5.exe", 0x140000000ULL, 0x1000U}},
+  };
+  auto& bytes = game->memory[inventory_scan_base];
+  bytes.assign(0x1000U, std::byte{0U});
+  for (const auto offset : std::array{0x100U, 0x200U, 0x300U}) {
+    materialize_inventory_slot(bytes, offset, binding, true);
+  }
+  if (ambiguous) {
+    for (const auto offset : std::array{0x500U, 0x600U, 0x700U}) {
+      materialize_inventory_slot(bytes, offset, binding, false);
+    }
+  }
+  game->regions = {
+      {inventory_scan_base, 0x1000U, 0x1000U, 0x04U, 0x20000U},
+      {inventory_scan_base + 0x1000U, 0x1000U, 0U, 0x01U, 0U},
+  };
+  return game;
+}
+
+void test_inventory_scope_discovery_and_recovery() {
+  auto profile = observation::embedded_memory_build_profiles().front();
+  profile.inventory_binding = fixture_inventory_binding();
+  auto game = make_inventory_binding_process(
+      profile, *profile.inventory_binding, false);
+  fake_connector connector(game, nullptr);
+  observation::memory_capture_plan_resolver resolver(
+      connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &profile, 1U});
+
+  const auto first = resolver.resolve_inventory(1U, 100U,
+      game->identity.generation);
+  require(first.ready() && first.profile->require_inventory &&
+          !first.profile->require_reeling &&
+          first.profile->inventory_candidates.size() == 6U &&
+          first.plan->regions.size() == 6U,
+      "inventory_binding_not_resolved_independently");
+  const auto queries_after_discovery = game->region_queries;
+
+  observation::memory_observer observer(connector);
+  const auto captured = observer.capture(*first.profile, *first.plan);
+  require(captured.ready() && captured.snapshot->inventory.has_value() &&
+          captured.snapshot->inventory->open &&
+          captured.snapshot->inventory->matched_votes == 6U &&
+          captured.snapshot->inventory->confidence == 1.0,
+      "inventory_binding_open_state_not_decoded");
+
+  const auto cached = resolver.resolve_inventory(2U, 200U,
+      game->identity.generation);
+  require(cached.ready() && game->region_queries == queries_after_discovery,
+      "inventory_binding_cache_redid_cold_scan");
+
+  auto& bytes = game->memory.at(inventory_scan_base);
+  std::fill(bytes.begin(), bytes.end(), std::byte{0U});
+  for (const auto offset : std::array{0x500U, 0x600U, 0x700U}) {
+    materialize_inventory_slot(
+        bytes, offset, *profile.inventory_binding, false);
+  }
+  const auto recovered = resolver.resolve_inventory(3U, 300U,
+      game->identity.generation);
+  require(recovered.ready() &&
+          game->region_queries > queries_after_discovery &&
+          recovered.plan->regions.front().address ==
+              inventory_scan_base + 0x500U + 16U,
+      "inventory_binding_did_not_rediscover_after_drift");
+
+  observation::memory_observer recovered_observer(connector);
+  const auto closed = recovered_observer.capture(
+      *recovered.profile, *recovered.plan);
+  require(closed.ready() && closed.snapshot->inventory.has_value() &&
+          !closed.snapshot->inventory->open &&
+          closed.snapshot->inventory->confidence == 1.0,
+      "inventory_binding_closed_state_not_decoded");
+}
+
+void test_inventory_scope_typed_blockers() {
+  auto profile = observation::embedded_memory_build_profiles().front();
+  auto current_game = make_inventory_binding_process(
+      profile, fixture_inventory_binding(), false);
+  current_game->identity.image_sha256 =
+      "8C2C3F768B87F060D678D9E175842AA20449CF5BC164C630692A494EB353D472";
+  fake_connector current_connector(current_game, nullptr);
+  observation::memory_capture_plan_resolver current(
+      current_connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &profile, 1U});
+  const auto unsupported = current.resolve_inventory(
+      1U, 100U, current_game->identity.generation);
+  require(!unsupported.ready() &&
+          unsupported.failure ==
+              observation::inventory_binding_failure::profile_unavailable &&
+          unsupported.reason == "memory_game_build_unsupported" &&
+          current_game->region_queries == 0U,
+      "current_inventory_build_blocker_was_not_typed_before_scan");
+
+  auto game = make_inventory_binding_process(
+      profile, fixture_inventory_binding(), false);
+  fake_connector connector(game, nullptr);
+  observation::memory_capture_plan_resolver unavailable(
+      connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &profile, 1U});
+  const auto missing = unavailable.resolve_inventory(
+      1U, 100U, game->identity.generation);
+  require(!missing.ready() &&
+          missing.failure ==
+              observation::inventory_binding_failure::profile_unavailable &&
+          missing.reason == "memory_inventory_binding_unavailable" &&
+          game->region_queries == 0U,
+      "missing_inventory_profile_did_not_fail_typed_before_scan");
+
+  profile.inventory_binding = fixture_inventory_binding();
+  profile.inventory_binding->slot_pattern.bytes[16U] = 0U;
+  auto invalid_game = make_inventory_binding_process(
+      profile, *profile.inventory_binding, false);
+  fake_connector invalid_connector(invalid_game, nullptr);
+  observation::memory_capture_plan_resolver invalid(
+      invalid_connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &profile, 1U});
+  const auto invalid_binding = invalid.resolve_inventory(
+      1U, 100U, invalid_game->identity.generation);
+  require(!invalid_binding.ready() &&
+          invalid_binding.failure ==
+              observation::inventory_binding_failure::profile_unavailable &&
+          invalid_binding.reason == "memory_inventory_binding_unavailable" &&
+          invalid_game->region_queries == 0U,
+      "dynamic_inventory_signal_was_admitted_as_exact_signature_byte");
+
+  profile.inventory_binding = fixture_inventory_binding();
+  auto ambiguous_game = make_inventory_binding_process(
+      profile, *profile.inventory_binding, true);
+  fake_connector ambiguous_connector(ambiguous_game, nullptr);
+  observation::memory_capture_plan_resolver ambiguous(
+      ambiguous_connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &profile, 1U});
+  const auto rejected = ambiguous.resolve_inventory(
+      1U, 100U, ambiguous_game->identity.generation);
+  const auto queries_after_rejection = ambiguous_game->region_queries;
+  require(!rejected.ready() &&
+          rejected.failure ==
+              observation::inventory_binding_failure::signature_ambiguous &&
+          rejected.reason == "memory_inventory_signature_ambiguous",
+      "ambiguous_inventory_signature_was_admitted");
+  const auto throttled = ambiguous.resolve_inventory(
+      2U, 200U, ambiguous_game->identity.generation);
+  require(!throttled.ready() &&
+          throttled.failure == rejected.failure &&
+          ambiguous_game->region_queries == queries_after_rejection,
+      "failed_inventory_discovery_was_repeated_without_cooldown");
+  const auto retried = ambiguous.resolve_inventory(
+      3U, 5'000'000'200ULL, ambiguous_game->identity.generation);
+  require(!retried.ready() &&
+          retried.failure == rejected.failure &&
+          ambiguous_game->region_queries > queries_after_rejection,
+      "failed_inventory_discovery_did_not_retry_after_cooldown");
 }
 
 void test_independent_fish_identity_projection(
@@ -719,6 +966,8 @@ int main() {
     test_language_neutral_fixture_parity(rows);
     test_coherent_snapshot_and_replay_rejection(rows);
     test_embedded_build_registry_contract();
+    test_inventory_scope_discovery_and_recovery();
+    test_inventory_scope_typed_blockers();
     test_independent_fish_identity_projection(rows);
     test_negative_and_profile_drift(rows);
     test_default_off_composition();

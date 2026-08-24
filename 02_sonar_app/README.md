@@ -31,7 +31,7 @@ Host/Engine composition; запуск рыбалки остаётся fail-close
 - `scripts` - PowerShell entrypoints целевой версии.
 - `docs/architecture` - ADR, migration evidence и production cutover checklist.
 
-Общие IPC, process supervision, licensing verification и `Sonar.UI.Wpf 0.2.18`
+Общие IPC, process supervision, licensing verification и `Sonar.UI.Wpf 0.2.19`
 потребляются как точные immutable Sonar Common packages. Исходники Common в
 Fishing не копируются.
 
@@ -119,6 +119,39 @@ Runtime 10 x64, после чего запускает `Sonar.exe` с пусты
 не обходит лицензию, startup availability, target, foreground или input-safety
 проверки.
 
+Для локальной проверки владельцем существует отдельный compile-isolated bundle:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_developer_full_access.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_developer_full_access.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full_access.ps1
+```
+
+`build_developer_full_access.ps1` принимает `-Version` и `-OutputDirectory`;
+`-SkipOfflineTests` предназначен только для промежуточной разработки.
+`verify_developer_full_access.ps1` и `run_developer_full_access.ps1` принимают
+`-BundleDirectory`, а run дополнительно поддерживает `-Wait`. Внутренний
+`-VerifyOnly` проверяет WinPS-compatible launch contract без запуска UI и
+используется regression-тестом.
+
+Builder по умолчанию использует стабильную локальную версию `1.0.0-local`.
+Product UI показывает активный `Локальный доступ`, не просит ключ и не выводит
+raw feature IDs или технический channel. В local feature set входят только
+capabilities с реальным production owner; пока недоступные Stream и stream chat
+не выдаются и не рекламируются как работающие. Техническая provenance остается
+в manifest и diagnostic log.
+
+Он собирается в `build/developer-full-access/bundle`, имеет manifest schema 2,
+channel `developer-full-access-unsigned` и marker
+`developerFullAccess: true`. Режим снимает только внешние licensing/entitlement
+и signed startup availability/update-block admission gates:
+verify требует подтвержденные одинаковые clean-build hashes;
+exact game build, coherent memory/capture, актуальное окно, foreground, input
+lease и final safety gates не ослабляются. Production EXE не принимает
+`--developer-full-access`, а ordinary run/install/update/rollback entrypoints
+отвергают такой bundle. Подробный контракт находится в
+[ADR-0002](docs/architecture/ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md).
+
 Точная матрица того, что работает в normal launch, а что остаётся выключенным
 до конкретного внешнего/архитектурного prerequisite, находится в
 [production cutover checklist](docs/architecture/PRODUCTION_CUTOVER_CHECKLIST.md#матрица-доступных-функций-normal-launch).
@@ -201,6 +234,8 @@ Loose DLL, source, wheel, interpreter, PDB, asset, database, dump и history
 ## Документация
 
 - [Architecture decision](docs/architecture/ADR-0001-WPF-CSHARP-CPP-ENGINE.md)
+- [Developer full-access authority](docs/architecture/ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md)
+- [Bounded Engine notification events](docs/architecture/ADR-0003-BOUNDED-ENGINE-NOTIFICATION-EVENTS.md)
 - [Engine migration evidence](docs/architecture/ENGINE_MIGRATION.md)
 - [Production cutover checklist](docs/architecture/PRODUCTION_CUTOVER_CHECKLIST.md)
 - [Native release pipeline](docs/architecture/NATIVE_RELEASE_PIPELINE.md)

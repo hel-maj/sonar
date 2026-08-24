@@ -7,6 +7,7 @@ namespace sonar::fishing::engine_ipc {
 enum class engine_authority_mode {
   offline_diagnostics,
   production,
+  developer_full_access,
 };
 
 inline constexpr char fishing_session_control_capability_id[] =

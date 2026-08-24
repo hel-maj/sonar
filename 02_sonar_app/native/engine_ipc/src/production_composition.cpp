@@ -47,6 +47,28 @@ constexpr std::size_t kCatchDismissPollMilliseconds = 150U;
   return "game_target_attach_failed";
 }
 
+[[nodiscard]] std::optional<production_player_status_notification>
+player_status_notification(
+    const std::optional<memory_observation::player_status_evidence>& source) {
+  if (!source.has_value() || !source->has_any_value()) {
+    return std::nullopt;
+  }
+  return production_player_status_notification{
+      .food = source->food,
+      .water = source->water,
+      .health = source->health,
+      .inventory_weight = source->inventory_weight,
+      .inventory_weight_max = source->inventory_weight_max,
+      .backpack_weight = source->backpack_weight,
+      .backpack_weight_max = source->backpack_weight_max,
+  };
+}
+
+[[nodiscard]] bool is_focus_loss_reason(
+    const std::string_view reason) noexcept {
+  return reason.find("not_foreground") != std::string_view::npos;
+}
+
 class windows_fishing_automation_session final
     : public production_automation_session,
       private production_cycle_port {
@@ -110,6 +132,11 @@ class windows_fishing_automation_session final
           : std::move(mutation_reason)};
     }
     const auto result = loop_.run(request, *this, stop_token);
+    if (!result.ok && is_focus_loss_reason(result.reason)) {
+      progress.publish_notification(production_focus_lost_notification{
+          .reason = result.reason,
+      });
+    }
     const bool cleanup_completed = mutation_->cleanup();
     mutation_.reset();
     production_observer_.reset();
@@ -177,6 +204,10 @@ class windows_fishing_automation_session final
               : observed.error);
     }
 
+    if (observed.inventory_full && progress_ != nullptr) {
+      progress_->publish_notification(
+          production_inventory_full_notification{});
+    }
     if (observed.inventory_full &&
         request.settings.overweight_action !=
             runtime_settings::OverweightAction::release) {
@@ -343,6 +374,13 @@ class windows_fishing_automation_session final
     };
 
     const auto tackle = run(maintenance_episode::episode_kind::tackle_check);
+    if (progress_ != nullptr) {
+      const auto status = player_status_notification(
+          production_observer_->current_maintenance().player_status);
+      if (status.has_value()) {
+        progress_->publish_notification(*status);
+      }
+    }
     if (const auto terminal = accept(tackle); terminal.has_value()) {
       return *terminal;
     }
@@ -360,6 +398,9 @@ class windows_fishing_automation_session final
     }
 
     const auto bait = run(maintenance_episode::episode_kind::bait_recovery);
+    if (progress_ != nullptr && bait.recovery_attempted) {
+      progress_->publish_notification(production_bait_tired_notification{});
+    }
     if (const auto terminal = accept(bait); terminal.has_value()) {
       return *terminal;
     }
@@ -378,6 +419,14 @@ class windows_fishing_automation_session final
     }
     if (request.settings.auto_meal && !meal_search_disabled_ && meal_needed) {
       const auto meal = run(maintenance_episode::episode_kind::meal_recovery);
+      if (progress_ != nullptr && meal.ok && meal.affected_count != 0U) {
+        progress_->publish_notification(
+            production_meal_recovered_notification{
+                .affected_count = meal.affected_count,
+                .player_status = player_status_notification(
+                    production_observer_->current_maintenance().player_status),
+            });
+      }
       if (const auto terminal = accept(meal); terminal.has_value()) {
         return *terminal;
       }
@@ -519,8 +568,35 @@ production_capability_snapshot production_capability_composition::snapshot()
           last_result_.inventory_episodes_completed,
       .maintenance_episodes_completed =
           last_result_.maintenance_episodes_completed,
+      .pending_notification_count = pending_notifications_.size(),
+      .dropped_notification_count = dropped_notification_count_,
       .statistics = statistics_.Snapshot(steady_now_seconds()),
   };
+}
+
+std::vector<production_notification_event>
+production_capability_composition::take_pending_notifications() noexcept {
+  const std::scoped_lock lock(state_gate_);
+  std::vector<production_notification_event> result;
+  try {
+    result.reserve(pending_notifications_.size());
+    while (!pending_notifications_.empty()) {
+      result.push_back(std::move(pending_notifications_.front()));
+      pending_notifications_.pop_front();
+    }
+  } catch (...) {
+    const auto lost = pending_notifications_.size();
+    pending_notifications_.clear();
+    if (dropped_notification_count_ <=
+        (std::numeric_limits<std::uint64_t>::max)() - lost) {
+      dropped_notification_count_ += lost;
+    } else {
+      dropped_notification_count_ =
+          (std::numeric_limits<std::uint64_t>::max)();
+    }
+    result.clear();
+  }
+  return result;
 }
 
 production_capability_admission
@@ -569,6 +645,7 @@ production_capability_composition::prepare_session(
   last_operation_ok_ = false;
   last_operation_reason_.clear();
   last_result_ = {};
+  pending_notifications_.clear();
   phase_ = production_phase::idle;
   detected_stage_ = "ready";
   statistics_.SetCustomPrices(prepared_settings_.custom_fish_prices);
@@ -701,6 +778,24 @@ void production_capability_composition::record_catch(
         .released = !kept,
         .catch_size_key = observation.quality_key,
     });
+    if (observation.fish_text.has_value() &&
+        !observation.fish_text->empty()) {
+      if (pending_notifications_.size() <
+          maximum_pending_production_notifications) {
+        pending_notifications_.push_back(production_catch_notification{
+            .fish_name = *observation.fish_text,
+            .weight_kg = observation.weight_kg,
+            .quality_text = observation.quality_label,
+            .released = !kept,
+            .totals = statistics_.Snapshot(steady_now_seconds()).totals,
+            .xp_current = observation.experience.current,
+            .xp_total = observation.experience.total,
+        });
+      } else if (dropped_notification_count_ !=
+                 (std::numeric_limits<std::uint64_t>::max)()) {
+        ++dropped_notification_count_;
+      }
+    }
     advance_progress_revision();
   } catch (...) {
     // Statistics are observational and never widen mutation authority.
@@ -723,6 +818,33 @@ void production_capability_composition::publish_tackle(
     advance_progress_revision();
   } catch (...) {
     // Tackle projection is latest-only session telemetry.
+  }
+}
+
+void production_capability_composition::publish_notification(
+    production_notification_event notification) noexcept {
+  enqueue_notification(std::move(notification));
+}
+
+void production_capability_composition::enqueue_notification(
+    production_notification_event notification) noexcept {
+  try {
+    const std::scoped_lock lock(state_gate_);
+    if (pending_notifications_.size() >=
+        maximum_pending_production_notifications) {
+      if (dropped_notification_count_ !=
+          (std::numeric_limits<std::uint64_t>::max)()) {
+        ++dropped_notification_count_;
+      }
+      return;
+    }
+    pending_notifications_.push_back(std::move(notification));
+  } catch (...) {
+    const std::scoped_lock lock(state_gate_);
+    if (dropped_notification_count_ !=
+        (std::numeric_limits<std::uint64_t>::max)()) {
+      ++dropped_notification_count_;
+    }
   }
 }
 

@@ -10,10 +10,14 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <IsPackable>false</IsPackable>
+    <SonarFishingDeveloperFullAccess Condition="'$(SonarFishingDeveloperFullAccess)' == ''">false</SonarFishingDeveloperFullAccess>
+    <DefineConstants Condition="'$(SonarFishingDeveloperFullAccess)' == 'true'">$(DefineConstants);SONAR_FISHING_DEVELOPER_FULL_ACCESS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\dotnet\Sonar.Fishing.Host\Sonar.Fishing.Host.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\Sonar.Fishing.Host\Sonar.Fishing.Host.csproj">
+      <AdditionalProperties>SonarFishingDeveloperFullAccess=$(SonarFishingDeveloperFullAccess)</AdditionalProperties>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

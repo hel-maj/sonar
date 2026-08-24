@@ -9,26 +9,45 @@ internal static class BundleSessionIdentityLoader
 {
     private const int MaximumManifestBytes = 64 * 1024;
 
-    private static readonly string[] RootProperties =
+    private static readonly string[] StandardRootProperties =
     [
         "schemaVersion", "product", "releaseMode", "version", "source", "ipc",
         "host", "engine", "requiredRuntime", "determinism", "authenticode",
     ];
+    private static readonly string[] DeveloperRootProperties =
+    [
+        "schemaVersion", "product", "releaseMode", "developerFullAccess",
+        "version", "source", "ipc", "host", "engine", "requiredRuntime",
+        "determinism", "authenticode",
+    ];
 
-    internal static EngineSessionIdentity Load(string engineExecutable)
+    internal static EngineSessionIdentity Load(
+        string engineExecutable,
+        EngineProcessAuthorityMode authorityMode = EngineProcessAuthorityMode.Production)
     {
         var hostExecutable = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(hostExecutable))
         {
             throw new InvalidDataException("bundle_host_process_path_missing");
         }
-        return Load(engineExecutable, hostExecutable);
+        return Load(engineExecutable, hostExecutable, authorityMode);
     }
 
     internal static EngineSessionIdentity Load(
         string engineExecutable,
-        string hostExecutable)
+        string hostExecutable,
+        EngineProcessAuthorityMode authorityMode = EngineProcessAuthorityMode.Production)
     {
+#if !SONAR_FISHING_DEVELOPER_FULL_ACCESS
+        if (authorityMode == EngineProcessAuthorityMode.DeveloperFullAccess)
+        {
+            throw new InvalidOperationException("developer_full_access_not_compiled");
+        }
+#endif
+        if (authorityMode == EngineProcessAuthorityMode.OfflineDiagnostics)
+        {
+            throw new ArgumentOutOfRangeException(nameof(authorityMode));
+        }
         var enginePath = Path.GetFullPath(engineExecutable);
         var bundleDirectory = Path.GetDirectoryName(enginePath)
             ?? throw new InvalidDataException("bundle_directory_missing");
@@ -54,14 +73,28 @@ internal static class BundleSessionIdentityLoader
         var manifestBytes = ReadBounded(manifestPath);
         using var document = ParseStrict(manifestBytes);
         var root = document.RootElement;
-        RequireExactProperties(root, RootProperties, "bundle_manifest_root_invalid");
-        if (root.GetProperty("schemaVersion").GetInt32() != 1 ||
+        var developerFullAccess = authorityMode ==
+            EngineProcessAuthorityMode.DeveloperFullAccess;
+        RequireExactProperties(
+            root,
+            developerFullAccess ? DeveloperRootProperties : StandardRootProperties,
+            "bundle_manifest_root_invalid");
+        var expectedSchemaVersion = developerFullAccess ? 2 : 1;
+        if (root.GetProperty("schemaVersion").GetInt32() != expectedSchemaVersion ||
             root.GetProperty("product").GetString() != EngineSessionIdentity.ProductId)
         {
             throw new InvalidDataException("bundle_manifest_identity_invalid");
         }
         var releaseMode = root.GetProperty("releaseMode").GetString();
-        if (releaseMode is not ("development-unsigned" or "production-signed"))
+        if (developerFullAccess)
+        {
+            if (releaseMode != "developer-full-access-unsigned" ||
+                root.GetProperty("developerFullAccess").ValueKind != JsonValueKind.True)
+            {
+                throw new InvalidDataException("bundle_manifest_developer_authority_invalid");
+            }
+        }
+        else if (releaseMode is not ("development-unsigned" or "production-signed"))
         {
             throw new InvalidDataException("bundle_manifest_mode_invalid");
         }
@@ -87,10 +120,18 @@ internal static class BundleSessionIdentityLoader
         RequireFileHash(hostPath, host.GetProperty("sha256").GetString(), "host");
         RequireFileHash(enginePath, engine.GetProperty("sha256").GetString(), "engine");
 
-        return EngineSessionIdentity.CreateProduction(
-            host.GetProperty("buildId").GetString()!,
-            engine.GetProperty("buildId").GetString()!,
-            Convert.ToHexString(SHA256.HashData(manifestBytes)));
+        var hostBuildId = host.GetProperty("buildId").GetString()!;
+        var engineBuildId = engine.GetProperty("buildId").GetString()!;
+        var manifestHash = Convert.ToHexString(SHA256.HashData(manifestBytes));
+        return developerFullAccess
+            ? EngineSessionIdentity.CreateDeveloperFullAccess(
+                hostBuildId,
+                engineBuildId,
+                manifestHash)
+            : EngineSessionIdentity.CreateProduction(
+                hostBuildId,
+                engineBuildId,
+                manifestHash);
     }
 
     private static byte[] ReadBounded(string path)

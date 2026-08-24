@@ -69,6 +69,7 @@ internal static class Program
             .Concat(TelegramSettingsPageTests.Create())
             .Concat(TelegramInboundRouterTests.Create())
             .Concat(TelegramNotificationPlannerTests.Create())
+            .Concat(TelegramEngineNotificationPublisherTests.Create())
             .Concat(TelegramBotApiClientTests.Create())
             .Concat(TelegramPollingServiceTests.Create())
             .Concat(TelegramCommandDispatcherTests.Create())

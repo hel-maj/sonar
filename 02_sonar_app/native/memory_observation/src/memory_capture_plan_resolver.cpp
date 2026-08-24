@@ -416,7 +416,13 @@ bool resolved_memory_capture::ready() const noexcept {
 
 memory_capture_plan_resolver::memory_capture_plan_resolver(
     memory_connector& connector) noexcept
-    : connector_(connector) {}
+    : memory_capture_plan_resolver(
+          connector, embedded_memory_build_profiles()) {}
+
+memory_capture_plan_resolver::memory_capture_plan_resolver(
+    memory_connector& connector,
+    const std::span<const embedded_memory_build_profile> profiles) noexcept
+    : connector_(connector), profiles_(profiles) {}
 
 void memory_capture_plan_resolver::reset() noexcept {
   session_.reset();
@@ -429,6 +435,57 @@ void memory_capture_plan_resolver::reset() noexcept {
   fish_address_ = 0U;
   fish_hash_address_ = 0U;
   player_right_offset_ = 0U;
+  inventory_signature_hits_.clear();
+  inventory_last_failure_ = inventory_binding_failure::none;
+  inventory_retry_after_steady_ns_ = 0U;
+}
+
+std::string memory_capture_plan_resolver::prepare_session(
+    const sonar::platform::windows::process_generation& game_generation)
+    noexcept {
+  if (session_ != nullptr && generation_ != game_generation) {
+    reset();
+  }
+  if (session_ == nullptr) {
+    std::string connector_reason;
+    session_ = connector_.connect(
+        process_role::game, game_generation.process_id, connector_reason);
+    if (!session_) {
+      return connector_reason.empty()
+          ? "memory_process_unavailable"
+          : connector_reason;
+    }
+    if (session_->identity().generation != game_generation) {
+      reset();
+      return "memory_process_generation_mismatch";
+    }
+    const auto selection = select_memory_build_profile(
+        profiles_,
+        session_->identity().image_name,
+        session_->identity().image_sha256);
+    if (!selection.ready()) {
+      reset();
+      return selection.reason.empty()
+          ? "memory_game_build_unsupported"
+          : selection.reason;
+    }
+    build_profile_ = selection.profile;
+    generation_ = game_generation;
+    const auto* module = game_module(session_->identity());
+    if (module == nullptr || module->base_address == 0U ||
+        module->size == 0U || module->size > kMaximumScannedModuleBytes ||
+        module->size > (std::numeric_limits<std::size_t>::max)()) {
+      reset();
+      return "memory_game_module_unavailable";
+    }
+    module_base_ = module->base_address;
+    module_size_ = static_cast<std::size_t>(module->size);
+  }
+  if (!session_->generation_current()) {
+    reset();
+    return "memory_process_generation_changed";
+  }
+  return {};
 }
 
 resolved_memory_capture memory_capture_plan_resolver::resolve_reeling(
@@ -442,46 +499,8 @@ resolved_memory_capture memory_capture_plan_resolver::resolve_reeling(
         game_generation.creation_time_filetime_100ns == 0U) {
       return fail("memory_capture_identity_invalid");
     }
-    if (session_ != nullptr && generation_ != game_generation) {
-      reset();
-    }
-    if (session_ == nullptr) {
-      std::string connector_reason;
-      session_ = connector_.connect(
-          process_role::game, game_generation.process_id, connector_reason);
-      if (!session_) {
-        return fail(connector_reason.empty()
-            ? "memory_process_unavailable"
-            : std::move(connector_reason));
-      }
-      if (session_->identity().generation != game_generation) {
-        reset();
-        return fail("memory_process_generation_mismatch");
-      }
-      const auto selection = select_embedded_memory_build_profile(
-          session_->identity().image_name,
-          session_->identity().image_sha256);
-      if (!selection.ready()) {
-        reset();
-        return fail(selection.reason.empty()
-            ? "memory_game_build_unsupported"
-            : selection.reason);
-      }
-      build_profile_ = selection.profile;
-      generation_ = game_generation;
-      const auto* module = game_module(session_->identity());
-      if (module == nullptr || module->base_address == 0U ||
-          module->size == 0U || module->size > kMaximumScannedModuleBytes ||
-          module->size > (std::numeric_limits<std::size_t>::max)()) {
-        reset();
-        return fail("memory_game_module_unavailable");
-      }
-      module_base_ = module->base_address;
-      module_size_ = static_cast<std::size_t>(module->size);
-    }
-    if (!session_->generation_current()) {
-      reset();
-      return fail("memory_process_generation_changed");
+    if (auto reason = prepare_session(game_generation); !reason.empty()) {
+      return fail(std::move(reason));
     }
     if (player_address_ == 0U || replay_address_ == 0U) {
       std::size_t right_offset{};

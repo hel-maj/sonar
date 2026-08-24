@@ -1,8 +1,11 @@
 #include "session_commands.h"
 
+#include <algorithm>
 #include <chrono>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
+#include <variant>
 
 namespace sonar::fishing::engine_ipc::runtime {
 namespace {
@@ -15,6 +18,181 @@ namespace {
 [[nodiscard]] std::int64_t current_unix_seconds() noexcept {
   return std::chrono::duration_cast<std::chrono::seconds>(
       std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+void assign_totals(
+    sonar::fishing::ipc::v1::FishingSessionTotals& target,
+    const sonar::fishing::session_statistics::SessionTotals& source) {
+  target.set_duration_seconds(source.duration_seconds);
+  target.set_caught_count(source.caught_count);
+  target.set_caught_kg(source.caught_kg);
+  target.set_released_count(source.released_count);
+  target.set_released_kg(source.released_kg);
+  target.set_earned_min(source.earned_min);
+  target.set_earned_max(source.earned_max);
+}
+
+void assign_player_status(
+    sonar::fishing::ipc::v1::PlayerStatusNotification& target,
+    const production_player_status_notification& source) {
+  if (source.food.has_value()) {
+    target.set_food(*source.food);
+  }
+  if (source.water.has_value()) {
+    target.set_water(*source.water);
+  }
+  if (source.health.has_value()) {
+    target.set_health(*source.health);
+  }
+  if (source.inventory_weight.has_value()) {
+    target.set_inventory_weight(*source.inventory_weight);
+  }
+  if (source.inventory_weight_max.has_value()) {
+    target.set_inventory_weight_max(*source.inventory_weight_max);
+  }
+  if (source.backpack_weight.has_value()) {
+    target.set_backpack_weight(*source.backpack_weight);
+  }
+  if (source.backpack_weight_max.has_value()) {
+    target.set_backpack_weight_max(*source.backpack_weight_max);
+  }
+}
+
+template <typename Fill>
+void enqueue_notification(
+    sonar::fishing::engine_ipc::event_writer& event_writer,
+    const std::string_view session_id,
+    sonar::platform::ipc::session_header_factory& headers,
+    const std::string_view correlation_id,
+    Fill&& fill) noexcept {
+  try {
+    fishing_envelope envelope;
+    populate_header(
+        *envelope.mutable_header(),
+        headers,
+        platform_v1::MESSAGE_KIND_EVENT,
+        session_id,
+        1,
+        correlation_id,
+        "ready",
+        platform_v1::CHANNEL_KIND_EVENTS);
+    fill(*envelope.mutable_fishing_notification_event());
+    const auto payload = serialize_envelope(envelope);
+    // Every notification uses one FIFO priority lane. Snapshot coalescing is a
+    // separate stream, so lifecycle prioritization here could reorder Common
+    // header sequences within the notification stream.
+    event_writer.enqueue_priority(
+        payload,
+        sonar::platform::ipc::frame_priority::normal);
+  } catch (...) {
+    // Notification projection and transport are observational. Saturation or
+    // a closed publisher must never stop the native fishing session.
+  }
+}
+
+void publish_production_notification(
+    sonar::fishing::engine_ipc::event_writer& event_writer,
+    const std::string_view session_id,
+    sonar::platform::ipc::session_header_factory& headers,
+    production_notification_event notification) noexcept {
+  std::visit(
+      [&](auto&& value) {
+        using value_type = std::decay_t<decltype(value)>;
+        enqueue_notification(
+            event_writer,
+            session_id,
+            headers,
+            {},
+            [&](sonar::fishing::ipc::v1::FishingNotificationEvent& event) {
+              if constexpr (std::is_same_v<
+                                value_type,
+                                production_catch_notification>) {
+                auto* target = event.mutable_catch_observed();
+                target->set_fish_name(value.fish_name);
+                if (value.weight_kg.has_value()) {
+                  target->set_weight_kg(*value.weight_kg);
+                }
+                if (value.quality_text.has_value()) {
+                  target->set_quality_text(*value.quality_text);
+                }
+                target->set_released(value.released);
+                assign_totals(*target->mutable_totals(), value.totals);
+                if (value.xp_current.has_value()) {
+                  target->set_xp_current(*value.xp_current);
+                }
+                if (value.xp_total.has_value()) {
+                  target->set_xp_total(*value.xp_total);
+                }
+              } else if constexpr (std::is_same_v<
+                                       value_type,
+                                       production_meal_recovered_notification>) {
+                auto* target = event.mutable_meal_recovered();
+                target->set_affected_count(
+                    static_cast<std::uint32_t>(std::min<std::size_t>(
+                        value.affected_count,
+                        (std::numeric_limits<std::uint32_t>::max)())));
+                if (value.player_status.has_value()) {
+                  assign_player_status(
+                      *target->mutable_player_status(),
+                      *value.player_status);
+                }
+              } else if constexpr (std::is_same_v<
+                                       value_type,
+                                       production_inventory_full_notification>) {
+                static_cast<void>(event.mutable_inventory_full());
+              } else if constexpr (std::is_same_v<
+                                       value_type,
+                                       production_player_status_notification>) {
+                assign_player_status(*event.mutable_player_status(), value);
+              } else if constexpr (std::is_same_v<
+                                       value_type,
+                                       production_bait_tired_notification>) {
+                static_cast<void>(event.mutable_bait_tired());
+              } else if constexpr (std::is_same_v<
+                                       value_type,
+                                       production_focus_lost_notification>) {
+                event.mutable_focus_lost()->set_reason(value.reason);
+              }
+            });
+      },
+      std::move(notification));
+}
+
+void publish_session_started_notification(
+    sonar::fishing::engine_ipc::event_writer& event_writer,
+    const fishing_envelope& request,
+    const std::string_view session_id,
+    sonar::platform::ipc::session_header_factory& headers,
+    const sonar::fishing::session_statistics::SessionTotals& totals) noexcept {
+  enqueue_notification(
+      event_writer,
+      session_id,
+      headers,
+      request.header().request_id(),
+      [&](sonar::fishing::ipc::v1::FishingNotificationEvent& event) {
+        assign_totals(*event.mutable_session_started()->mutable_totals(), totals);
+      });
+}
+
+void publish_session_stopped_notification(
+    sonar::fishing::engine_ipc::event_writer& event_writer,
+    const std::string_view correlation_id,
+    const std::string_view session_id,
+    sonar::platform::ipc::session_header_factory& headers,
+    const sonar::fishing::session_statistics::SessionTotals& totals,
+    const std::optional<std::string_view> reason = std::nullopt) noexcept {
+  enqueue_notification(
+      event_writer,
+      session_id,
+      headers,
+      correlation_id,
+      [&](sonar::fishing::ipc::v1::FishingNotificationEvent& event) {
+        auto* target = event.mutable_session_stopped();
+        assign_totals(*target->mutable_totals(), totals);
+        if (reason.has_value()) {
+          target->set_reason(*reason);
+        }
+      });
 }
 
 void publish_session_snapshot(
@@ -129,10 +307,18 @@ void publish_pending_production_progress(
     sonar::fishing::engine_ipc::production_capability_composition& capabilities,
     const sonar::fishing::runtime_settings::RuntimeSettingsOwner& settings,
     sonar::platform::ipc::session_header_factory& headers,
-    std::uint64_t& snapshot_revision,
-    std::uint64_t& published_progress_revision) {
+  std::uint64_t& snapshot_revision,
+  std::uint64_t& published_progress_revision) {
   if (!active_start_request.has_value()) {
+    static_cast<void>(capabilities.take_pending_notifications());
     return;
+  }
+  for (auto& notification : capabilities.take_pending_notifications()) {
+    publish_production_notification(
+        event_writer,
+        session_id,
+        headers,
+        std::move(notification));
   }
   const auto progress = capabilities.snapshot();
   if (progress.progress_revision <= published_progress_revision) {
@@ -157,6 +343,17 @@ void publish_pending_production_progress(
       progress.operation_completed && !progress.last_operation_ok
           ? std::optional<std::string_view>(progress.last_operation_reason)
           : std::nullopt);
+  if (progress.operation_completed) {
+    publish_session_stopped_notification(
+        event_writer,
+        active_start_request->header().request_id(),
+        session_id,
+        headers,
+        progress.statistics.totals,
+        progress.last_operation_ok
+            ? std::nullopt
+            : std::optional<std::string_view>(progress.last_operation_reason));
+  }
   published_progress_revision = progress.progress_revision;
 }
 
@@ -342,6 +539,23 @@ bool handle_start_fishing_session(
               : std::nullopt
           : std::optional<std::string_view>(transition.reason));
   if (transition.accepted) {
+    publish_session_started_notification(
+        event_writer,
+        request,
+        session_id,
+        headers,
+        progress.statistics.totals);
+    if (progress.operation_completed) {
+      publish_session_stopped_notification(
+          event_writer,
+          request.header().request_id(),
+          session_id,
+          headers,
+          progress.statistics.totals,
+          progress.last_operation_ok
+              ? std::nullopt
+              : std::optional<std::string_view>(progress.last_operation_reason));
+    }
     published_progress_revision = progress.progress_revision;
   }
   return transition.accepted;
@@ -373,6 +587,7 @@ void handle_stop_automation(
     throw std::runtime_error("stop_automation_request_invalid");
   }
 
+  const bool was_running = lifecycle.running();
   capabilities.stop();
   const auto transition = lifecycle.stop();
 
@@ -403,6 +618,14 @@ void handle_stop_automation(
       false,
       sonar::fishing::ipc::v1::FISHING_PHASE_IDLE,
       transition.reason);
+  if (was_running) {
+    publish_session_stopped_notification(
+        event_writer,
+        request.header().request_id(),
+        session_id,
+        headers,
+        capabilities.snapshot().statistics.totals);
+  }
 }
 
 }  // namespace sonar::fishing::engine_ipc::runtime

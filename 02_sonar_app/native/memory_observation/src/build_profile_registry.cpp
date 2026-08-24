@@ -67,8 +67,9 @@ constexpr pattern_byte any = -1;
            0x48, 0x8B, 0xD7, 0xE8, any, any, any, any,
            0x48, 0x8D, 0x0D, any, any, any, any,
            0x8A, 0xD8, 0xE8, any, any, any, any,
-           0x84, 0xDB, 0x75, 0x13, 0x48, 0x8D, 0x0D},
+          0x84, 0xDB, 0x75, 0x13, 0x48, 0x8D, 0x0D},
           3U, 7U, {}),
+      .inventory_binding = std::nullopt,
   };
 }
 
@@ -112,11 +113,11 @@ embedded_memory_build_profiles() noexcept {
   return profiles;
 }
 
-build_profile_selection select_embedded_memory_build_profile(
+build_profile_selection select_memory_build_profile(
+    const std::span<const embedded_memory_build_profile> profiles,
     const std::wstring_view image_name,
     const std::string_view image_sha256) noexcept {
   try {
-    const auto profiles = embedded_memory_build_profiles();
     const embedded_memory_build_profile* selected = nullptr;
     for (const auto& profile : profiles) {
       if (!same_image_name(image_name, profile.game.image_name) ||
@@ -137,12 +138,20 @@ build_profile_selection select_embedded_memory_build_profile(
   }
 }
 
+build_profile_selection select_embedded_memory_build_profile(
+    const std::wstring_view image_name,
+    const std::string_view image_sha256) noexcept {
+  return select_memory_build_profile(
+      embedded_memory_build_profiles(), image_name, image_sha256);
+}
+
 std::string embedded_memory_build_profile_canonical_tsv() {
   return
       "schema_version\tprofile_id\tprofile_revision\tgame_image\tgame_sha256\t"
       "player_matrix_offsets\tfish_position_offsets\tfish_model_hash\t"
-      "fish_active_offset\tworld_patterns\treplay_pattern\n"
-      "1\tmajestic-gta5-677e4e35-v1\t1\tGTA5.exe\t"
+      "fish_active_offset\tworld_patterns\treplay_pattern\t"
+      "inventory_binding\n"
+      "2\tmajestic-gta5-677e4e35-v1\t1\tGTA5.exe\t"
       "677E4E355CFBDB13273B1D992407E3C261B3A108DC4DD5C8A0C4C1DA651802E5\t"
       "0x50,0x40,0x60,0x30\t0x90,0x130,0x120,0x110,0x160\t"
       "802685111\t0x189\t"
@@ -151,7 +160,8 @@ std::string embedded_memory_build_profile_canonical_tsv() {
       "488B05????????4885C0@3@7@0x8,0x10,0x18;"
       "488B0D????????4885C9@3@7@0x8;"
       "488B05????????33FF@3@7@0x8\t"
-      "488D0D????????488BD7E8????????488D0D????????8AD8E8????????84DB7513488D0D\n";
+      "488D0D????????488BD7E8????????488D0D????????8AD8E8????????84DB7513488D0D\t"
+      "-\n";
 }
 
 }  // namespace sonar::fishing::memory_observation

@@ -8,6 +8,8 @@ wheelhouse, upload и diagnostic guides удалены вместе с legacy pr
 ## Архитектура и миграция
 
 - [Product ADR: WPF Host и C++ Engine](architecture/ADR-0001-WPF-CSHARP-CPP-ENGINE.md)
+- [Compile-isolated developer authority](architecture/ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md)
+- [Bounded Engine notification events](architecture/ADR-0003-BOUNDED-ENGINE-NOTIFICATION-EVENTS.md)
 - [Code-backed Engine migration evidence](architecture/ENGINE_MIGRATION.md)
 - [Production cutover checklist](architecture/PRODUCTION_CUTOVER_CHECKLIST.md)
 - [Performance evidence и safe optimization](architecture/MIGRATION_PERFORMANCE.md)
@@ -18,6 +20,7 @@ wheelhouse, upload и diagnostic guides удалены вместе с legacy pr
 
 - [Fishing stage detection](architecture/FISHING_STAGE_DETECTION.md)
 - [Coherent memory observation](architecture/MEMORY_OBSERVATION_NATIVE.md)
+- [Controlled inventory-state characterization](architecture/INVENTORY_STATE_CHARACTERIZATION.md)
 - [Whole fishing episode](architecture/FISHING_EPISODE_NATIVE.md)
 - [Inventory/store episode](architecture/INVENTORY_STORE_EPISODE.md)
 - [Maintenance episodes](architecture/MAINTENANCE_EPISODES.md)

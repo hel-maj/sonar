@@ -17,6 +17,7 @@ internal static class OfflineEngineSessionProtocol
     private const string SessionStatisticsCapabilityId = "fishing-session.statistics";
     private const string RuntimeSettingsCapabilityId = "fishing-runtime-settings.apply";
     private const string SignedEntitlementCapabilityId = "signed-entitlement.verify";
+    private const string NotificationEventsCapabilityId = "fishing-notifications.events";
 
     internal static HandshakeAccepted AcceptHandshake(
         EngineSessionIdentity identity,
@@ -37,16 +38,20 @@ internal static class OfflineEngineSessionProtocol
             new(SessionStatisticsCapabilityId, Major: 1, MinimumMinor: 0),
             new(RuntimeSettingsCapabilityId, Major: 1, MinimumMinor: 0),
             new(SignedEntitlementCapabilityId, Major: 1, MinimumMinor: 0),
+            new(NotificationEventsCapabilityId, Major: 1, MinimumMinor: 0),
         };
-        if (authorityMode == EngineProcessAuthorityMode.Production)
+        if (authorityMode is EngineProcessAuthorityMode.Production or
+            EngineProcessAuthorityMode.DeveloperFullAccess)
         {
             requirements.Add(new CapabilityRequirement(
                 "fishing-session.control",
                 Major: 1,
                 MinimumMinor: 0));
         }
-        var allowSideEffects = authorityMode == EngineProcessAuthorityMode.Production;
-        if (identity.Production != allowSideEffects)
+        var allowSideEffects = authorityMode is EngineProcessAuthorityMode.Production or
+            EngineProcessAuthorityMode.DeveloperFullAccess;
+        if (identity.AuthorityMode != authorityMode ||
+            identity.SideEffectsAllowed != allowSideEffects)
         {
             throw new InvalidOperationException("engine_session_identity_mode_mismatch");
         }

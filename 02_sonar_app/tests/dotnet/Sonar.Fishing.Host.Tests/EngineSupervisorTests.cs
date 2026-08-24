@@ -1,6 +1,7 @@
 using System.IO;
 using Sonar.Fishing.Host.EngineIntegration;
 using Sonar.Fishing.Host.EngineIntegration.Supervision;
+using Sonar.Fishing.Host.EngineIntegration.Notifications;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.SettingsPersistence;
@@ -10,15 +11,24 @@ namespace Sonar.Fishing.Host.Tests;
 internal static class EngineSupervisorTests
 {
     private static readonly EngineRestartPolicy ManualCyclePolicy = new(
-        MaximumFailures: 3,
         FailureWindow: TimeSpan.FromMinutes(1),
-        HeartbeatInterval: TimeSpan.FromMinutes(1));
+        HeartbeatInterval: TimeSpan.FromMinutes(1),
+        InitialRestartDelay: TimeSpan.FromMilliseconds(1),
+        MaximumRestartDelay: TimeSpan.FromMilliseconds(4),
+        AutomationCommandTimeout: TimeSpan.FromMilliseconds(100));
 
     public static IReadOnlyList<TestCase> Create() =>
     [
         new("engine_supervisor_reuses_one_healthy_generation", ReusesHealthyGeneration),
         new("engine_supervisor_restarts_one_unexpected_exit", RestartsUnexpectedExit),
-        new("engine_supervisor_opens_bounded_restart_circuit", OpensRestartCircuit),
+        new("engine_supervisor_crash_withdraws_authority_restores_settings_without_command_replay", CrashRecoveryIsFailClosed),
+        new("developer_engine_crash_restores_bootstrap_authority_without_command_or_lease_replay", DeveloperCrashRecoveryIsFailClosed),
+        new("engine_supervisor_recovers_after_failures_beyond_previous_limit", RecoversAfterRepeatedFailures),
+        new("faulted_event_pump_recovers_generation_without_old_notification_replay", NotificationsFollowCurrentGeneration),
+        new("engine_generation_bound_state_callback_cannot_cross_retirement", GenerationBoundStateCannotCrossRetirement),
+        new("engine_generation_bound_notification_callback_cannot_cross_retirement", GenerationBoundNotificationCannotCrossRetirement),
+        new("engine_automation_timeout_retires_generation_and_allows_recovery", AutomationTimeoutRetiresGeneration),
+        new("rejected_cached_entitlement_allows_fresh_replacement_envelope", RejectedCachedEntitlementAllowsReplacement),
         new("engine_supervisor_caller_cancellation_preserves_session", CallerCancellationPreservesSession),
         new("engine_supervisor_terminal_stop_cancels_start_and_prevents_restart", TerminalStopCancelsStart),
         new("engine_supervisor_concurrent_terminal_stop_is_idempotent", ConcurrentStopIsIdempotent),
@@ -65,37 +75,321 @@ internal static class EngineSupervisorTests
         TestAssert.Equal(1, secondSession.DisposeCount, "Replacement survived terminal cleanup");
     }
 
-    private static void OpensRestartCircuit()
+    private static void RecoversAfterRepeatedFailures()
     {
-        var firstSession = new FakeSession(processId: 4301);
-        var factory = new FakeFactory(
-            _ => Task.FromResult<IEngineManagedSession>(firstSession),
-            _ => Task.FromException<IEngineManagedSession>(new IOException("first_restart_failed")),
-            _ => Task.FromException<IEngineManagedSession>(new IOException("second_restart_failed")));
-        var supervisor = new EngineSessionSupervisor(factory, ManualCyclePolicy);
+        const int previousCircuitFailureLimit = 3;
+        var replacement = new FakeSession(processId: 4301);
+        var factory = new RecoveringFactory(
+            failuresBeforeSuccess: previousCircuitFailureLimit + 2,
+            replacement);
+        var recoveryPolicy = ManualCyclePolicy with
+        {
+            HeartbeatInterval = TimeSpan.FromMilliseconds(1),
+        };
+        var supervisor = new EngineSessionSupervisor(factory, recoveryPolicy);
 
-        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
-        firstSession.IsAlive = false;
-        TestAssert.Throws<InvalidOperationException>(
-            () => supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult(),
-            "First replacement failure was accepted");
-        var circuitFailure = CaptureFailure(
+        var initialFailure = CaptureFailure(
             () => supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult());
-        var startCountAtOpen = factory.StartCount;
-        var repeatedFailure = CaptureFailure(
-            () => supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult());
+        var recoveredWithoutAnotherCheck = factory.SuccessfulStart.Task.Wait(
+            TimeSpan.FromSeconds(2));
+        var recovered = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
         supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
 
         TestAssert.Equal(
-            "engine_supervisor_restart_circuit_open",
-            circuitFailure.Message,
-            "Restart budget did not open with a stable reason");
+            "engine_supervisor_start_failed",
+            initialFailure.Message,
+            "Initial start failure lost its stable reason");
+        TestAssert.True(
+            recoveredWithoutAnotherCheck,
+            "Heartbeat monitor did not recover after the previous failure limit");
         TestAssert.Equal(
-            circuitFailure.Message,
-            repeatedFailure.Message,
-            "Open circuit changed its terminal reason");
-        TestAssert.Equal(startCountAtOpen, factory.StartCount, "Open circuit started another Engine");
-        TestAssert.Equal(1, firstSession.DisposeCount, "Crashed generation was retired more than once");
+            previousCircuitFailureLimit + 3,
+            factory.StartCount,
+            "Heartbeat monitor did not perform the expected bounded retries");
+        TestAssert.Equal<ulong>(1, recovered.Generation, "Recovered generation changed");
+        TestAssert.Equal(4301, recovered.ProcessId, "Recovered Engine identity changed");
+        TestAssert.Equal(
+            recoveryPolicy.MaximumRestartDelay,
+            recovered.LastRestartDelay,
+            "Repeated recovery delay did not stay at its configured cap");
+        TestAssert.Equal(1, replacement.DisposeCount, "Recovered Engine was not disposed once");
+    }
+
+    private static void CrashRecoveryIsFailClosed()
+    {
+        var settings = FishingRuntimeSettings.CreateDefault(revision: 17);
+        var firstSession = new FakeSession(processId: 4251);
+        var secondSession = new FakeSession(processId: 4252);
+        var factory = new GatedRecoveryFactory(
+            firstSession,
+            secondSession,
+            () => settings);
+        var supervisor = new EngineSessionSupervisor(factory, ManualCyclePolicy);
+        var runtime = new EngineFishingAutomationRuntime(supervisor, () => settings);
+        var observed = new List<FishingSessionStateSnapshot>();
+        runtime.SessionStateChanged += observed.Add;
+        var entitlement = new FishingSignedEntitlementEnvelope(
+            "POST",
+            "/v1/licenses/actions/validate-key",
+            "api.keygen.sh",
+            "date",
+            "digest",
+            "signature",
+            [1]);
+
+        _ = supervisor.ApplyVerifiedKeygenEntitlementAsync(
+            entitlement,
+            CancellationToken.None).GetAwaiter().GetResult();
+        _ = runtime.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        settings = FishingRuntimeSettings.CreateDefault(revision: 18);
+        firstSession.IsAlive = false;
+        var recovery = supervisor.CheckAsync(CancellationToken.None);
+        var replacementStarted = factory.ReplacementStarted.Task.Wait(
+            TimeSpan.FromSeconds(2));
+        var authorityWithdrawn = !runtime.HasActiveEntitlement;
+        var withdrawnStatePublished = observed.Any(snapshot =>
+            !snapshot.Running && snapshot.AcceptedSettingsRevision == 0);
+        factory.ReleaseReplacement.TrySetResult();
+        var recovered = recovery.GetAwaiter().GetResult();
+        var authorityRestored = runtime.HasActiveEntitlement;
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        TestAssert.True(replacementStarted, "Replacement Engine did not enter bounded restart");
+        TestAssert.True(authorityWithdrawn, "Crashed Engine authority stayed active during restart");
+        TestAssert.True(withdrawnStatePublished, "Crash did not publish fail-closed idle state");
+        TestAssert.True(authorityRestored,
+            "Replacement Engine did not restore signed runtime authority");
+        TestAssert.True(runtime.HasActiveEntitlement == false,
+            "Terminal cleanup retained Engine runtime authority");
+        TestAssert.Equal<ulong>(18, recovered.SessionState.AcceptedSettingsRevision,
+            "Replacement Engine did not restore the latest settings snapshot");
+        TestAssert.True(!recovered.SessionState.Running,
+            "Replacement Engine replayed the previous running state");
+        TestAssert.Equal(ManualCyclePolicy.InitialRestartDelay, recovered.LastRestartDelay,
+            "Replacement did not apply the configured restart backoff");
+        TestAssert.Equal(ManualCyclePolicy.MaximumRestartDelay,
+            ManualCyclePolicy.DelayForFailureCount(100),
+            "Restart backoff exceeded or missed its cap");
+        TestAssert.Equal(1, firstSession.StartCommandCount,
+            "Original Engine did not receive the explicit start exactly once");
+        TestAssert.Equal(0, secondSession.StartCommandCount,
+            "Replacement Engine replayed the automation start command");
+        TestAssert.Equal(0, secondSession.StopCommandCount,
+            "Replacement Engine fabricated a stop command or input cleanup lease");
+        TestAssert.Equal(1, secondSession.EntitlementApplyCount,
+            "Replacement Engine did not restore exactly one signed authority envelope");
+    }
+
+    private static void NotificationsFollowCurrentGeneration()
+    {
+        var first = new FakeSession(processId: 4351);
+        var second = new FakeSession(processId: 4352);
+        var supervisor = new EngineSessionSupervisor(
+            FakeFactory.FromSessions(first, second),
+            ManualCyclePolicy);
+        var observed = new List<FishingEngineNotificationReceipt>();
+        supervisor.NotificationReceived += observed.Add;
+
+        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+        first.EmitNotification(sequence: 7);
+        first.FailEventPump();
+        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+        first.EmitNotification(sequence: 8);
+        second.EmitNotification(sequence: 1);
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        TestAssert.Equal(2, observed.Count, "Retired Engine notification was forwarded");
+        TestAssert.Equal<ulong>(1, observed[0].Generation, "Initial event generation changed");
+        TestAssert.Equal<ulong>(7, observed[0].Sequence, "Initial event sequence changed");
+        TestAssert.Equal<ulong>(2, observed[1].Generation, "Replacement event generation changed");
+        TestAssert.Equal<ulong>(1, observed[1].Sequence, "Replacement sequence was replayed or remapped");
+    }
+
+    private static void GenerationBoundStateCannotCrossRetirement()
+    {
+        var first = new FakeSession(processId: 4361);
+        var second = new FakeSession(processId: 4362);
+        var factory = FakeFactory.FromSessions(first, second);
+        var supervisor = new EngineSessionSupervisor(factory, ManualCyclePolicy);
+        var observed = new List<FishingSessionStateSnapshot>();
+        var observedGate = new object();
+        using var callbackEntered = new ManualResetEventSlim();
+        using var releaseCallback = new ManualResetEventSlim();
+        supervisor.SessionStateChanged += snapshot =>
+        {
+            if (snapshot.Revision == 99)
+            {
+                callbackEntered.Set();
+                _ = releaseCallback.Wait(TimeSpan.FromSeconds(2));
+            }
+            lock (observedGate)
+            {
+                observed.Add(snapshot);
+            }
+        };
+
+        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var staleCallback = Task.Run(() => first.EmitSessionState(
+            revision: 99,
+            running: true));
+        TestAssert.True(
+            callbackEntered.Wait(TimeSpan.FromSeconds(2)),
+            "Old generation state callback did not enter the subscriber");
+        first.FailEventPump();
+        var recovery = Task.Run(() =>
+            supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult());
+        _ = SpinWait.SpinUntil(() => factory.StartCount == 2, TimeSpan.FromMilliseconds(250));
+        releaseCallback.Set();
+        staleCallback.GetAwaiter().GetResult();
+        var recovered = recovery.GetAwaiter().GetResult();
+
+        FishingSessionStateSnapshot[] snapshot;
+        lock (observedGate)
+        {
+            snapshot = observed.ToArray();
+        }
+        var staleIndex = Array.FindLastIndex(snapshot, value => value.Revision == 99);
+        var withdrawnIndex = Array.FindLastIndex(snapshot, value =>
+            value.Revision == 0 && !value.Running);
+        TestAssert.True(
+            staleIndex >= 0 && withdrawnIndex > staleIndex,
+            "Retired generation state was published after fail-closed replacement state");
+        TestAssert.Equal<ulong>(2, recovered.Generation,
+            "State callback serialization prevented Engine recovery");
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static void GenerationBoundNotificationCannotCrossRetirement()
+    {
+        var first = new FakeSession(processId: 4363);
+        var second = new FakeSession(processId: 4364);
+        var factory = FakeFactory.FromSessions(first, second);
+        var supervisor = new EngineSessionSupervisor(factory, ManualCyclePolicy);
+        var observed = new List<FishingEngineNotificationReceipt>();
+        var observedGate = new object();
+        using var callbackEntered = new ManualResetEventSlim();
+        using var releaseCallback = new ManualResetEventSlim();
+        supervisor.NotificationReceived += receipt =>
+        {
+            if (receipt.Generation == 1 && receipt.Sequence == 7)
+            {
+                callbackEntered.Set();
+                _ = releaseCallback.Wait(TimeSpan.FromSeconds(2));
+            }
+            lock (observedGate)
+            {
+                observed.Add(receipt);
+            }
+        };
+
+        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var staleCallback = Task.Run(() => first.EmitNotification(sequence: 7));
+        TestAssert.True(
+            callbackEntered.Wait(TimeSpan.FromSeconds(2)),
+            "Old generation notification callback did not enter the subscriber");
+        first.FailEventPump();
+        var recovery = Task.Run(() =>
+            supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult());
+        var replacementCrossedCallback = SpinWait.SpinUntil(
+            () => factory.StartCount == 2,
+            TimeSpan.FromMilliseconds(250));
+        if (replacementCrossedCallback)
+        {
+            second.EmitNotification(sequence: 1);
+        }
+        releaseCallback.Set();
+        staleCallback.GetAwaiter().GetResult();
+        _ = recovery.GetAwaiter().GetResult();
+        if (!replacementCrossedCallback)
+        {
+            second.EmitNotification(sequence: 1);
+        }
+
+        FishingEngineNotificationReceipt[] receipts;
+        lock (observedGate)
+        {
+            receipts = observed.ToArray();
+        }
+        TestAssert.Equal(2, receipts.Length,
+            "Generation callback race dropped or duplicated a notification");
+        TestAssert.Equal<ulong>(1, receipts[0].Generation,
+            "Replacement notification overtook an already admitted old-generation callback");
+        TestAssert.Equal<ulong>(2, receipts[1].Generation,
+            "Old notification was tagged as or delivered after the replacement generation");
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static void AutomationTimeoutRetiresGeneration()
+    {
+        var first = new FakeSession(processId: 4371) { BlockStart = true };
+        var second = new FakeSession(processId: 4372);
+        var supervisor = new EngineSessionSupervisor(
+            FakeFactory.FromSessions(first, second),
+            ManualCyclePolicy with
+            {
+                AutomationCommandTimeout = TimeSpan.FromMilliseconds(25),
+            });
+        var entitlement = Entitlement(bodyByte: 1);
+        _ = supervisor.ApplyVerifiedKeygenEntitlementAsync(
+            entitlement,
+            CancellationToken.None).GetAwaiter().GetResult();
+        var runtime = new EngineFishingAutomationRuntime(
+            supervisor,
+            () => FishingRuntimeSettings.CreateDefault(revision: 41));
+
+        var failure = CaptureFailure(
+            () => runtime.StartAsync(CancellationToken.None).GetAwaiter().GetResult());
+        TestAssert.Equal(
+            "engine_automation_command_timeout",
+            failure.Message,
+            "Automation deadline lost its stable boundary reason");
+        TestAssert.True(!runtime.HasActiveEntitlement,
+            "Timed-out generation retained runtime authority");
+        var recovered = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        TestAssert.Equal<ulong>(2, recovered.Generation,
+            "Supervisor did not replace a timed-out automation generation");
+        TestAssert.Equal(1, first.DisposeCount,
+            "Timed-out Engine generation was not retired exactly once");
+        TestAssert.Equal(0, second.StartCommandCount,
+            "Replacement Engine replayed the timed-out start command");
+        TestAssert.True(runtime.HasActiveEntitlement,
+            "Replacement Engine did not freshly restore the signed entitlement");
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static void RejectedCachedEntitlementAllowsReplacement()
+    {
+        var first = new FakeSession(processId: 4381);
+        var second = new FakeSession(processId: 4382)
+        {
+            RejectEntitlementApplicationsRemaining = 1,
+        };
+        var factory = FakeFactory.FromSessions(first, second);
+        var supervisor = new EngineSessionSupervisor(factory, ManualCyclePolicy);
+        _ = supervisor.ApplyVerifiedKeygenEntitlementAsync(
+            Entitlement(bodyByte: 1),
+            CancellationToken.None).GetAwaiter().GetResult();
+        first.FailEventPump();
+
+        var receipt = supervisor.ApplyVerifiedKeygenEntitlementAsync(
+            Entitlement(bodyByte: 2),
+            CancellationToken.None).GetAwaiter().GetResult();
+        var recovered = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        TestAssert.True(receipt.Accepted,
+            "Fresh verified entitlement was discarded after cached lease rejection");
+        TestAssert.Equal(2, second.EntitlementApplyCount,
+            "Replacement did not reject the cache once and accept the fresh envelope once");
+        TestAssert.Equal<ulong>(2, recovered.Generation,
+            "Cached entitlement rejection caused another Engine generation");
+        TestAssert.True(supervisor.HasActiveEntitlement,
+            "Fresh replacement entitlement did not restore runtime authority");
+        TestAssert.Equal(0, second.DisposeCount,
+            "Cached entitlement rejection disposed the usable replacement Engine");
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private static void CallerCancellationPreservesSession()
@@ -123,6 +417,68 @@ internal static class EngineSupervisorTests
         TestAssert.Equal(first.ProcessId, afterCancellation.ProcessId, "Cancellation replaced Engine");
         TestAssert.Equal<ulong>(1, afterCancellation.Generation, "Cancellation advanced generation");
         TestAssert.Equal(0, afterCancellation.FailuresInWindow, "Cancellation consumed crash budget");
+    }
+
+    private static void DeveloperCrashRecoveryIsFailClosed()
+    {
+        var settings = FishingRuntimeSettings.CreateDefault(revision: 31);
+        var firstSession = new FakeSession(
+            processId: 4261,
+            hasBootstrapRuntimeAuthority: true);
+        var secondSession = new FakeSession(
+            processId: 4262,
+            hasBootstrapRuntimeAuthority: true);
+        var factory = new GatedRecoveryFactory(
+            firstSession,
+            secondSession,
+            () => settings);
+        var supervisor = new EngineSessionSupervisor(factory, ManualCyclePolicy);
+        var runtime = new EngineFishingAutomationRuntime(supervisor, () => settings);
+
+        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+        TestAssert.True(
+            runtime.HasActiveEntitlement,
+            "Developer bootstrap authority was not activated");
+        _ = runtime.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        settings = FishingRuntimeSettings.CreateDefault(revision: 32);
+        firstSession.IsAlive = false;
+        var recovery = supervisor.CheckAsync(CancellationToken.None);
+        TestAssert.True(
+            factory.ReplacementStarted.Task.Wait(TimeSpan.FromSeconds(2)),
+            "Developer replacement Engine did not enter bounded restart");
+        TestAssert.True(
+            !runtime.HasActiveEntitlement,
+            "Developer authority stayed active while Engine was absent");
+        factory.ReleaseReplacement.TrySetResult();
+        var recovered = recovery.GetAwaiter().GetResult();
+
+        TestAssert.True(
+            runtime.HasActiveEntitlement,
+            "Replacement did not restore compile-bound developer authority");
+        TestAssert.Equal<ulong>(
+            32,
+            recovered.SessionState.AcceptedSettingsRevision,
+            "Developer replacement did not restore current settings");
+        TestAssert.True(
+            !recovered.SessionState.Running,
+            "Developer replacement replayed the running state");
+        TestAssert.Equal(
+            0,
+            secondSession.StartCommandCount,
+            "Developer replacement replayed the start command");
+        TestAssert.Equal(
+            0,
+            secondSession.StopCommandCount,
+            "Developer replacement fabricated a stop or input lease");
+        TestAssert.Equal(
+            0,
+            secondSession.EntitlementApplyCount,
+            "Developer replacement replayed a signed entitlement envelope");
+
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        TestAssert.True(
+            !runtime.HasActiveEntitlement,
+            "Terminal cleanup retained developer runtime authority");
     }
 
     private static void TerminalStopCancelsStart()
@@ -236,6 +592,15 @@ internal static class EngineSupervisorTests
         throw new InvalidOperationException("Expected InvalidOperationException was not thrown");
     }
 
+    private static FishingSignedEntitlementEnvelope Entitlement(byte bodyByte) => new(
+        "POST",
+        "/v1/licenses/actions/validate-key",
+        "api.keygen.sh",
+        "date",
+        "digest",
+        "signature",
+        [bodyByte]);
+
     private sealed class FakeFactory(
         params Func<CancellationToken, Task<IEngineManagedSession>>[] starts)
         : IEngineManagedSessionFactory
@@ -286,10 +651,72 @@ internal static class EngineSupervisorTests
         }
     }
 
-    private sealed class FakeSession(int processId) :
+    private sealed class RecoveringFactory(
+        int failuresBeforeSuccess,
+        FakeSession replacement) : IEngineManagedSessionFactory
+    {
+        public TaskCompletionSource SuccessfulStart { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int StartCount { get; private set; }
+
+        public Task<IEngineManagedSession> StartAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StartCount++;
+            if (StartCount <= failuresBeforeSuccess)
+            {
+                return Task.FromException<IEngineManagedSession>(
+                    new IOException($"restart_failed_{StartCount}"));
+            }
+            SuccessfulStart.TrySetResult();
+            return Task.FromResult<IEngineManagedSession>(replacement);
+        }
+    }
+
+    private sealed class GatedRecoveryFactory(
+        FakeSession first,
+        FakeSession replacement,
+        Func<FishingRuntimeSettings> currentSettings) : IEngineManagedSessionFactory
+    {
+        public TaskCompletionSource ReplacementStarted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReleaseReplacement { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private int startCount;
+
+        public async Task<IEngineManagedSession> StartAsync(
+            CancellationToken cancellationToken)
+        {
+            startCount++;
+            if (startCount == 1)
+            {
+                first.RestoreSettings(currentSettings().Revision);
+                return first;
+            }
+            if (startCount != 2)
+            {
+                throw new InvalidOperationException("unexpected_fake_engine_start");
+            }
+            ReplacementStarted.TrySetResult();
+            await ReleaseReplacement.Task.WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+            replacement.RestoreSettings(currentSettings().Revision);
+            return replacement;
+        }
+    }
+
+    private sealed class FakeSession(
+        int processId,
+        bool hasBootstrapRuntimeAuthority = false) :
         IEngineManagedSession,
         IEngineEntitlementSession,
-        IEngineAutomationSession
+        IEngineAutomationSession,
+        IEngineSessionStateSource,
+        IEngineNotificationFrameSource,
+        IEngineBootstrapAuthoritySession
     {
         public TaskCompletionSource PingStarted { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -307,6 +734,9 @@ internal static class EngineSupervisorTests
         public FishingSessionStateSnapshot SessionState { get; private set; } =
             FishingSessionStateSnapshot.Empty;
 
+        public bool HasBootstrapRuntimeAuthority { get; } =
+            hasBootstrapRuntimeAuthority;
+
         public int PingCount { get; private set; }
 
         public int DisposeCount { get; private set; }
@@ -315,7 +745,21 @@ internal static class EngineSupervisorTests
 
         public bool RejectStart { get; set; }
 
+        public bool BlockStart { get; set; }
+
+        public int RejectEntitlementApplicationsRemaining { get; set; }
+
         public ulong LastSettingsRevision { get; private set; }
+
+        public int EntitlementApplyCount { get; private set; }
+
+        public int StartCommandCount { get; private set; }
+
+        public int StopCommandCount { get; private set; }
+
+        public event Action<FishingSessionStateSnapshot>? SessionStateChanged;
+
+        public event Action<FishingEngineNotificationFrame>? NotificationReceived;
 
         public async Task PingAsync(CancellationToken cancellationToken)
         {
@@ -334,6 +778,16 @@ internal static class EngineSupervisorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(entitlement);
+            EntitlementApplyCount++;
+            if (RejectEntitlementApplicationsRemaining > 0)
+            {
+                RejectEntitlementApplicationsRemaining--;
+                return Task.FromResult(new EngineSignedEntitlementReceipt(
+                    Accepted: false,
+                    Reason: "cached_entitlement_rejected",
+                    AcceptedGeneration: 0,
+                    ExpiresUnixSeconds: 0));
+            }
             return Task.FromResult(new EngineSignedEntitlementReceipt(
                 Accepted: true,
                 Reason: "accepted",
@@ -347,13 +801,19 @@ internal static class EngineSupervisorTests
             return Task.FromResult<ulong>(8);
         }
 
-        public Task<FishingSessionStateSnapshot> StartFishingSessionAsync(
+        public async Task<FishingSessionStateSnapshot> StartFishingSessionAsync(
             FishingRuntimeSettings settings,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(settings);
+            StartCommandCount++;
             LastSettingsRevision = settings.Revision;
+            if (BlockStart)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                    .ConfigureAwait(false);
+            }
             if (RejectStart)
             {
                 throw new EngineCommandRejectedException(
@@ -361,18 +821,40 @@ internal static class EngineSupervisorTests
                     "settings_revision_mismatch");
             }
             SessionState = CreateSessionState(settings.Revision, running: true);
-            return Task.FromResult(SessionState);
+            return SessionState;
         }
 
         public Task<FishingSessionStateSnapshot> StopAutomationAsync(
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            StopCommandCount++;
             SessionState = CreateSessionState(
                 LastSettingsRevision == 0 ? 1 : LastSettingsRevision,
                 running: false);
             return Task.FromResult(SessionState);
         }
+
+        public void RestoreSettings(ulong revision)
+        {
+            LastSettingsRevision = revision;
+            SessionState = CreateSessionState(revision, running: false);
+        }
+
+        public void EmitSessionState(ulong revision, bool running)
+        {
+            SessionState = CreateSessionState(revision, running);
+            SessionStateChanged?.Invoke(SessionState);
+        }
+
+        public void EmitNotification(ulong sequence) =>
+            NotificationReceived?.Invoke(new FishingEngineNotificationFrame(
+                $"fake-{ProcessId}",
+                sequence,
+                1_900_000_000_000,
+                new BaitTiredEngineNotification()));
+
+        public void FailEventPump() => IsAlive = false;
 
         public ValueTask DisposeAsync()
         {
@@ -389,6 +871,7 @@ internal static class EngineSupervisorTests
             stopping: false,
             detectedStage: running ? "active" : "idle",
             totals: new FishingSessionTotalsSnapshot(0, 0, 0, 0, 0, 0, 0),
-            tackleItems: Array.Empty<FishingTackleItemSnapshot>());
+            tackleItems: Array.Empty<FishingTackleItemSnapshot>(),
+            acceptedSettingsRevision: revision);
     }
 }

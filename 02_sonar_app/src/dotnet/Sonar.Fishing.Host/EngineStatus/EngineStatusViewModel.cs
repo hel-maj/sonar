@@ -104,7 +104,7 @@ public sealed record EngineStatusViewModel(
 
     internal static EngineStatusViewModel FromBoundaryFailure(bool canRetry) => new(
         Title: "Автоматизация недоступна",
-        Description: "Рыбалка остановлена. Перезапустите приложение и повторите команду.",
+        Description: "Рыбалка остановлена. Восстановление продолжается автоматически; повторите команду, когда статус снова станет готовым.",
         BadgeText: "Ошибка",
         BadgeTone: SemanticTone.Danger,
         CanStart: canRetry,

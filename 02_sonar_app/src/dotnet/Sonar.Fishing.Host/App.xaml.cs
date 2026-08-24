@@ -20,7 +20,7 @@ public partial class App : Application
     private HostApplicationComposition? _composition;
     private ProductDiagnosticLog? _diagnostics;
     private HttpClient? _licenseHttpClient;
-    private FishingLicenseRuntimeCoordinator? _licenseRuntime;
+    private ILicenseRuntimeLifecycle? _licenseRuntime;
     private HttpClient? _startupHttpClient;
     private CancellationTokenSource? _startupMonitorCancellation;
     private Task? _startupMonitorTask;
@@ -56,9 +56,16 @@ public partial class App : Application
                 return;
             }
             Action? clearDiagnostics = _diagnostics is null ? null : _diagnostics.Clear;
-            _composition = options.Mode == HostRunMode.Production
-                ? CreateProductionComposition(state, clearDiagnostics)
-                : HostApplicationComposition.Create(options, state, clearDiagnostics);
+            _composition = options.Mode is HostRunMode.Production or
+                HostRunMode.DeveloperFullAccess
+                    ? CreateProductionComposition(
+                        state,
+                        clearDiagnostics,
+                        options.Mode)
+                    : HostApplicationComposition.Create(
+                        options,
+                        state,
+                        clearDiagnostics);
             MainWindow = new MainWindow(
                 _composition.Shell,
                 _composition.Lifecycle);
@@ -211,16 +218,35 @@ public partial class App : Application
 
     private HostApplicationComposition CreateProductionComposition(
         HostStateCoordinator state,
-        Action? clearDiagnostics)
+        Action? clearDiagnostics,
+        HostRunMode runMode)
     {
-        state.RevokeLicenseAuthority(clearSignedCache: false);
+        if (runMode is not (HostRunMode.Production or
+            HostRunMode.DeveloperFullAccess))
+        {
+            throw new ArgumentOutOfRangeException(nameof(runMode));
+        }
+#if !SONAR_FISHING_DEVELOPER_FULL_ACCESS
+        if (runMode == HostRunMode.DeveloperFullAccess)
+        {
+            throw new InvalidOperationException("developer_full_access_not_compiled");
+        }
+#endif
+        var developerFullAccess = runMode == HostRunMode.DeveloperFullAccess;
+        if (!developerFullAccess)
+        {
+            state.RevokeLicenseAuthority(clearSignedCache: false);
+        }
         var engineExecutable = Path.Combine(AppContext.BaseDirectory, "Sonar.Engine.exe");
         var timeout = TimeSpan.FromSeconds(10);
         var supervisor = new EngineSessionSupervisor(
             new ProductionEngineManagedSessionFactory(
                 engineExecutable,
                 timeout,
-                () => state.Current.Fishing),
+                () => state.Current.Fishing,
+                developerFullAccess
+                    ? EngineProcessAuthorityMode.DeveloperFullAccess
+                    : EngineProcessAuthorityMode.Production),
             EngineRestartPolicy.Default);
         var healthUseCase = new ProductionEngineHealthUseCase(supervisor, timeout);
         var automationRuntime = new EngineFishingAutomationRuntime(
@@ -231,23 +257,39 @@ public partial class App : Application
             () => state.Current.Fishing,
             automationRuntime,
             ProductWindowFocusProbe.IsActive);
-        _licenseHttpClient = CreateLicenseHttpClient();
-        var licenseService = new FishingLicenseActivationService(
-            new KeygenLicenseApiClient(_licenseHttpClient),
-            WindowsMachineFingerprint.Current());
-        _licenseRuntime = new FishingLicenseRuntimeCoordinator(
-            licenseService,
-            state,
-            new EngineEntitlementRuntimeSink(supervisor),
-            dispatchStateMutation: action => Dispatcher.Invoke(action));
+        Func<string, CancellationToken, Task<FishingLicenseActivationResult>>?
+            activateLicense = null;
+        LicenseHostSettings? licenseOverride = null;
+        if (developerFullAccess)
+        {
+            _licenseRuntime = DeveloperLicenseRuntimeLifecycle.Instance;
+            licenseOverride = DeveloperFullAccessPolicy.VisibleLicense;
+        }
+        else
+        {
+            _licenseHttpClient = CreateLicenseHttpClient();
+            var licenseService = new FishingLicenseActivationService(
+                new KeygenLicenseApiClient(_licenseHttpClient),
+                WindowsMachineFingerprint.Current());
+            var productionLicenseRuntime = new FishingLicenseRuntimeCoordinator(
+                licenseService,
+                state,
+                new EngineEntitlementRuntimeSink(supervisor),
+                dispatchStateMutation: action => Dispatcher.Invoke(action));
+            _licenseRuntime = productionLicenseRuntime;
+            activateLicense = productionLicenseRuntime.ActivateAsync;
+        }
         return HostApplicationComposition.CreateProduction(
             state,
             healthUseCase,
             automationRuntime,
+            supervisor,
             _licenseRuntime,
             hotkeyRuntime,
-            _licenseRuntime.ActivateAsync,
-            clearDiagnostics);
+            activateLicense,
+            clearDiagnostics,
+            runMode,
+            licenseOverride);
     }
 
     private static ProductDiagnosticLog? TryOpenDiagnostics()

@@ -445,14 +445,17 @@ class one_frame_capture final : public platform::client_capture_source {
 class recording_memory final : public adapters::fishing_memory_source {
  public:
   [[nodiscard]] adapters::memory_snapshot_result capture(
+      const adapters::memory_capture_scope scope,
       const std::uint64_t,
       const std::uint64_t,
       const sonar::platform::windows::process_generation&) noexcept override {
     ++calls;
+    scopes.push_back(scope);
     return {.reason = "fixture_memory_not_expected"};
   }
 
   std::size_t calls{};
+  std::vector<adapters::memory_capture_scope> scopes;
 };
 
 class recording_gate final : public adapters::immediate_action_gate {

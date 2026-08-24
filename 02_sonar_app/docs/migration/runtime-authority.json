@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "recorded_at": "2026-08-23",
+  "schema_version": 3,
+  "recorded_at": "2026-08-24",
   "production": {
     "authority": "WPF C# Host with native C++ Engine",
     "entrypoint": "src/dotnet/Sonar.Fishing.Host/App.xaml",
@@ -9,6 +9,27 @@
     "engine_composition_root": "native/engine_ipc/src/production_composition.cpp",
     "side_effect_owner": "windows_fishing_automation_session behind runtime safety and entitlement gates",
     "python_runtime_allowed": false
+  },
+  "developer_full_access": {
+    "authority": "compile-isolated local owner access",
+    "entrypoint": "scripts/run_developer_full_access.ps1",
+    "host_compile_property": "SonarFishingDeveloperFullAccess=true",
+    "engine_cmake_option": "SONAR_FISHING_DEVELOPER_FULL_ACCESS=ON",
+    "launch_contract": "Sonar.exe --developer-full-access",
+    "manifest": {
+      "schema_version": 2,
+      "release_mode": "developer-full-access-unsigned",
+      "marker": "developerFullAccess=true",
+      "ordinary_reader_accepts": false,
+      "local_maintenance_accepts": false
+    },
+    "licensing_and_entitlement_bypassed": true,
+    "signed_startup_availability_and_update_block_bypassed": true,
+    "memory_window_capture_input_safety_bypassed": false,
+    "unsupported_game_build_bypassed": false,
+    "crash_recovery_replays_runtime_or_input_authority": false,
+    "python_runtime_allowed": false,
+    "production_distribution_allowed": false
   },
   "offline_ipc_slice": {
     "authority": "diagnostic only",
@@ -113,7 +134,7 @@
     "authority": "production product Host",
     "entrypoint": "src/dotnet/Sonar.Fishing.Host/App.xaml",
     "normal_mode": "no arguments",
-    "explicit_development_modes": ["--demo", "--offline-engine <path>"],
+    "explicit_development_modes": ["--demo", "--offline-engine <path>", "--developer-full-access (compile-isolated build only)"],
     "implicit_default_mode": true,
     "session_and_tackle_source": "native production Engine aggregate session snapshots",
     "settings_source": "exact application-directory config/state.dat with DPAPI CurrentUser secrets",
@@ -128,6 +149,13 @@
     "telegram_transport": true,
     "telegram_native_fishing_start_stop": true,
     "telegram_statistics_and_tackle": true,
+    "telegram_engine_notifications": {
+      "catch_start_stop_meal_inventory_bait_focus": true,
+      "bounded_in_memory": true,
+      "generation_sequence_deduplicated": true,
+      "persistent_replay": false,
+      "live_network_accepted": false
+    },
     "streaming": {
       "controller_and_containment_core": true,
       "production_capture_network_chat_composition": false,
@@ -149,10 +177,15 @@
     "The production Engine composes Win32 capture, memory observation and guarded mutation adapters inside one coarse fishing session.",
     "No product automation command can bypass signed entitlement, coherent target, foreground, packet-budget and immediate runtime-safety gates.",
     "The explicit --offline-engine mode remains diagnostic and never grants production side-effect authority.",
+    "The compile-isolated --developer-full-access mode bypasses only external signed startup availability/update-block and licensing/entitlement admission; ordinary production binaries reject it, unavailable capabilities remain unavailable, and all game safety gates remain mandatory.",
+    "Engine crash recovery withdraws the failed generation authority, restores settings and freshly revalidates still-current signed or compile-time local authority, and never replays snapshots, automation commands, side effects, or input leases.",
+    "Engine process, heartbeat or event-pump failure never opens a permanent circuit; the heartbeat owner retries indefinitely with capped backoff.",
+    "Every Engine generation scrubs inherited reciprocal authority mode and production identity environment before writing its own exact session bootstrap.",
     "The production Keygen RSA public key is embedded and independently enforced by Host and Engine.",
     "Fishing product source, tests and entrypoints contain no Python runtime or Python product composition.",
     "The normal Host lifecycle owns one global rising-edge start/stop hotkey reader over the latest persisted gesture and the existing coarse entitlement-gated automation command.",
     "Telegram long polling is production-composed; native fishing start/stop, current statistics and tackle projections use the same production runtime.",
+    "Typed catch, session, meal, inventory, bait and focus events feed a bounded generation-gated Telegram publisher without persistence or replay.",
     "The current production memory profile proves reeling regions only; player-status and chat regions are absent and cannot be reported as memory authority.",
     "The native game-chat episode is offline-tested but is not instantiated by normal production composition.",
     "Streaming has tested core contracts but no complete production composition because capture, authenticated network, chat bridge and embedded tool payload owners are absent.",
@@ -163,7 +196,7 @@
     "successful normal no-argument lifecycle against the current signed startup service",
     "authorized live GTA acceptance of every automation stage without bypassing safety gates",
     "production Authenticode signing and timestamp verification",
-    "install, update, rollback and crash-recovery allowlist acceptance"
+    "complete production-signed install, remote update, interrupted-update recovery, remote rollback and crash-recovery allowlist acceptance"
   ],
   "cutover_status": "Native source, build and runtime authority cutover is complete; live acceptance and signed distribution remain separate release gates."
 }

@@ -218,6 +218,7 @@ void blit_asset(
 class unavailable_memory final : public adapters::fishing_memory_source {
  public:
   [[nodiscard]] adapters::memory_snapshot_result capture(
+      adapters::memory_capture_scope,
       std::uint64_t,
       std::uint64_t,
       const sonar::platform::windows::process_generation&) noexcept override {
@@ -230,10 +231,12 @@ class inventory_memory final : public adapters::fishing_memory_source {
   explicit inventory_memory(const bool open) : open_(open) {}
 
   [[nodiscard]] adapters::memory_snapshot_result capture(
+      const adapters::memory_capture_scope scope,
       const std::uint64_t sequence,
       const std::uint64_t captured_at_steady_ns,
       const sonar::platform::windows::process_generation& game_generation)
       noexcept override {
+    last_scope_ = scope;
     return {
         .snapshot = sonar::fishing::memory_observation::coherent_memory_snapshot{
             .sequence = sequence,
@@ -250,8 +253,14 @@ class inventory_memory final : public adapters::fishing_memory_source {
     };
   }
 
+  [[nodiscard]] adapters::memory_capture_scope last_scope() const noexcept {
+    return last_scope_;
+  }
+
  private:
   bool open_{};
+  adapters::memory_capture_scope last_scope_{
+      adapters::memory_capture_scope::reeling};
 };
 
 class queued_text final : public adapters::runtime_text_recognizer {
@@ -323,6 +332,9 @@ void inventory_frame_rejects_unmatched_slots(IWICImagingFactory& factory) {
   require(fact.error.empty() &&
           fact.surface == inventory::inventory_surface::inventory,
       "production_inventory_surface_changed");
+  require(
+      memory.last_scope() == adapters::memory_capture_scope::inventory_state,
+      "production_inventory_used_reeling_memory_scope");
   require(fact.items.empty(), "production_inventory_false_positive");
   for (const auto& item : fact.items) {
     require(!item.instance_id.empty() && !item.item_id.empty() &&

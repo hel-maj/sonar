@@ -12,6 +12,7 @@ read-only observation. Она не нажимает клавиши, не упр�
 
 ```text
 exact product target resolver
+  -> explicit reeling or inventory_state capture scope
   -> capture_plan + expected process generations
   -> least-rights Windows memory_connector
   -> bounded exact reads
@@ -39,9 +40,14 @@ evidence получают один sequence, monotonic capture time, profile id/
 - Historical decoder semantics сохранены в language-neutral fixture; executable
   legacy oracle и runtime fallback удалены.
 
+Windows connector использует Common `memory_regions` access profile. Это
+добавляет только least-rights region enumeration к exact read; Fishing
+по-прежнему владеет scan bounds, binding и admission.
+
 Конкретный Windows connector создается без side effect. Process handle появляется
-только внутри явно запущенной production fishing session либо отдельного
-non-shipping [live observation preflight](LIVE_OBSERVATION_PREFLIGHT.md).
+только внутри явно запущенной production fishing session, отдельного
+non-shipping [live observation preflight](LIVE_OBSERVATION_PREFLIGHT.md) либо
+явно подтверждённого inventory characterization tool.
 Preflight использует тот же embedded build selection, resolver и observer, но
 не создаёт input/mutation capability и наружу отдаёт только coarse readiness.
 
@@ -55,6 +61,10 @@ Preflight использует тот же embedded build selection, resolver и
 - inventory vote candidates, минимум 6 matches и confidence 0.85;
 - typed/scaled player-status candidates;
 - required/optional domain policy.
+
+Embedded registry schema `2` дополнительно фиксирует optional inventory
+binding. У текущего shipping profile поле равно `-`: decoder/vote contract
+существует, но production address authority не выдумывается из legacy bytes.
 
 `capture_plan` содержит resolved addresses только для одной уже проверенной
 process generation. Resolver обязан передать exact `(pid, creation time)` для
@@ -95,20 +105,33 @@ hash, ambiguous inventory vote и replayed sequence.
 
 ## Production admission и оставшиеся gaps
 
-Normal Engine композирует подтверждённый build-specific profile. Inventory
-openness теперь берётся только из `coherent_memory_snapshot.inventory` и через
-Common нормализуется в `unknown/closed/open`: screenshot detector сохраняет
-только item/context geometry и никогда не превращает неизвестность в closed.
+Normal Engine теперь маршрутизирует reeling и inventory разными capture scopes.
+Inventory поэтому не требует active fish. Если exact build profile содержит
+binding, resolver выполняет bounded cold discovery, revalidates cached masked
+signatures на каждом плане и после drift делает ровно одну bounded rediscovery.
+Неудачная cold discovery не повторяется каждый frame: typed failure удерживает
+пятисекундный cooldown перед следующей bounded попыткой и оставляет state
+`unknown`. Screenshot detector сохраняет только
+item/context geometry и никогда не превращает неизвестность в closed.
+
+Shipping registry пока не содержит ни одного admitted inventory binding, а
+actual current hash вообще не admitted. Следовательно, current runtime
+возвращает typed `profile_unavailable` / `memory_game_build_unsupported`;
+`memory_inventory_binding_unavailable` относится к старому admitted profile без
+binding. Ни один путь не публикует выдуманный `open/closed`. Полная
+граница и подготовленный manual evidence entrypoint описаны в
+[inventory-state characterization](INVENTORY_STATE_CHARACTERIZATION.md).
 Player/status/chat поля также публикуются только при наличии admitted layout;
 visual evidence не выдаётся за memory evidence. E11 остаётся partial live
-acceptance до аутентификации текущего build profile. Оставшиеся gates:
+acceptance. Оставшиеся gates:
 
 1. Первый guarded read-only preflight 2026-08-24 подтвердил process/window,
    executable hash-read и capture, но exact profile selection fail-closed
    вернул `game_build_unsupported`; reeling memory не читалась.
 2. Реальные profile-drift, target-loss и reeling captures.
-3. Authentic player status/chat/inventory captures для уже описанных layouts;
-   отсутствие любого required field сохраняет whole aggregate fail-closed.
+3. Один controlled manual `CLOSED/OPEN` characterization current build,
+   автономный signature/root review и immutable inventory binding promotion;
+   authentic player status/chat captures остаются отдельными gaps.
 4. Любой новый GTA build получает новый immutable profile/revision и regression
    evidence; silent wildcard profile запрещён.
 
@@ -123,6 +146,11 @@ candidate result не изменяет registry и не является product
 hash и pinned baseline, но вернул `pattern_scan_incomplete`; identity и coherent
 snapshot остались false. Production memory authority поэтому всё ещё не
 принимает текущую build, а screenshot не подменяет open-state evidence.
+
+Дополнительный zero-input scan legacy inventory signature на exact current hash
+также вернул `0` matches даже по всем `13490` readable regions до 16 MiB.
+Старый anchor имел sliding base и не имел module-rooted pointer, поэтому он
+намеренно не promoted и current hash не добавлен wildcard-ом.
 
 До выполнения этих пунктов отсутствие profile/plan дает fail-closed result, а
 production bundle не включает Python memory runtime как fallback.

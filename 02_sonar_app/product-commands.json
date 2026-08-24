@@ -89,6 +89,105 @@
       ]
     },
     {
+      "id": "fishing-native-build-developer-full-access",
+      "category": "fishing",
+      "kind": "build",
+      "title": "Собрать Fishing с локальным доступом",
+      "description": "Собирает отдельную локальную пару Host и Engine без лицензионного ограничения. Доступны только реально подключённые функции; игровые проверки остаются обязательными.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\build_developer_full_access.ps1"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\build_developer_full_access.ps1", "{productRoot}\\scripts\\verify_developer_full_access.ps1", "{productRoot}\\scripts\\build_release_native.ps1"],
+      "parameters": [
+        {
+          "id": "version",
+          "type": "text",
+          "label": "Версия локальной сборки",
+          "description": "SemVer локальной сборки. Технический канал указан только в manifest.",
+          "argument": "-Version",
+          "required": true,
+          "defaultValue": "1.0.0-local",
+          "maxLength": 64,
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        {
+          "id": "outputDirectory",
+          "type": "path",
+          "label": "Папка локальной сборки",
+          "description": "Отдельная папка внутри product build; ordinary bundle не заменяется.",
+          "argument": "-OutputDirectory",
+          "required": true,
+          "defaultValue": "build\\developer-full-access\\bundle",
+          "pathKind": "directory",
+          "mustExist": false
+        },
+        {
+          "id": "skipOfflineTests",
+          "type": "bool",
+          "label": "Пропустить offline-тесты",
+          "description": "Оставьте выключенным для полной проверки перед использованием.",
+          "argument": "-SkipOfflineTests",
+          "defaultBoolean": false
+        }
+      ]
+    },
+    {
+      "id": "fishing-native-verify-developer-full-access",
+      "category": "fishing",
+      "kind": "test",
+      "title": "Проверить локальную сборку Fishing",
+      "description": "Проверяет пару EXE, состав файлов, зависимости, секреты и отсутствие Python без запуска приложения.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\verify_developer_full_access.ps1"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\verify_developer_full_access.ps1", "{productRoot}\\scripts\\release_common.ps1"],
+      "parameters": [
+        {
+          "id": "bundleDirectory",
+          "type": "path",
+          "label": "Папка локальной сборки",
+          "description": "Проверенная локальная сборка без лицензионного ограничения.",
+          "argument": "-BundleDirectory",
+          "required": true,
+          "defaultValue": "build\\developer-full-access\\bundle",
+          "pathKind": "directory",
+          "mustExist": true
+        }
+      ]
+    },
+    {
+      "id": "fishing-native-run-developer-full-access",
+      "category": "fishing",
+      "kind": "run",
+      "title": "Запустить Fishing с локальным доступом",
+      "description": "Проверяет и запускает отдельную локальную сборку без лицензионного ограничения. Доступны только реально подключённые функции; игровые проверки остаются обязательными.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\run_developer_full_access.ps1"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\run_developer_full_access.ps1", "{productRoot}\\scripts\\verify_developer_full_access.ps1"],
+      "parameters": [
+        {
+          "id": "bundleDirectory",
+          "type": "path",
+          "label": "Папка локальной сборки",
+          "description": "Проверенная локальная сборка с Host, Engine и manifest.",
+          "argument": "-BundleDirectory",
+          "required": true,
+          "defaultValue": "build\\developer-full-access\\bundle",
+          "pathKind": "directory",
+          "mustExist": true
+        },
+        {
+          "id": "wait",
+          "type": "bool",
+          "label": "Ждать завершения",
+          "description": "Оставить команду активной до штатного выхода приложения.",
+          "argument": "-Wait",
+          "defaultBoolean": false
+        }
+      ]
+    },
+    {
       "id": "fishing-native-run",
       "category": "fishing",
       "kind": "run",

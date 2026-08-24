@@ -116,7 +116,7 @@ unauthenticated-viewer rejection, total cleanup timeout, in-flight startup
 cancellation, serialized restart without overlap, bounded retry and bounded
 chat command. No real process or socket is created by these tests.
 
-Current Release acceptance is 128/128 WPF tests with zero warnings. Five equal
+Current Release acceptance is 209/209 WPF tests with zero warnings. Five equal
 offline process samples had median wall time 2219.172 ms, median CPU time
 1437.5 ms and maximum peak working set 16,564,224 bytes. H07 adds no Engine IPC
 operation or bytes. The sample demonstrates no isolated hotspot, so no

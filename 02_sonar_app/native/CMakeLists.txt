@@ -24,6 +24,11 @@ option(
     OFF
 )
 option(
+    SONAR_FISHING_DEVELOPER_FULL_ACCESS
+    "Compile the local owner-only developer authority into Host-paired Engine code"
+    OFF
+)
+option(
     SONAR_FISHING_BUILD_LIVE_OBSERVATION_PREFLIGHT
     "Build the non-shipping one-shot read-only GTA observation preflight"
     OFF

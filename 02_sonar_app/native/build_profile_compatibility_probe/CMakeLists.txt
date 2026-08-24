@@ -4,6 +4,7 @@ endif()
 
 add_library(SonarFishingBuildProfileCompatibilityProbeCore STATIC
     src/build_profile_compatibility_probe.cpp
+    src/inventory_state_characterization.cpp
 )
 add_library(
     Sonar::FishingBuildProfileCompatibilityProbeCore
@@ -34,6 +35,29 @@ target_compile_options(SonarFishingBuildProfileCompatibilityProbeTests
 add_test(
     NAME sonar_fishing.build_profile_compatibility_probe
     COMMAND SonarFishingBuildProfileCompatibilityProbeTests
+)
+
+add_executable(SonarFishingInventoryStateCharacterizationTests
+    tests/inventory_state_characterization_test.cpp
+)
+target_compile_features(
+    SonarFishingInventoryStateCharacterizationTests PRIVATE cxx_std_20
+)
+target_include_directories(
+    SonarFishingInventoryStateCharacterizationTests
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    SonarFishingInventoryStateCharacterizationTests
+    PRIVATE Sonar::FishingBuildProfileCompatibilityProbeCore
+)
+target_compile_options(
+    SonarFishingInventoryStateCharacterizationTests
+    PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
+)
+add_test(
+    NAME sonar_fishing.inventory_state_characterization
+    COMMAND SonarFishingInventoryStateCharacterizationTests
 )
 
 add_test(
@@ -88,6 +112,44 @@ add_test(
     COMMAND "${CMAKE_COMMAND}"
         "-DDUMPBIN=${CMAKE_DUMPBIN}"
         "-DTOOL=$<TARGET_FILE:SonarFishingBuildProfileCompatibilityProbeTool>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_binary_imports.cmake"
+)
+
+add_executable(SonarFishingInventoryStateCharacterizationTool
+    src/inventory_state_characterization_main.cpp
+)
+set_target_properties(
+    SonarFishingInventoryStateCharacterizationTool PROPERTIES
+    OUTPUT_NAME "Sonar.Fishing.InventoryStateCharacterization"
+)
+target_compile_features(
+    SonarFishingInventoryStateCharacterizationTool PRIVATE cxx_std_20
+)
+target_include_directories(
+    SonarFishingInventoryStateCharacterizationTool
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    SonarFishingInventoryStateCharacterizationTool
+    PRIVATE
+        Sonar::FishingBuildProfileCompatibilityProbeCore
+        Sonar::FishingMemoryObservation
+)
+target_compile_options(
+    SonarFishingInventoryStateCharacterizationTool
+    PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
+)
+add_test(
+    NAME sonar_fishing.inventory_state_characterization_authority_gate
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTOOL=$<TARGET_FILE:SonarFishingInventoryStateCharacterizationTool>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_authority_gate.cmake"
+)
+add_test(
+    NAME sonar_fishing.inventory_state_characterization_binary_imports
+    COMMAND "${CMAKE_COMMAND}"
+        "-DDUMPBIN=${CMAKE_DUMPBIN}"
+        "-DTOOL=$<TARGET_FILE:SonarFishingInventoryStateCharacterizationTool>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_binary_imports.cmake"
 )
 

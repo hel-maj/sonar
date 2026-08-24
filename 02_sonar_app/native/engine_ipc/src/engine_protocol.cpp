@@ -22,6 +22,8 @@ constexpr std::string_view kRuntimeSettingsCapabilityId =
     "fishing-runtime-settings.apply";
 constexpr std::string_view kSignedEntitlementCapabilityId =
     "signed-entitlement.verify";
+constexpr std::string_view kNotificationEventsCapabilityId =
+    "fishing-notifications.events";
 
 }  // namespace
 
@@ -145,6 +147,10 @@ void send_handshake_hello(
   signed_entitlement->set_capability_id(kSignedEntitlementCapabilityId);
   signed_entitlement->set_major(1);
   signed_entitlement->set_minor(0);
+  auto* notification_events = hello->add_capabilities();
+  notification_events->set_capability_id(kNotificationEventsCapabilityId);
+  notification_events->set_major(1);
+  notification_events->set_minor(0);
   sonar::fishing::engine_ipc::apply_handshake_mode(*hello, authority_mode);
   write_envelope(pipe, envelope);
 }
@@ -182,6 +188,11 @@ bool require_handshake_accepted(
       },
       sonar::platform::ipc::capability_requirement{
           .capability_id = kSignedEntitlementCapabilityId,
+          .major = 1,
+          .minimum_minor = 0,
+      },
+      sonar::platform::ipc::capability_requirement{
+          .capability_id = kNotificationEventsCapabilityId,
           .major = 1,
           .minimum_minor = 0,
       },

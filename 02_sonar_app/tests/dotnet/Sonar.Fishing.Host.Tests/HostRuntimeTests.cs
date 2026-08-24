@@ -40,6 +40,17 @@ internal static class HostRuntimeTests
         var production = HostRunOptions.Parse(Array.Empty<string>());
         TestAssert.Equal(HostRunMode.Production, production.Mode, "Default product mode changed");
         TestAssert.True(production.EngineExecutable is null, "Production mode retained a dev Engine path");
+#if SONAR_FISHING_DEVELOPER_FULL_ACCESS
+        var developer = HostRunOptions.Parse(["--developer-full-access"]);
+        TestAssert.Equal(
+            HostRunMode.DeveloperFullAccess,
+            developer.Mode,
+            "Compiled developer authority mode was not accepted");
+#else
+        TestAssert.Throws<HostRunOptionsException>(
+            () => HostRunOptions.Parse(["--developer-full-access"]),
+            "Production Host accepted developer authority arguments");
+#endif
         try
         {
             _ = HostRunOptions.Parse(["--offline-engine"]);

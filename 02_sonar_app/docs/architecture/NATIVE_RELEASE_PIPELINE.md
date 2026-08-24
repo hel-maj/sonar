@@ -71,6 +71,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke_native.ps1 `
 gate. Production не позволяет пропускать тесты. `-StaticOnly` также доступен
 только для unsigned development smoke.
 
+Отдельный compile-isolated local-access channel не является вариантом обычного
+`-DevelopmentUnsigned`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_developer_full_access.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_developer_full_access.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full_access.ps1
+```
+
+Эта пара снимает только внешние licensing/entitlement и signed startup
+availability/update-block admission gates и сохраняет production
+memory, supported-build, window, foreground, capture, input и final safety
+gates. Builder по умолчанию маркирует версию как `1.0.0-local`; product UI
+показывает `Локальный доступ` без key activation, raw feature IDs или internal
+channel. Ordinary `run_product.ps1` и local maintenance намеренно отвергают ее.
+Полный security contract описан в
+[ADR-0002](ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md).
+
 Product-owned local maintenance для той же development-unsigned пары:
 
 ```powershell
@@ -121,8 +139,12 @@ MSVC `/Brepro`. Source и generated-output paths отображаются в к�
 виртуальные корни. До signing SHA-256 обоих EXE обязан совпасть между build A и
 build B в production режиме.
 
-`bundle-manifest.json` имеет `schemaVersion: 1`, canonical compact UTF-8/LF
-encoding и строгий порядок/набор полей. Он связывает:
+Обычный `bundle-manifest.json` имеет `schemaVersion: 1`, canonical compact
+UTF-8/LF encoding и строгий порядок/набор полей. Отдельный local-access manifest
+имеет `schemaVersion: 2`, release mode
+`developer-full-access-unsigned` и обязательный marker
+`developerFullAccess: true`. Обычный reader не принимает schema 2; developer
+reader требует exact schema, mode и marker. Каждый вариант связывает:
 
 - product, release mode и semantic version;
 - Git commit и dirty-state build input;
@@ -181,14 +203,14 @@ Remote production update, signed activation/uninstall и production-signed
 installation остаются отдельными gates. Native cutover уже зафиксирован;
 unsigned smoke не является доказательством signing или live GTA acceptance.
 
-## Offline acceptance receipt 2026-08-24
+## Offline acceptance receipts 2026-08-24
 
-- Host/WPF focused gate: `194/194`, warnings/errors `0/0`;
-- native CTest: `41/41`; typed IPC integration: `7/7`;
+- Host/WPF focused gate: `209/209`, warnings/errors `0/0`;
+- native CTest: `45/45`; typed IPC integration: `7/7`;
 - deterministic offscreen UI matrix: 180 PNG для compact/medium/expanded
-  layouts и 100/125/150/200% DPI в `build/ui-gallery-0218-final/`; manifest
-  фиксирует Common UI `0.2.18` и имеет SHA-256
-  `6487F1A9783BD7DD4EB7A7805F90402500FC4A3D914BF60E8A98C9A840BA0386`;
+  layouts и 100/125/150/200% DPI в `build/ui-gallery-0219-final/`; manifest
+  фиксирует Common UI `0.2.19` и имеет SHA-256
+  `FD257489E58A3F69A154A54AD176447775981A51FCE0D1744EF6A8369305AD49`;
 - network-inert demo Host прошёл три start/normal-exit цикла, а packaged
   manifest-bound Engine — три crash/replacement/cleanup цикла;
 - lifecycle-labelled exact allowlist/no-Python gates зелены для package,
@@ -200,16 +222,23 @@ unsigned smoke не является доказательством signing ил
 - product-visible XAML/view-model copy и regression
   `all_product_pages_hide_implementation_copy` не содержат migration,
   language, Host/Engine/IPC или architecture status;
-- development bundle проверен как exact two-EXE/no-Python package;
+- previous ordinary development bundle был проверен как exact
+  two-EXE/no-Python package до текущего notification/local-access rebuild;
   оба EXE имеют ожидаемый `NotSigned`. Exact SHA-256:
   `Sonar.exe=36D1B588BFFE4B30E125D126F2B22C8AC641526968510D71B87BD2E28D5866C1`,
   `Sonar.Engine.exe=D162D5A403296085D18D4F18B5E60F178B5FDBB2F603BA11FD84FA96E1B2B6D5`,
   `bundle-manifest.json=E941F958DF0FC455DBA5F8181D0F8223D9C2435687CBA0425FC6A8F75032766B`.
+- current compile-isolated local-access bundle `1.0.0-local` собран без
+  `SkipOfflineTests`, verified как deterministic exact two-EXE/no-Python pair:
+  `Sonar.exe=C3E1E0E8B4739342317CAC58846DB3EE45FD96EB2E84C7A08EA65980A59F230F`,
+  `Sonar.Engine.exe=25BA64F21B877D969C204F76C56215E4DD81794937A7D1A591E085F4A8008953`,
+  `bundle-manifest.json=E6296C3FAE9CAB09971B2540AAFE73A6F8B98DFF5618C220FC9CC096C15F8510`.
 
-- local development-unsigned wrapper фактически прошёл atomic install,
+- local development-unsigned wrapper исторически прошёл atomic install,
   update с Common UI `0.2.17` на `0.2.18`, rollback и synthetic interrupted
-  recovery; каждый этап повторил exact allowlist/no-Python gate и не оставил
-  transaction residue;
+  recovery; текущий exact repin `0.2.19` отдельно прошёл package-hash,
+  build, `209/209` WPF tests и 180-image UI gate. Каждый выполненный transaction
+  stage повторял exact allowlist/no-Python gate и не оставил residue;
 - новых Fishing Application Error 1000 или .NET Runtime 1026 после финальных
   package/lifecycle gates не зарегистрировано.
 

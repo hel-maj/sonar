@@ -13,6 +13,7 @@ handshake_mode_policy handshake_policy(
           .advertises_session_control = false,
       };
     case engine_authority_mode::production:
+    case engine_authority_mode::developer_full_access:
       return handshake_mode_policy{
           .diagnostic_mode = false,
           .side_effect_support = true,

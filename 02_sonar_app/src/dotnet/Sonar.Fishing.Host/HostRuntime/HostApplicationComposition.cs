@@ -1,5 +1,6 @@
 using Sonar.Fishing.Host.EngineHealth;
 using Sonar.Fishing.Host.EngineIntegration;
+using Sonar.Fishing.Host.EngineIntegration.Notifications;
 using Sonar.Fishing.Host.FishingPage;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.LicensePage;
@@ -52,19 +53,27 @@ public sealed record HostApplicationComposition(
         HostStateCoordinator coordinator,
         IEngineHealthUseCase engineHealthUseCase,
         IFishingAutomationRuntime automationRuntime,
+        IFishingEngineNotificationSource engineNotifications,
         ILicenseRuntimeLifecycle licenseRuntime,
         IHostHotkeyRuntimeLifecycle hotkeyRuntime,
-        Func<string, CancellationToken, Task<FishingLicenseActivationResult>> activateLicense,
-        Action? clearDiagnostics = null)
+        Func<string, CancellationToken, Task<FishingLicenseActivationResult>>? activateLicense,
+        Action? clearDiagnostics = null,
+        HostRunMode runMode = HostRunMode.Production,
+        LicenseHostSettings? licenseOverride = null)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
         ArgumentNullException.ThrowIfNull(engineHealthUseCase);
         ArgumentNullException.ThrowIfNull(automationRuntime);
+        ArgumentNullException.ThrowIfNull(engineNotifications);
         ArgumentNullException.ThrowIfNull(licenseRuntime);
         ArgumentNullException.ThrowIfNull(hotkeyRuntime);
-        ArgumentNullException.ThrowIfNull(activateLicense);
+        if (runMode is not (HostRunMode.Production or
+            HostRunMode.DeveloperFullAccess))
+        {
+            throw new ArgumentOutOfRangeException(nameof(runMode));
+        }
         return CreateCore(
-            new HostRunOptions(HostRunMode.Production, null),
+            new HostRunOptions(runMode, null),
             coordinator.Current,
             coordinator,
             clearDiagnostics,
@@ -72,7 +81,9 @@ public sealed record HostApplicationComposition(
             engineHealthUseCase,
             licenseRuntime,
             automationRuntime,
-            hotkeyRuntime);
+            hotkeyRuntime,
+            licenseOverride,
+            engineNotifications);
     }
 
     private static HostApplicationComposition CreateCore(
@@ -84,7 +95,9 @@ public sealed record HostApplicationComposition(
         IEngineHealthUseCase? productionEngineHealth = null,
         ILicenseRuntimeLifecycle? licenseRuntime = null,
         IFishingAutomationRuntime? automationRuntime = null,
-        IHostHotkeyRuntimeLifecycle? hotkeyRuntime = null)
+        IHostHotkeyRuntimeLifecycle? hotkeyRuntime = null,
+        LicenseHostSettings? licenseOverride = null,
+        IFishingEngineNotificationSource? engineNotifications = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(state);
@@ -92,7 +105,8 @@ public sealed record HostApplicationComposition(
 
         var fishingPage = options.Mode switch
         {
-            HostRunMode.Production => FishingPageViewModel.CreateProduction(
+            HostRunMode.Production or HostRunMode.DeveloperFullAccess =>
+                FishingPageViewModel.CreateProduction(
                 automationRuntime ?? throw new InvalidOperationException(
                     "production_automation_runtime_missing")),
             HostRunMode.Demo => FishingPageViewModel.MigrationPreview,
@@ -125,7 +139,8 @@ public sealed record HostApplicationComposition(
         };
         var engineHealth = options.Mode switch
         {
-            HostRunMode.Production => EngineHealthViewModel.CreateProduction(
+            HostRunMode.Production or HostRunMode.DeveloperFullAccess =>
+                EngineHealthViewModel.CreateProduction(
                 productionEngineHealth ?? throw new InvalidOperationException(
                     "production_engine_health_missing"),
                 ApplySessionState),
@@ -138,10 +153,14 @@ public sealed record HostApplicationComposition(
                 ApplySessionState),
             _ => throw new ArgumentOutOfRangeException(nameof(options)),
         };
-        var initialPage = options.Mode == HostRunMode.OfflineEngine
-            ? FishingHostPage.EngineHealth
-            : FishingHostPage.License;
-        var allowedFeatures = state.License.Features.ToHashSet(StringComparer.Ordinal);
+        var initialPage = options.Mode switch
+        {
+            HostRunMode.OfflineEngine => FishingHostPage.EngineHealth,
+            HostRunMode.DeveloperFullAccess => FishingHostPage.Overview,
+            _ => FishingHostPage.License,
+        };
+        var effectiveLicense = licenseOverride ?? state.License;
+        var allowedFeatures = effectiveLicense.Features.ToHashSet(StringComparer.Ordinal);
         var telegramFeatureAllowed = allowedFeatures.Contains("telegram");
         Action<FishingRuntimeSettings>? saveFishing = coordinator is null
             ? null
@@ -170,20 +189,31 @@ public sealed record HostApplicationComposition(
                 coordinator.Current.Secrets.TelegramBotToken);
             return Task.CompletedTask;
         }
-        ITelegramProductUseCases telegramProduct = options.Mode == HostRunMode.Production
+        var liveRuntime = options.Mode is HostRunMode.Production or
+            HostRunMode.DeveloperFullAccess;
+        ITelegramProductUseCases telegramProduct = liveRuntime
             ? new FishingTelegramProductUseCases(
                 automationRuntime ?? throw new InvalidOperationException(
                     "production_automation_runtime_missing"),
-                () => coordinator?.Current ?? state)
+                () =>
+                {
+                    var current = coordinator?.Current ?? state;
+                    return licenseOverride is null
+                        ? current
+                        : current with { License = licenseOverride };
+                })
             : new UnavailableTelegramProductUseCases();
         var telegramNetwork = new TelegramNetworkRunner(
             ReadTelegramSettings,
             SaveTelegramSettingsAsync,
             telegramProduct,
-            streamingController);
+            streamingController,
+            liveRuntime ? engineNotifications : null);
         TelegramRuntimeConfiguration TelegramConfiguration(FishingHostState source) => new(
-            networkAllowed: options.Mode == HostRunMode.Production,
-            featureAllowed: source.License.Features.Contains("telegram", StringComparer.Ordinal),
+            networkAllowed: liveRuntime,
+            featureAllowed: licenseOverride is null
+                ? source.License.Features.Contains("telegram", StringComparer.Ordinal)
+                : allowedFeatures.Contains("telegram"),
             source.Telegram,
             source.Secrets.TelegramBotToken);
         var telegramRuntime = new TelegramRuntimeCoordinator(
@@ -194,7 +224,12 @@ public sealed record HostApplicationComposition(
             coordinator.StateChanged += updated =>
                 telegramRuntime.ApplyConfiguration(TelegramConfiguration(updated));
         }
-        var licensePage = new LicensePageViewModel(state.License, activateLicense);
+        var licensePage = new LicensePageViewModel(
+            effectiveLicense,
+            activateLicense,
+            options.Mode == HostRunMode.DeveloperFullAccess
+                ? LicensePagePresentation.LocalAccess
+                : LicensePagePresentation.Standard);
         var shell = new FishingHostShellViewModel(
             overviewPage,
             licensePage,
@@ -224,8 +259,11 @@ public sealed record HostApplicationComposition(
         {
             coordinator.StateChanged += updated =>
             {
-                licensePage.ApplyExternalSettings(updated.License);
-                shell.ApplyAllowedFeatures(updated.License.Features);
+                if (licenseOverride is null)
+                {
+                    licensePage.ApplyExternalSettings(updated.License);
+                    shell.ApplyAllowedFeatures(updated.License.Features);
+                }
                 fishingPage.RefreshCommandAuthority();
             };
         }

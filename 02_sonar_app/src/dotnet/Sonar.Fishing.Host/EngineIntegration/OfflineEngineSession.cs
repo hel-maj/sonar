@@ -3,6 +3,7 @@ using System.IO;
 using Sonar.Fishing.Host.EngineIntegration.CatchDisposition;
 using Sonar.Fishing.Host.EngineIntegration.CatchQuality;
 using Sonar.Fishing.Host.EngineIntegration.RuntimeSettings;
+using Sonar.Fishing.Host.EngineIntegration.Notifications;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.SettingsPersistence;
@@ -31,7 +32,8 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
     private readonly Dictionary<string, TaskCompletionSource<FishingSessionStateSnapshot>>
         pendingSessionSnapshots = new(StringComparer.Ordinal);
     private Exception? eventPumpFailure;
-    private ulong lastEventSequence;
+    private ulong lastNotificationSequence;
+    private ulong lastSnapshotSequence;
     private ulong sequence = 2;
     private bool shutdown;
     private bool disposed;
@@ -63,11 +65,16 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
 
     internal event Action<FishingSessionStateSnapshot>? SessionSnapshotReceived;
 
+    internal event Action<FishingEngineNotificationFrame>? NotificationReceived;
+
     internal int ProcessId => engineProcess.Id;
 
     internal bool IsContained => engineProcess.IsContained;
 
-    internal bool IsAlive => !disposed && !engineProcess.Process.HasExited;
+    internal bool IsAlive =>
+        !disposed &&
+        !eventPumpTask.IsCompleted &&
+        !engineProcess.Process.HasExited;
 
     internal uint NegotiatedProtocolMinor { get; }
 
@@ -98,6 +105,18 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
             identity,
             cancellationToken).ConfigureAwait(false);
 
+    internal static async Task<OfflineEngineSession> StartDeveloperFullAccessAsync(
+        string engineExecutable,
+        TimeSpan timeout,
+        EngineSessionIdentity identity,
+        CancellationToken cancellationToken) =>
+        await StartAsync(
+            engineExecutable,
+            timeout,
+            EngineProcessAuthorityMode.DeveloperFullAccess,
+            identity,
+            cancellationToken).ConfigureAwait(false);
+
     private static async Task<OfflineEngineSession> StartAsync(
         string engineExecutable,
         TimeSpan timeout,
@@ -110,8 +129,7 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(timeout));
         }
         ArgumentNullException.ThrowIfNull(identity);
-        if (identity.Production !=
-            (authorityMode == EngineProcessAuthorityMode.Production))
+        if (identity.AuthorityMode != authorityMode)
         {
             throw new InvalidOperationException("engine_session_identity_mode_mismatch");
         }
@@ -438,9 +456,12 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
             {
                 await eventPumpTask.ConfigureAwait(false);
             }
-            catch (Exception exception) when (
-                exception is OperationCanceledException or IOException)
+            catch (Exception)
             {
+                // A malformed, faulted or prematurely completed event stream
+                // is already reflected by IsAlive and is the reason this
+                // generation is being retired. Cleanup must still close the
+                // Common Job and pipes so the supervisor can replace it.
             }
             await servers.DisposeAsync().ConfigureAwait(false);
             await engineProcess.DisposeAsync().ConfigureAwait(false);
@@ -657,21 +678,53 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
                 var envelope = await OfflineEngineSessionProtocol.ReadEventEnvelopeAsync(
                     servers.Events,
                     cancellationToken).ConfigureAwait(false);
+                var expectedKind = envelope.PayloadCase switch
+                {
+                    Envelope.PayloadOneofCase.FishingSessionSnapshot => MessageKind.Snapshot,
+                    Envelope.PayloadOneofCase.FishingNotificationEvent => MessageKind.Event,
+                    _ => throw new InvalidOperationException("engine_event_payload_invalid"),
+                };
                 OfflineEngineSessionProtocol.ValidateEngineEventEnvelope(
                     identity,
                     envelope,
-                    MessageKind.Snapshot,
+                    expectedKind,
                     sessionId);
-                if (envelope.Header.Sequence <= lastEventSequence)
+                if (envelope.PayloadCase ==
+                    Envelope.PayloadOneofCase.FishingNotificationEvent)
                 {
-                    throw new InvalidOperationException("engine_event_sequence_replayed");
+                    if (envelope.Header.Sequence <= lastNotificationSequence)
+                    {
+                        throw new InvalidOperationException(
+                            "engine_notification_sequence_replayed");
+                    }
+                    var notification = FishingEngineNotificationWireMapper.Map(
+                        envelope.FishingNotificationEvent);
+                    lastNotificationSequence = envelope.Header.Sequence;
+                    try
+                    {
+                        NotificationReceived?.Invoke(new FishingEngineNotificationFrame(
+                            envelope.Header.SessionId,
+                            envelope.Header.Sequence,
+                            envelope.Header.CapturedAtUnixMs,
+                            notification));
+                    }
+                    catch
+                    {
+                        // Host notification consumers are observational. Their
+                        // failure must not terminate the Engine event pump.
+                    }
+                    continue;
                 }
-                if (string.IsNullOrWhiteSpace(envelope.Header.CorrelationId) ||
-                    envelope.PayloadCase != Envelope.PayloadOneofCase.FishingSessionSnapshot)
+                if (envelope.Header.Sequence <= lastSnapshotSequence)
+                {
+                    throw new InvalidOperationException(
+                        "engine_snapshot_sequence_replayed");
+                }
+                if (string.IsNullOrWhiteSpace(envelope.Header.CorrelationId))
                 {
                     throw new InvalidOperationException("fishing_session_snapshot_invalid");
                 }
-                lastEventSequence = envelope.Header.Sequence;
+                lastSnapshotSequence = envelope.Header.Sequence;
                 var snapshot = FishingSessionWireMapper.Map(
                     envelope.FishingSessionSnapshot);
                 TaskCompletionSource<FishingSessionStateSnapshot>? completion;

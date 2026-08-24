@@ -16,6 +16,9 @@ $requiredFiles = @(
     "scripts\test_no_python_runtime.ps1",
     "scripts\release_common.ps1",
     "scripts\build_release_native.ps1",
+    "scripts\build_developer_full_access.ps1",
+    "scripts\verify_developer_full_access.ps1",
+    "scripts\run_developer_full_access.ps1",
     "scripts\smoke_release_native.ps1",
     "scripts\test_release_plumbing.ps1"
 )
@@ -65,7 +68,7 @@ $nativePackage = Join-Path $productRoot "..\..\.artifacts\sonar-native\0.1.1"
 $nativeWindowsPackage = Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.6"
 $nativeLicensingPackage = Join-Path $productRoot "..\..\.artifacts\sonar-native-licensing\0.1.2"
 $expected = @{
-    (Join-Path $commonFeed "Sonar.UI.Wpf.0.2.18.nupkg") = "737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6"
+    (Join-Path $commonFeed "Sonar.UI.Wpf.0.2.19.nupkg") = "37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33"
     (Join-Path $commonFeed "emoji.wpf.0.3.4.nupkg") = "A9C0570F97961E3DC2B2BA9E41EB7B28808733D194742D837653478EECE7D191"
     (Join-Path $commonFeed "stfu.0.1.1.nupkg") = "BDD1BAEEEC5FF16B74D0354B88393D002A6E8ECBB19793AB900B9151CE686B3A"
     (Join-Path $commonFeed "jeremyansel.hlsl.targets.1.0.13.nupkg") = "4F4CC76E9EFD35F605042FB6D8BD64EF1203F2174DED65217779BB049CFB22E8"

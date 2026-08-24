@@ -101,6 +101,11 @@ constexpr std::string_view kOfflineBundleManifestHash =
   if (!offline.has_value() && mode == "production") {
     return engine_authority_mode::production;
   }
+#if defined(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
+  if (!offline.has_value() && mode == "developer-full-access") {
+    return engine_authority_mode::developer_full_access;
+  }
+#endif
   throw std::runtime_error("production_authority_gate_closed");
 }
 
@@ -115,20 +120,28 @@ constexpr std::string_view kOfflineBundleManifestHash =
     };
   }
 #else
-  if (authority_mode != engine_authority_mode::production) {
+  if (authority_mode == engine_authority_mode::offline_diagnostics) {
     throw std::runtime_error("production_authority_required");
   }
 #endif
+  const bool developer_full_access =
+      authority_mode == engine_authority_mode::developer_full_access;
   return engine_build_identity{
       .host_build_id = require_production_environment(
           L"SONAR_FISHING_HOST_BUILD_ID",
-          "production_host_build_id_missing"),
+          developer_full_access
+              ? "developer_host_build_id_missing"
+              : "production_host_build_id_missing"),
       .engine_build_id = require_production_environment(
           L"SONAR_FISHING_ENGINE_BUILD_ID",
-          "production_engine_build_id_missing"),
+          developer_full_access
+              ? "developer_engine_build_id_missing"
+              : "production_engine_build_id_missing"),
       .bundle_manifest_hash = require_production_environment(
           L"SONAR_FISHING_BUNDLE_MANIFEST_HASH",
-          "production_bundle_manifest_hash_missing"),
+          developer_full_access
+              ? "developer_bundle_manifest_hash_missing"
+              : "production_bundle_manifest_hash_missing"),
   };
 }
 

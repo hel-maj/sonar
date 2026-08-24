@@ -101,7 +101,7 @@ Product wrapper разрешает source, target и backup только как 
 - bounded after-exit argument/PID/receipt contract.
 
 На 2026-08-24 focused Host suite после local-maintenance slice зелёна:
-`194/194`, managed warnings/errors `0/0`. Offline release plumbing прогоняет тот же exact
+`209/209`, managed warnings/errors `0/0`. Offline release plumbing прогоняет тот же exact
 allowlist/no-Python validator для `FirstActivation`, `NormalExit`,
 `CrashRecovery`, `Updated`, `InterruptedUpdateRecovery` и `RemoteRollback`.
 Network-inert demo Host фактически подтвердил `FirstActivation`, а

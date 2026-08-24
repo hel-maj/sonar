@@ -27,7 +27,12 @@ endforeach()
 file(READ "${NATIVE_ROOT}/memory_observation/src/memory_capture_plan_resolver.cpp"
     RESOLVER_CONTENT)
 string(FIND "${RESOLVER_CONTENT}"
-    "select_embedded_memory_build_profile(" SELECTOR_POSITION)
+    "embedded_memory_build_profiles()" EMBEDDED_REGISTRY_POSITION)
+string(FIND "${RESOLVER_CONTENT}"
+    "select_memory_build_profile(" SELECTOR_POSITION)
+if(EMBEDDED_REGISTRY_POSITION EQUAL -1)
+    message(FATAL_ERROR "Shipping memory resolver lost embedded registry ownership")
+endif()
 if(SELECTOR_POSITION EQUAL -1)
     message(FATAL_ERROR "Shipping memory resolver lost exact embedded selector")
 endif()
@@ -72,6 +77,27 @@ foreach(FORBIDDEN "Start-Process" "Invoke-WebRequest" "Invoke-RestMethod")
     string(FIND "${WRAPPER_SCRIPT}" "${FORBIDDEN}" FORBIDDEN_POSITION)
     if(NOT FORBIDDEN_POSITION EQUAL -1)
         message(FATAL_ERROR "Compatibility wrapper contains forbidden operation: ${FORBIDDEN}")
+    endif()
+endforeach()
+
+file(READ "${PRODUCT_ROOT}/scripts/run_inventory_state_characterization.ps1"
+    INVENTORY_WRAPPER_SCRIPT)
+foreach(REQUIRED
+        "ConfirmedManualInventoryCharacterization"
+        "inventory_characterization_import_scan_failed"
+        "inventory_characterization_network_dependency_detected"
+        "--confirmed-manual-inventory-characterization")
+    string(FIND "${INVENTORY_WRAPPER_SCRIPT}" "${REQUIRED}" REQUIRED_POSITION)
+    if(REQUIRED_POSITION EQUAL -1)
+        message(FATAL_ERROR
+            "Inventory characterization wrapper lost required gate: ${REQUIRED}")
+    endif()
+endforeach()
+foreach(FORBIDDEN "Start-Process" "Invoke-WebRequest" "Invoke-RestMethod")
+    string(FIND "${INVENTORY_WRAPPER_SCRIPT}" "${FORBIDDEN}" FORBIDDEN_POSITION)
+    if(NOT FORBIDDEN_POSITION EQUAL -1)
+        message(FATAL_ERROR
+            "Inventory characterization wrapper contains forbidden operation: ${FORBIDDEN}")
     endif()
 endforeach()
 

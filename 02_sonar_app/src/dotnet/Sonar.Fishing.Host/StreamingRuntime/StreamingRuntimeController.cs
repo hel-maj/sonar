@@ -611,7 +611,7 @@ internal sealed class StreamingRuntimeController : IStreamingController, IAsyncD
             "Не удалось безопасно завершить предыдущую трансляцию.",
         "streaming_loose_tools_forbidden" or "streaming_embedded_tool_missing" or
             "streaming_embedded_tool_hash_mismatch" =>
-            "Не удалось подготовить трансляцию. Перезапустите приложение и повторите.",
+            "Трансляция сейчас недоступна. Повторите запуск после обновления приложения.",
         "streaming_network_boundary_invalid" =>
             "Не удалось открыть трансляцию. Повторите запуск.",
         _ => "Трансляция завершилась с ошибкой.",

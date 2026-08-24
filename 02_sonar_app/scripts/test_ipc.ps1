@@ -6,6 +6,7 @@ param(
     [string]$CommonNativeLicensingPackage = $env:SONAR_COMMON_NATIVE_LICENSING_PACKAGE,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
     [string]$CMakeExecutable = $env:SONAR_CMAKE_EXECUTABLE,
+    [switch]$DeveloperFullAccess,
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release"
 )
@@ -17,7 +18,13 @@ $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $noPythonGate = Join-Path $PSScriptRoot "test_no_python_runtime.ps1"
 & $noPythonGate -ProductRoot $productRoot
 $nativeSource = Join-Path $productRoot "native"
-$nativeBuild = Join-Path $productRoot "build\native\windows-msvc-v143-ipc"
+$nativeBuildName = if ($DeveloperFullAccess) {
+    "windows-msvc-v143-ipc-developer-full-access"
+}
+else {
+    "windows-msvc-v143-ipc"
+}
+$nativeBuild = Join-Path $productRoot "build\native\$nativeBuildName"
 $packageCache = Join-Path $productRoot "build\nuget\managed-packages-deterministic-v2"
 $testProject = Join-Path $productRoot "tests\dotnet\Sonar.Fishing.Ipc.IntegrationTests\Sonar.Fishing.Ipc.IntegrationTests.csproj"
 $expectedProtocHash = "C77B7F5125113306ECDE9B328E72466E5CA805A3974DBF10B9DF91A35781E89C"
@@ -56,6 +63,8 @@ $requiredNativeTargets = @(
     "SonarFishingBuildProfileCompatibilityProbeTests",
     "SonarFishingBuildProfileCompatibilityProbeTool",
     "SonarFishingBuildProfileCompatibilityValidatorTests",
+    "SonarFishingInventoryStateCharacterizationTests",
+    "SonarFishingInventoryStateCharacterizationTool",
     "SonarFishingEpisodeTests",
     "SonarFishingEpisodeBenchmark",
     "SonarFishingMaintenanceEpisodeTests",
@@ -101,6 +110,9 @@ $expectedCTestNames = @(
     "sonar_fishing.build_profile_compatibility_probe_authority_gate",
     "sonar_fishing.build_profile_compatibility_probe_binary_imports",
     "sonar_fishing.build_profile_compatibility_validator",
+    "sonar_fishing.inventory_state_characterization",
+    "sonar_fishing.inventory_state_characterization_authority_gate",
+    "sonar_fishing.inventory_state_characterization_binary_imports",
     "sonar_fishing.fishing_episode",
     "sonar_fishing.maintenance_episode",
     "sonar_fishing.automation_adapters",
@@ -111,6 +123,7 @@ $expectedCTestNames = @(
     "sonar_fishing.ipc.production_composition",
     "sonar_fishing.ipc.offline_authority_gate",
     "sonar_fishing.ipc.production_identity_gate"
+    "sonar_fishing.ipc.developer_authority_gate"
 )
 
 function Resolve-Directory([string]$requested, [string]$fallback, [string]$description) {
@@ -505,7 +518,7 @@ $expectedPackages = @{
     "Sonar.Platform.Ipc.NamedPipes.0.1.1.nupkg" = "0CF50FDAFFF00608F0B5742C39A15B3AB24CF79329DA8B07A01404E9F7A45214"
     "Sonar.Platform.Processes.0.1.0.nupkg" = "03DEE12DCB7F2C30A21921A9198CA5388D93A682B8CCE69658CAD0E1996AE5EB"
     "Sonar.Licensing.Verification.0.1.3.nupkg" = "CA1DAC5C5220872F15130C863AB5D12E85709AC19D4972AFC7193C8223FA7518"
-    "Sonar.UI.Wpf.0.2.18.nupkg" = "737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6"
+    "Sonar.UI.Wpf.0.2.19.nupkg" = "37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33"
     "emoji.wpf.0.3.4.nupkg" = "A9C0570F97961E3DC2B2BA9E41EB7B28808733D194742D837653478EECE7D191"
     "stfu.0.1.1.nupkg" = "BDD1BAEEEC5FF16B74D0354B88393D002A6E8ECBB19793AB900B9151CE686B3A"
     "jeremyansel.hlsl.targets.1.0.13.nupkg" = "4F4CC76E9EFD35F605042FB6D8BD64EF1203F2174DED65217779BB049CFB22E8"
@@ -689,6 +702,8 @@ if ($maintenanceEpisodeCases.Count -ne 5) {
     throw "Pinned maintenance-episode fixture must contain exactly 5 cases"
 }
 
+$developerCMakeValue = if ($DeveloperFullAccess) { "ON" } else { "OFF" }
+
 Invoke-Checked $resolvedCMake @(
     "-S", $nativeSource,
     "-B", $nativeBuild,
@@ -698,6 +713,7 @@ Invoke-Checked $resolvedCMake @(
     "-DSONAR_FISHING_BUILD_OFFLINE_IPC=ON",
     "-DSONAR_FISHING_BUILD_LIVE_OBSERVATION_PREFLIGHT=ON",
     "-DSONAR_FISHING_BUILD_PROFILE_COMPATIBILITY_PROBE=ON",
+    "-DSONAR_FISHING_DEVELOPER_FULL_ACCESS=$developerCMakeValue",
     "-DSONAR_COMMON_NATIVE_PACKAGE=$resolvedNativePackage",
     "-DSONAR_COMMON_NATIVE_WINDOWS_PACKAGE=$resolvedNativeWindowsPackage",
     "-DSONAR_COMMON_NATIVE_LICENSING_PACKAGE=$resolvedNativeLicensingPackage",

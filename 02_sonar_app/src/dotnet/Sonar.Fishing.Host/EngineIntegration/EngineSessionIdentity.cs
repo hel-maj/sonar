@@ -12,12 +12,12 @@ internal sealed partial record EngineSessionIdentity
         string hostBuildId,
         string engineBuildId,
         string bundleManifestHash,
-        bool production)
+        EngineProcessAuthorityMode authorityMode)
     {
         HostBuildId = hostBuildId;
         EngineBuildId = engineBuildId;
         BundleManifestHash = bundleManifestHash;
-        Production = production;
+        AuthorityMode = authorityMode;
     }
 
     internal string HostBuildId { get; }
@@ -26,13 +26,22 @@ internal sealed partial record EngineSessionIdentity
 
     internal string BundleManifestHash { get; }
 
-    internal bool Production { get; }
+    internal EngineProcessAuthorityMode AuthorityMode { get; }
+
+    internal bool Production => AuthorityMode == EngineProcessAuthorityMode.Production;
+
+    internal bool DeveloperFullAccess =>
+        AuthorityMode == EngineProcessAuthorityMode.DeveloperFullAccess;
+
+    internal bool SideEffectsAllowed =>
+        AuthorityMode is EngineProcessAuthorityMode.Production or
+            EngineProcessAuthorityMode.DeveloperFullAccess;
 
     internal static EngineSessionIdentity OfflineDiagnostics { get; } = new(
         "offline-host-0.1.0",
         "offline-engine-0.1.0",
         "offline-bundle-manifest",
-        production: false);
+        EngineProcessAuthorityMode.OfflineDiagnostics);
 
     internal static EngineSessionIdentity CreateProduction(
         string hostBuildId,
@@ -58,7 +67,27 @@ internal sealed partial record EngineSessionIdentity
             hostBuildId,
             engineBuildId,
             bundleManifestHash.ToUpperInvariant(),
-            production: true);
+            EngineProcessAuthorityMode.Production);
+    }
+
+    internal static EngineSessionIdentity CreateDeveloperFullAccess(
+        string hostBuildId,
+        string engineBuildId,
+        string bundleManifestHash)
+    {
+#if !SONAR_FISHING_DEVELOPER_FULL_ACCESS
+        throw new InvalidOperationException("developer_full_access_not_compiled");
+#else
+        var productionIdentity = CreateProduction(
+            hostBuildId,
+            engineBuildId,
+            bundleManifestHash);
+        return new EngineSessionIdentity(
+            productionIdentity.HostBuildId,
+            productionIdentity.EngineBuildId,
+            productionIdentity.BundleManifestHash,
+            EngineProcessAuthorityMode.DeveloperFullAccess);
+#endif
     }
 
     [GeneratedRegex("^fishing-host-[0-9a-f]{16}$", RegexOptions.CultureInvariant)]
