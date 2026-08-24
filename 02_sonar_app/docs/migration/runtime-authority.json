@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "recorded_at": "2026-08-24",
+  "recorded_at": "2026-08-25",
   "production": {
     "authority": "WPF C# Host with native C++ Engine",
     "entrypoint": "src/dotnet/Sonar.Fishing.Host/App.xaml",
@@ -176,7 +176,10 @@
       "embedded_profile_sha256": "677E4E355CFBDB13273B1D992407E3C261B3A108DC4DD5C8A0C4C1DA651802E5",
       "actual_current_build_sha256": "8c2c3f768b87f060d678d9e175842aa20449cf5bc164c630692a494eb353d472",
       "actual_current_build_admitted": false,
-      "actual_current_build_blocker": "pattern_scan_incomplete"
+      "actual_current_build_validation_status": "unknown_pending_new_live_receipt",
+      "actual_current_build_blocker": "not_revalidated",
+      "actual_current_build_last_live_receipt_reason": "pattern_scan_incomplete",
+      "actual_current_build_last_live_receipt_scanner_generation": "before_scanner_hardening_975ca94"
     },
     "production_inventory_open": {
       "owner": "SonarMajesticCefInventory 0.1.0 public facade",
