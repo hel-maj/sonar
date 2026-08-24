@@ -29,6 +29,34 @@ function Assert-Throws([scriptblock]$Action, [string]$ExpectedReason) {
     throw "release_test_expected_failure_missing: $ExpectedReason"
 }
 
+function Assert-MaintenanceWrapperRejects(
+    [string[]]$Arguments,
+    [string]$ExpectedReason) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = @(& powershell.exe `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File (Join-Path $PSScriptRoot "invoke_local_release_maintenance.ps1") `
+            @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    $text = $output | Out-String
+    if ($exitCode -eq 0) {
+        throw "release_test_unsafe_maintenance_path_accepted: $ExpectedReason"
+    }
+    if ($text -notlike "*$ExpectedReason*") {
+        throw "release_test_wrong_failure: expected=$ExpectedReason actual=$text"
+    }
+}
+
+$maintenanceJunction = $null
+$externalRoot = $null
+
 try {
     $currentExecutable = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     Copy-Item -LiteralPath $currentExecutable -Destination (Join-Path $bundle "Sonar.exe")
@@ -53,6 +81,126 @@ try {
         $productRoot $bundle "development-unsigned"
     if (-not $accepted.determinism.verified) {
         throw "release_test_manifest_determinism_lost"
+    }
+
+    $gitIgnoreLines = @(Get-Content -LiteralPath (Join-Path $productRoot ".gitignore"))
+    if ($gitIgnoreLines -notcontains "build/") {
+        throw "release_build_root_not_ignored"
+    }
+
+    $maintenanceTarget = Join-Path $testRoot "maintenance-target"
+    $maintenanceExistingTarget = Join-Path $testRoot "maintenance-existing"
+    $maintenanceWrongType = Join-Path $testRoot "maintenance-file"
+    New-Item -ItemType Directory -Path $maintenanceExistingTarget -Force | Out-Null
+    Set-Content -LiteralPath $maintenanceWrongType -Value "sentinel"
+
+    $externalBase = Get-FishingCanonicalPath (Join-Path $productRoot "local-builds")
+    $externalRoot = Join-Path `
+        $externalBase `
+        "release-path-test-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $externalRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $externalRoot "sentinel.txt") -Value "unchanged"
+    $externalFingerprint = Get-FishingDirectoryFingerprint $externalRoot
+
+    $maintenanceJunction = Join-Path $testRoot "maintenance-reparse"
+    New-Item -ItemType Junction -Path $maintenanceJunction -Target $externalRoot |
+        Out-Null
+    $fakeProductRoot = Join-Path $testRoot "fake-product"
+    New-Item -ItemType Directory -Path $fakeProductRoot -Force | Out-Null
+    $fakeBuildJunction = Join-Path $fakeProductRoot "build"
+    New-Item -ItemType Junction -Path $fakeBuildJunction -Target $externalRoot |
+        Out-Null
+    try {
+        Assert-Throws {
+            Assert-FishingSafeBuildPath `
+                $fakeProductRoot `
+                (Join-Path $fakeBuildJunction "escaped-output") `
+                "reparse build root"
+        } "release_path_reparse_point"
+    }
+    finally {
+        [IO.Directory]::Delete($fakeBuildJunction, $false)
+    }
+
+    $receiptDirectory = Join-Path $productRoot "build\release-maintenance\receipts"
+    $receiptFingerprint = Get-FishingDirectoryFingerprint $receiptDirectory
+    $commonInstallArguments = @(
+        "-Action", "Install",
+        "-InstallDirectory", $maintenanceTarget,
+        "-DevelopmentUnsigned",
+        "-DryRun")
+
+    foreach ($unsafeSource in @(
+            (Join-Path $productRoot "scripts"),
+            (Join-Path $productRoot "src"),
+            $externalRoot)) {
+        Assert-MaintenanceWrapperRejects `
+            -Arguments (@("-SourceBundle", $unsafeSource) + $commonInstallArguments) `
+            -ExpectedReason "release_path_outside_build_root"
+    }
+    Assert-MaintenanceWrapperRejects `
+        -Arguments (@("-SourceBundle", $maintenanceWrongType) + $commonInstallArguments) `
+        -ExpectedReason "release_path_not_directory"
+
+    foreach ($unsafeTarget in @(
+            (Join-Path $productRoot "scripts\maintenance-target"),
+            (Join-Path $productRoot "src\maintenance-target"),
+            (Join-Path $externalRoot "maintenance-target"))) {
+        Assert-MaintenanceWrapperRejects -Arguments @(
+            "-Action", "Install",
+            "-SourceBundle", $bundle,
+            "-InstallDirectory", $unsafeTarget,
+            "-DevelopmentUnsigned",
+            "-DryRun") -ExpectedReason "release_path_outside_build_root"
+    }
+    Assert-Throws {
+        Assert-FishingSafeBuildPath `
+            $productRoot `
+            ((Join-Path $productRoot "build") + [IO.Path]::DirectorySeparatorChar) `
+            "maintenance build root"
+    } "release_path_outside_build_root"
+    Assert-MaintenanceWrapperRejects -Arguments @(
+        "-Action", "Install",
+        "-SourceBundle", $bundle,
+        "-InstallDirectory", (Join-Path $maintenanceJunction "escaped-target"),
+        "-DevelopmentUnsigned",
+        "-DryRun") -ExpectedReason "release_path_reparse_point"
+    Assert-MaintenanceWrapperRejects -Arguments @(
+        "-Action", "Install",
+        "-SourceBundle", $bundle,
+        "-InstallDirectory", $maintenanceWrongType,
+        "-DevelopmentUnsigned",
+        "-DryRun") -ExpectedReason "release_path_not_directory"
+
+    foreach ($unsafeBackup in @(
+            (Join-Path $productRoot "scripts\maintenance-backup"),
+            (Join-Path $externalRoot "maintenance-backup"))) {
+        Assert-MaintenanceWrapperRejects -Arguments @(
+            "-Action", "Update",
+            "-SourceBundle", $bundle,
+            "-InstallDirectory", $maintenanceExistingTarget,
+            "-BackupDirectory", $unsafeBackup,
+            "-DevelopmentUnsigned",
+            "-DryRun") -ExpectedReason "release_path_outside_build_root"
+    }
+    Assert-MaintenanceWrapperRejects -Arguments @(
+        "-Action", "Update",
+        "-SourceBundle", $bundle,
+        "-InstallDirectory", $maintenanceExistingTarget,
+        "-BackupDirectory", (Join-Path $maintenanceJunction "escaped-backup"),
+        "-DevelopmentUnsigned",
+        "-DryRun") -ExpectedReason "release_path_reparse_point"
+    Assert-MaintenanceWrapperRejects -Arguments @(
+        "-Action", "Update",
+        "-SourceBundle", $bundle,
+        "-InstallDirectory", $maintenanceExistingTarget,
+        "-BackupDirectory", $maintenanceWrongType,
+        "-DevelopmentUnsigned",
+        "-DryRun") -ExpectedReason "release_path_not_directory"
+
+    if ((Get-FishingDirectoryFingerprint $externalRoot) -cne $externalFingerprint -or
+        (Get-FishingDirectoryFingerprint $receiptDirectory) -cne $receiptFingerprint) {
+        throw "release_unsafe_path_rejection_mutated_state"
     }
 
     & (Join-Path $PSScriptRoot "test_no_python_runtime.ps1") `
@@ -196,6 +344,7 @@ try {
         "smoke_native.ps1",
         "run_dotnet.ps1",
         "run_product.ps1",
+        "invoke_local_release_maintenance.ps1",
         "test_product_lifecycle.ps1",
         "test_no_python_runtime.ps1",
         "test_release_plumbing.ps1"
@@ -215,6 +364,21 @@ try {
     Write-Output "PASS Fishing release manifest, lifecycle allowlist and script contracts"
 }
 finally {
+    if ($null -ne $maintenanceJunction -and
+        (Test-Path -LiteralPath $maintenanceJunction)) {
+        [IO.Directory]::Delete($maintenanceJunction, $false)
+    }
+    if ($null -ne $externalRoot -and (Test-Path -LiteralPath $externalRoot)) {
+        $externalBase = (Get-FishingCanonicalPath `
+            (Join-Path $productRoot "local-builds")).TrimEnd("\") + "\"
+        $canonicalExternal = Get-FishingCanonicalPath $externalRoot
+        if (-not $canonicalExternal.StartsWith(
+                $externalBase,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "release_test_external_cleanup_path_invalid"
+        }
+        Remove-Item -LiteralPath $canonicalExternal -Recurse -Force
+    }
     $safe = Assert-FishingSafeBuildPath $productRoot $testRoot "release plumbing tests"
     if (Test-Path -LiteralPath $safe) {
         Remove-Item -LiteralPath $safe -Recurse -Force

@@ -24,27 +24,38 @@ function Assert-FishingSafeBuildPath(
     [string]$ProductRoot,
     [string]$Path,
     [string]$Purpose = "release output") {
-    $root = Get-FishingCanonicalPath $ProductRoot
-    $buildRoot = Get-FishingCanonicalPath (Join-Path $root "build")
-    $candidate = Get-FishingCanonicalPath $Path
-    $prefix = $buildRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) +
-        [IO.Path]::DirectorySeparatorChar
+    $separators = [char[]]@(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar)
+    $root = (Get-FishingCanonicalPath $ProductRoot).TrimEnd($separators)
+    $buildRoot = (Get-FishingCanonicalPath (Join-Path $root "build")).TrimEnd($separators)
+    $candidate = (Get-FishingCanonicalPath $Path).TrimEnd($separators)
+    $prefix = $buildRoot + [IO.Path]::DirectorySeparatorChar
     if (-not $candidate.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
-        $candidate -eq $buildRoot) {
+        $candidate.Equals($buildRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "release_path_outside_build_root: $Purpose"
     }
 
     $current = $candidate
-    while ($current.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+    while ($true) {
         if (Test-Path -LiteralPath $current) {
             $item = Get-Item -LiteralPath $current -Force
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
                 throw "release_path_reparse_point: $Purpose"
             }
+            if (-not $item.PSIsContainer) {
+                throw "release_path_not_directory: $Purpose"
+            }
+        }
+        if ($current.Equals($buildRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            break
         }
         $parent = Split-Path -Parent $current
-        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
-            break
+        if ([string]::IsNullOrWhiteSpace($parent) -or
+            $parent.Equals($current, [StringComparison]::OrdinalIgnoreCase) -or
+            (-not $parent.Equals($buildRoot, [StringComparison]::OrdinalIgnoreCase) -and
+             -not $parent.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase))) {
+            throw "release_path_outside_build_root: $Purpose"
         }
         $current = $parent
     }

@@ -62,14 +62,16 @@ if (-not $DevelopmentUnsigned) {
 }
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
-$source = Get-FishingCanonicalPath $SourceBundle
+$source = Assert-FishingSafeBuildPath `
+    $productRoot $SourceBundle "maintenance source bundle"
 if (-not (Test-Path -LiteralPath $source -PathType Container)) {
     throw "release_maintenance_source_missing: $source"
 }
 [void](Read-FishingBundleManifest $productRoot $source "development-unsigned")
 $executor = Join-Path $source "Sonar.exe"
 
-$target = Get-FishingCanonicalPath $InstallDirectory
+$target = Assert-FishingSafeBuildPath `
+    $productRoot $InstallDirectory "maintenance install directory"
 $actionValue = if ($Action -eq "ImportLicense") {
     "import-license"
 }
@@ -92,7 +94,8 @@ if ($requiresBackup) {
     if ([string]::IsNullOrWhiteSpace($BackupDirectory)) {
         throw "release_maintenance_backup_required"
     }
-    $backup = Get-FishingCanonicalPath $BackupDirectory
+    $backup = Assert-FishingSafeBuildPath `
+        $productRoot $BackupDirectory "maintenance backup directory"
     $backupParent = Split-Path -Parent $backup
     if ((Test-Path -LiteralPath $backup) -or
         -not (Test-Path -LiteralPath $backupParent -PathType Container)) {

@@ -84,6 +84,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\invoke_local_relea
 запускает bounded maintenance mode самого проверенного `Sonar.exe`; UI,
 production runtime, сеть и GTA при этом не создаются.
 
+`SourceBundle`, `InstallDirectory` и `BackupDirectory` допускаются только как
+строгие потомки канонического ignored `build/`. Wrapper до создания receipt и
+запуска executor отклоняет сам build-root, `scripts/`, `src/`, внешний путь,
+неверный тип пути и любой существующий reparse-компонент. Отклонение не меняет
+ни целевой каталог, ни receipt state.
+
 Обычный запуск проверенного bundle:
 
 ```powershell
@@ -177,7 +183,7 @@ unsigned smoke не является доказательством signing ил
 
 ## Offline acceptance receipt 2026-08-24
 
-- Host/WPF focused gate: `192/192`, warnings/errors `0/0`;
+- Host/WPF focused gate: `194/194`, warnings/errors `0/0`;
 - native CTest: `41/41`; typed IPC integration: `7/7`;
 - deterministic offscreen UI matrix: 180 PNG для compact/medium/expanded
   layouts и 100/125/150/200% DPI в `build/ui-gallery-0218-final/`; manifest

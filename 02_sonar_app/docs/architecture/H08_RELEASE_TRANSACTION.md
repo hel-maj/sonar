@@ -71,8 +71,11 @@ exact manifest schema, пару build IDs, SHA-256 обоих EXE, determinism c
 - `ImportLicense` сохраняет только legacy `license_key` в DPAPI state. Legacy
   id, role, group, features, denial list и timestamps не считаются trust.
 
-Source, target и backup не могут совпадать, содержать друг друга, быть root,
-repository checkout или reparse boundary. Update/rollback не удаляют backup;
+Product wrapper разрешает source, target и backup только как строгие потомки
+канонического ignored-каталога `build/`. Сам `build/`, `scripts/`, `src/`,
+внешние пути, файл вместо каталога и любой существующий reparse-компонент
+отклоняются до создания receipt и запуска executor. Source, target и backup не
+могут совпадать или содержать друг друга. Update/rollback не удаляют backup;
 его lifecycle остаётся явным действием оператора. После non-dry-run wrapper
 повторяет allowlist/no-Python lifecycle gate и пишет только sanitized receipt
 без путей, PID или секретов. Это не подменяет production signing: без
@@ -93,10 +96,12 @@ repository checkout или reparse boundary. Update/rollback не удаляют
 - exact-confirmation uninstall plan и unsafe-root/loose-path rejection;
 - development bundle tamper rejection, local install/update/rollback,
   interrupted recovery, сохранение state/logs и key-only legacy license import;
+- wrapper path-policy rejection для `scripts/`, `src/`, внешнего каталога,
+  build-root, wrong path type и junction без filesystem mutation;
 - bounded after-exit argument/PID/receipt contract.
 
 На 2026-08-24 focused Host suite после local-maintenance slice зелёна:
-`192/192`, managed warnings/errors `0/0`. Offline release plumbing прогоняет тот же exact
+`194/194`, managed warnings/errors `0/0`. Offline release plumbing прогоняет тот же exact
 allowlist/no-Python validator для `FirstActivation`, `NormalExit`,
 `CrashRecovery`, `Updated`, `InterruptedUpdateRecovery` и `RemoteRollback`.
 Network-inert demo Host фактически подтвердил `FirstActivation`, а
