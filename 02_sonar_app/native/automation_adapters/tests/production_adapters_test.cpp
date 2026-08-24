@@ -39,6 +39,12 @@
 #ifndef SONAR_FISHING_TACKLE_PRODUCTION_FIXTURE
 #error SONAR_FISHING_TACKLE_PRODUCTION_FIXTURE is required
 #endif
+#ifndef SONAR_FISHING_IDLE_PRODUCTION_FIXTURE
+#error SONAR_FISHING_IDLE_PRODUCTION_FIXTURE is required
+#endif
+#ifndef SONAR_FISHING_REELING_PRODUCTION_FIXTURE
+#error SONAR_FISHING_REELING_PRODUCTION_FIXTURE is required
+#endif
 
 namespace {
 
@@ -218,49 +224,85 @@ void blit_asset(
 class unavailable_memory final : public adapters::fishing_memory_source {
  public:
   [[nodiscard]] adapters::memory_snapshot_result capture(
-      adapters::memory_capture_scope,
       std::uint64_t,
       std::uint64_t,
-      const sonar::platform::windows::process_generation&) noexcept override {
+      const sonar::platform::windows::process_generation&,
+      bool) noexcept override {
     return {.reason = "fixture_memory_unavailable"};
   }
 };
 
 class inventory_memory final : public adapters::fishing_memory_source {
  public:
-  explicit inventory_memory(const bool open) : open_(open) {}
+  explicit inventory_memory(
+      const bool open,
+      const std::optional<bool> reeling_active = std::nullopt)
+      : open_(open), reeling_active_(reeling_active) {}
 
   [[nodiscard]] adapters::memory_snapshot_result capture(
-      const adapters::memory_capture_scope scope,
       const std::uint64_t sequence,
       const std::uint64_t captured_at_steady_ns,
-      const sonar::platform::windows::process_generation& game_generation)
+      const sonar::platform::windows::process_generation& game_generation,
+      const bool reeling_stage_visible)
       noexcept override {
-    last_scope_ = scope;
+    last_reeling_stage_visible_ = reeling_stage_visible;
+    sonar::fishing::memory_observation::coherent_memory_snapshot snapshot{
+        .sequence = sequence,
+        .captured_at_steady_ns = captured_at_steady_ns,
+        .profile_id = "fixture-profile",
+        .profile_revision = 1U,
+        .game_generation = game_generation,
+        .inventory_open_state = open_
+            ? sonar::platform::inventory::observed_state::open
+            : sonar::platform::inventory::observed_state::closed,
+    };
+    if (reeling_active_.has_value()) {
+      snapshot.reeling = sonar::fishing::memory_observation::reeling_evidence{
+          .active = *reeling_active_,
+          .fish_model_confirmed = true,
+          .player_right_x = 1.0,
+          .distance = *reeling_active_ ? 5.0 : 0.0,
+      };
+    }
     return {
-        .snapshot = sonar::fishing::memory_observation::coherent_memory_snapshot{
-            .sequence = sequence,
-            .captured_at_steady_ns = captured_at_steady_ns,
-            .profile_id = "fixture-profile",
-            .profile_revision = 1U,
-            .game_generation = game_generation,
-            .inventory = sonar::fishing::memory_observation::inventory_evidence{
-                .open = open_,
-                .matched_votes = 6U,
-                .confidence = 0.95,
-            },
-        },
+        .snapshot = std::move(snapshot),
     };
   }
 
-  [[nodiscard]] adapters::memory_capture_scope last_scope() const noexcept {
-    return last_scope_;
+  [[nodiscard]] bool last_reeling_stage_visible() const noexcept {
+    return last_reeling_stage_visible_;
   }
 
  private:
   bool open_{};
-  adapters::memory_capture_scope last_scope_{
-      adapters::memory_capture_scope::reeling};
+  std::optional<bool> reeling_active_;
+  bool last_reeling_stage_visible_{};
+};
+
+class legacy_inventory_memory final : public adapters::fishing_memory_source {
+ public:
+  [[nodiscard]] adapters::memory_snapshot_result capture(
+      const std::uint64_t sequence,
+      const std::uint64_t captured_at_steady_ns,
+      const sonar::platform::windows::process_generation& game_generation,
+      bool) noexcept override {
+    return {
+        .snapshot =
+            sonar::fishing::memory_observation::coherent_memory_snapshot{
+                .sequence = sequence,
+                .captured_at_steady_ns = captured_at_steady_ns,
+                .profile_id = "legacy-characterization-only",
+                .profile_revision = 1U,
+                .game_generation = game_generation,
+                .inventory =
+                    sonar::fishing::memory_observation::inventory_evidence{
+                        .open = true,
+                        .matched_votes = 80U,
+                        .confidence = 1.0,
+                    },
+            },
+    };
+  }
 };
 
 class queued_text final : public adapters::runtime_text_recognizer {
@@ -282,6 +324,54 @@ class queued_text final : public adapters::runtime_text_recognizer {
   std::vector<std::string> values_;
   std::size_t cursor_{};
 };
+
+class failed_text final : public adapters::runtime_text_recognizer {
+ public:
+  [[nodiscard]] adapters::recognized_text recognize(
+      const platform::client_frame&,
+      const sonar::fishing::stage_detection::normalized_rect&) noexcept
+      override {
+    return {.reason = "fixture_ocr_unavailable"};
+  }
+};
+
+void minigame_activity_derivation_is_tristate() {
+  using sonar::fishing::stage_detection::observed_fishing_stage;
+  using sonar::fishing::stage_detection::stage_detection_result;
+  using sonar::fishing::stage_detection::stage_observation;
+
+  const auto no_trigger = detail::derive_fishing_minigame_active({});
+  require(no_trigger == false,
+      "production_minigame_no_trigger_not_inactive");
+
+  const auto sentinel = detail::derive_fishing_minigame_active({
+      .observation = stage_observation{
+          .stage = observed_fishing_stage::none,
+      },
+  });
+  require(sentinel == false,
+      "production_minigame_none_observation_became_active");
+
+  const auto failed = detail::derive_fishing_minigame_active({
+      .error = "fixture_stage_unavailable",
+  });
+  require(!failed.has_value(),
+      "production_minigame_detector_failure_not_unknown");
+
+  for (const auto active_stage : {
+           observed_fishing_stage::tackle_selection,
+           observed_fishing_stage::casting,
+           observed_fishing_stage::waiting_for_bite,
+           observed_fishing_stage::reeling}) {
+    const auto active = detail::derive_fishing_minigame_active({
+        .observation = stage_observation{
+            .stage = active_stage,
+        },
+    });
+    require(active == true,
+        "production_minigame_active_stage_not_active");
+  }
+}
 
 [[nodiscard]] std::unique_ptr<adapters::production_frame_observer> observer(
     repeating_capture& capture,
@@ -330,11 +420,12 @@ void inventory_frame_rejects_unmatched_slots(IWICImagingFactory& factory) {
   auto target = observer(capture, memory, policy, text, stage);
   const auto fact = target->observe({});
   require(fact.error.empty() &&
-          fact.surface == inventory::inventory_surface::inventory,
+          fact.surface == inventory::inventory_surface::inventory &&
+          fact.inventory_open == true && fact.game_menu_open == false &&
+          fact.fishing_minigame_active == false,
       "production_inventory_surface_changed");
-  require(
-      memory.last_scope() == adapters::memory_capture_scope::inventory_state,
-      "production_inventory_used_reeling_memory_scope");
+  require(!memory.last_reeling_stage_visible(),
+      "production_inventory_requested_reeling_anchor");
   require(fact.items.empty(), "production_inventory_false_positive");
   for (const auto& item : fact.items) {
     require(!item.instance_id.empty() && !item.item_id.empty() &&
@@ -360,6 +451,8 @@ void inventory_visibility_is_memory_authoritative(
   auto closed = observer(capture, closed_memory, policy, text, stage);
   const auto contradicted = closed->observe({});
   require(contradicted.surface == inventory::inventory_surface::gameplay &&
+          contradicted.inventory_open == false &&
+          contradicted.game_menu_open == false &&
           contradicted.items.empty() &&
           !contradicted.remove_action.has_value(),
       "production_visual_inventory_overrode_memory_closed");
@@ -373,9 +466,93 @@ void inventory_visibility_is_memory_authoritative(
       unknown_capture, unavailable, unknown_policy, unknown_text, stage);
   const auto unavailable_fact = unknown->observe({});
   require(unavailable_fact.surface == inventory::inventory_surface::unknown &&
+          !unavailable_fact.inventory_open.has_value() &&
+          unavailable_fact.game_menu_open == false &&
           unavailable_fact.items.empty() &&
           !unavailable_fact.remove_action.has_value(),
       "production_unknown_inventory_collapsed_into_visual_state");
+
+  repeating_capture legacy_capture(load_frame(
+      factory, SONAR_FISHING_INVENTORY_FISH_FIXTURE, 3U));
+  legacy_inventory_memory legacy;
+  adapters::mutable_runtime_policy_source legacy_policy;
+  queued_text legacy_text({"Окружение Инвентарь"});
+  auto legacy_observer = observer(
+      legacy_capture, legacy, legacy_policy, legacy_text, stage);
+  const auto legacy_fact = legacy_observer->observe({});
+  require(!legacy_fact.inventory_open.has_value() &&
+          legacy_fact.surface == inventory::inventory_surface::unknown,
+      "legacy Fishing inventory binding remained production authority");
+}
+
+void aggregate_surface_states_are_independent(IWICImagingFactory& factory) {
+  {
+    repeating_capture capture(load_frame(
+        factory, SONAR_FISHING_IDLE_PRODUCTION_FIXTURE, 1U));
+    unavailable_memory memory;
+    adapters::mutable_runtime_policy_source policy;
+    queued_text text({"", "Назад"});
+    sonar::fishing::stage_detection::majestic_fishing_stage_detector stage;
+    auto target = observer(capture, memory, policy, text, stage);
+    const auto fact = target->observe({});
+    require(fact.surface == inventory::inventory_surface::game_menu &&
+            !fact.inventory_open.has_value() &&
+            fact.game_menu_open == true &&
+            fact.fishing_minigame_active == false,
+        "production_menu_state_lost_with_unknown_inventory");
+  }
+  {
+    repeating_capture capture(load_frame(
+        factory, SONAR_FISHING_IDLE_PRODUCTION_FIXTURE, 2U));
+    inventory_memory memory(false);
+    adapters::mutable_runtime_policy_source policy;
+    failed_text text;
+    sonar::fishing::stage_detection::majestic_fishing_stage_detector stage;
+    auto target = observer(capture, memory, policy, text, stage);
+    const auto fact = target->observe({});
+    require(fact.surface == inventory::inventory_surface::unknown &&
+            fact.inventory_open == false &&
+            !fact.game_menu_open.has_value() &&
+            fact.fishing_minigame_active == false,
+        "production_menu_ocr_failure_collapsed_to_closed");
+  }
+  {
+    repeating_capture capture(load_frame(
+        factory, SONAR_FISHING_REELING_PRODUCTION_FIXTURE, 3U));
+    inventory_memory memory(false, true);
+    adapters::mutable_runtime_policy_source policy;
+    queued_text text({""});
+    sonar::fishing::stage_detection::majestic_fishing_stage_detector stage;
+    auto target = observer(capture, memory, policy, text, stage);
+    const auto fact = target->observe({});
+    const auto& maintenance = target->current_maintenance();
+    require(fact.surface == inventory::inventory_surface::gameplay &&
+            fact.inventory_open == false &&
+            fact.game_menu_open == false &&
+            fact.fishing_minigame_active == true &&
+            fact.fishing_stage ==
+                sonar::fishing::stage_detection::observed_fishing_stage::reeling &&
+            memory.last_reeling_stage_visible() &&
+            maintenance.reeling.has_value() &&
+            maintenance.reeling->active,
+        "production_minigame_state_not_aggregated");
+  }
+  {
+    repeating_capture capture(load_frame(
+        factory, SONAR_FISHING_REELING_PRODUCTION_FIXTURE, 4U));
+    inventory_memory memory(true, true);
+    adapters::mutable_runtime_policy_source policy;
+    queued_text text({""});
+    sonar::fishing::stage_detection::majestic_fishing_stage_detector stage;
+    auto target = observer(capture, memory, policy, text, stage);
+    const auto fact = target->observe({});
+    require(fact.surface == inventory::inventory_surface::unknown &&
+            fact.inventory_open == true &&
+            fact.game_menu_open == false &&
+            fact.fishing_minigame_active == true &&
+            fact.items.empty() && !fact.remove_action.has_value(),
+        "production_conflicting_inventory_and_minigame_was_actionable");
+  }
 }
 
 void memory_open_preserves_context_geometry(IWICImagingFactory& factory) {
@@ -458,6 +635,27 @@ void embedded_assets_drive_positive_inventory_and_context_matches(
       });
   require(detected != inventory_result.items.end(),
       "production_embedded_fish_match_changed");
+
+  repeating_capture aggregate_capture(inventory_frame);
+  unavailable_memory unavailable;
+  adapters::mutable_runtime_policy_source aggregate_policy;
+  queued_text aggregate_text({"Окружение Инвентарь"});
+  sonar::fishing::stage_detection::majestic_fishing_stage_detector aggregate_stage;
+  auto aggregate = observer(
+      aggregate_capture,
+      unavailable,
+      aggregate_policy,
+      aggregate_text,
+      aggregate_stage);
+  const auto aggregate_fact = aggregate->observe({});
+  require(
+      aggregate_fact.surface == inventory::inventory_surface::unknown &&
+          !aggregate_fact.inventory_open.has_value() &&
+          std::ranges::any_of(aggregate_fact.items, [](const auto& item) {
+            return item.instance_id == "inventory:8:3" &&
+                item.item_id == "marlin";
+          }),
+      "production_unknown_open_state_erased_current_frame_items");
 
   auto context_frame = load_frame(
       factory, SONAR_FISHING_INVENTORY_PRODUCTION_FIXTURE, 2U);
@@ -644,6 +842,7 @@ void shutdown_is_cleanup_first_and_uses_a_non_input_final_gate(
 
 int main() {
   try {
+    minigame_activity_derivation_is_tristate();
     com_apartment apartment;
     ComPtr<IWICImagingFactory> factory;
     check(CoCreateInstance(
@@ -653,6 +852,7 @@ int main() {
     catch_frame_produces_one_typed_fact(*factory.Get());
     inventory_frame_rejects_unmatched_slots(*factory.Get());
     inventory_visibility_is_memory_authoritative(*factory.Get());
+    aggregate_surface_states_are_independent(*factory.Get());
     memory_open_preserves_context_geometry(*factory.Get());
     embedded_assets_drive_positive_inventory_and_context_matches(
         *factory.Get());

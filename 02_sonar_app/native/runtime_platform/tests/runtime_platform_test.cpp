@@ -89,6 +89,16 @@ class recording_api final : public platform::native_platform_api {
 }
 
 void exact_target_policy_is_fail_closed() {
+  const auto window_policy = platform::exact_game_window_policy();
+  require(
+      window_policy.maximum_candidates ==
+          sonar::platform::windows::maximum_top_level_window_candidates &&
+      window_policy.require_visible &&
+      window_policy.require_not_minimized &&
+      !window_policy.require_unowned &&
+      !window_policy.exclude_tool_windows,
+      "common_window_policy_changed_product_eligibility");
+
   require(
       platform::select_exact_game_target({}).reason ==
           "game_target_unavailable",
@@ -113,6 +123,26 @@ void exact_target_policy_is_fail_closed() {
       platform::select_exact_game_target(ambiguous).reason ==
           "game_target_ambiguous",
       "ambiguous_game_target_accepted");
+
+  auto stale_generation = target();
+  stale_generation.process.creation_time_filetime_100ns = 0U;
+  const std::vector<platform::target_candidate> stale{
+      {L"GTA5.exe", stale_generation},
+  };
+  require(
+      platform::select_exact_game_target(stale).reason ==
+          "game_target_unavailable",
+      "generationless_game_target_accepted");
+
+  auto minimized = target();
+  minimized.minimized = true;
+  const std::vector<platform::target_candidate> unavailable{
+      {L"GTA5.exe", minimized},
+  };
+  require(
+      platform::select_exact_game_target(unavailable).reason ==
+          "game_target_unavailable",
+      "minimized_game_target_accepted");
 }
 
 void one_shared_lease_is_exclusive_and_move_owned() {

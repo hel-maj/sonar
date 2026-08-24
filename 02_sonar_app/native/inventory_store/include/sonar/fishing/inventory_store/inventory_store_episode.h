@@ -42,6 +42,12 @@ struct inventory_context_action_observation final {
 struct inventory_observation final {
   std::uint64_t sequence{};
   inventory_surface surface{inventory_surface::unknown};
+  // nullopt is an explicit unknown. These three same-frame facts remain
+  // independent so a proven menu/stage is not erased merely because the
+  // inventory memory binding is unavailable.
+  std::optional<bool> inventory_open;
+  std::optional<bool> game_menu_open;
+  std::optional<bool> fishing_minigame_active;
   stage_detection::observed_fishing_stage fishing_stage{
       stage_detection::observed_fishing_stage::none};
   bool catch_screen_visible{};

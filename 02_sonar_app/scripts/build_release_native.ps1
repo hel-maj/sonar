@@ -9,6 +9,8 @@ param(
     [string]$CommonNativePackage = $env:SONAR_COMMON_NATIVE_PACKAGE,
     [string]$CommonNativeWindowsPackage = $env:SONAR_COMMON_NATIVE_WINDOWS_PACKAGE,
     [string]$CommonNativeLicensingPackage = $env:SONAR_COMMON_NATIVE_LICENSING_PACKAGE,
+    [string]$CommonMajesticCefInventoryPackage =
+        $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
     [string]$CMakeExecutable = $env:SONAR_CMAKE_EXECUTABLE,
     [string]$SignToolPath = $env:SONAR_FISHING_SIGNTOOL,
@@ -20,6 +22,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "release_common.ps1")
+. (Join-Path $PSScriptRoot "common_inventory_package.ps1")
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $releaseMode = if ($DeveloperFullAccess) {
@@ -198,6 +201,7 @@ function Build-FishingEngine(
     [string]$ResolvedNativePackage,
     [string]$ResolvedNativeWindowsPackage,
     [string]$ResolvedNativeLicensingPackage,
+    [string]$ResolvedMajesticCefInventoryPackage,
     [string]$ResolvedProtoc) {
     $nativeSource = Join-Path $productRoot "native"
     $nativeBuild = Join-Path $BuildRoot "native-build"
@@ -217,6 +221,7 @@ function Build-FishingEngine(
         "-DSONAR_COMMON_NATIVE_PACKAGE=$ResolvedNativePackage",
         "-DSONAR_COMMON_NATIVE_WINDOWS_PACKAGE=$ResolvedNativeWindowsPackage",
         "-DSONAR_COMMON_NATIVE_LICENSING_PACKAGE=$ResolvedNativeLicensingPackage",
+        "-DSONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE=$ResolvedMajesticCefInventoryPackage",
         "-DSONAR_PROTOC_EXECUTABLE=$ResolvedProtoc",
         "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/INCREMENTAL:NO /OPT:REF /OPT:ICF /Brepro /PDBALTPATH:Sonar.Engine.pdb"
     )
@@ -266,10 +271,14 @@ if (-not $DevelopmentUnsigned) {
 }
 
 if ($SkipOfflineTests) {
-    & (Join-Path $PSScriptRoot "setup_native.ps1") -CommonFeed $CommonFeed
+    & (Join-Path $PSScriptRoot "setup_native.ps1") `
+        -CommonFeed $CommonFeed `
+        -CommonMajesticCefInventoryPackage $CommonMajesticCefInventoryPackage
 }
 else {
-    & (Join-Path $PSScriptRoot "test_native.ps1") -CommonFeed $CommonFeed
+    & (Join-Path $PSScriptRoot "test_native.ps1") `
+        -CommonFeed $CommonFeed `
+        -CommonMajesticCefInventoryPackage $CommonMajesticCefInventoryPackage
 }
 
 Assert-FishingDesktopRuntime
@@ -289,6 +298,12 @@ $resolvedNativeLicensingPackage = Resolve-RequiredDirectory `
     $CommonNativeLicensingPackage `
     (Join-Path $productRoot "..\..\.artifacts\sonar-native-licensing\0.1.2") `
     "Sonar Platform Licensing native package"
+$resolvedMajesticCefInventoryPackage = Resolve-RequiredDirectory `
+    $CommonMajesticCefInventoryPackage `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.0") `
+    "Sonar Majestic CEF Inventory 0.1.0 package"
+$resolvedMajesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
+    $resolvedMajesticCefInventoryPackage
 $resolvedProtoc = Resolve-RequiredExecutable `
     $ProtocExecutable `
     @((Join-Path $productRoot "..\..\.artifacts\sonar-tools\protoc\35.1\bin\protoc.exe")) `
@@ -326,11 +341,13 @@ New-Item -ItemType Directory -Path $secondBuild -Force | Out-Null
 $firstHost = Publish-FishingHost $firstBuild $localFeed $resolvedProtoc
 $firstEngine = Build-FishingEngine `
     $firstBuild $resolvedCMake $resolvedNativePackage `
-    $resolvedNativeWindowsPackage $resolvedNativeLicensingPackage $resolvedProtoc
+    $resolvedNativeWindowsPackage $resolvedNativeLicensingPackage `
+    $resolvedMajesticCefInventoryPackage $resolvedProtoc
 $secondHost = Publish-FishingHost $secondBuild $localFeed $resolvedProtoc
 $secondEngine = Build-FishingEngine `
     $secondBuild $resolvedCMake $resolvedNativePackage `
-    $resolvedNativeWindowsPackage $resolvedNativeLicensingPackage $resolvedProtoc
+    $resolvedNativeWindowsPackage $resolvedNativeLicensingPackage `
+    $resolvedMajesticCefInventoryPackage $resolvedProtoc
 
 $firstHostHash = Get-FishingSha256 $firstHost
 $secondHostHash = Get-FishingSha256 $secondHost

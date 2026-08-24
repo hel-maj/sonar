@@ -48,6 +48,16 @@ namespace {
 
 }  // namespace
 
+std::optional<bool> detail::derive_fishing_minigame_active(
+    const stage_detection::stage_detection_result& detection) noexcept {
+  if (!detection.error.empty()) {
+    return std::nullopt;
+  }
+  return detection.observation.has_value() &&
+      detection.observation->stage !=
+          stage_detection::observed_fishing_stage::none;
+}
+
 struct production_frame_observer::implementation final {
   runtime_platform::client_capture_source& capture;
   stage_detection::majestic_fishing_stage_detector& stage_detector;
@@ -148,6 +158,8 @@ inventory_store::inventory_observation production_frame_observer::observe(
   }
   result.sequence = frame->sequence;
   const auto stage = implementation_->stage_detector.detect(view(*frame));
+  result.fishing_minigame_active =
+      detail::derive_fishing_minigame_active(stage);
   if (!stage.error.empty()) {
     result.error = stage.error;
     return result;
@@ -174,58 +186,83 @@ inventory_store::inventory_observation production_frame_observer::observe(
   if (stage.observation.has_value()) {
     result.fishing_stage = stage.observation->stage;
   }
-  bool game_menu_visible = false;
+  std::optional<bool> game_menu_open;
   if (!inventory_title && result.fishing_stage ==
           stage_detection::observed_fishing_stage::none &&
       !result.catch_screen_visible) {
     const auto menu = implementation_->text.recognize(
         *frame, {0.50, 0.70, 0.49, 0.29});
-    if (menu.reason.empty() && contains_menu_affordance(menu.text)) {
-      game_menu_visible = true;
+    if (menu.reason.empty()) {
+      game_menu_open = contains_menu_affordance(menu.text);
     }
+  } else {
+    // These characterized surfaces are mutually exclusive with the generic
+    // game menu. Unlike a failed OCR call, they prove the negative state.
+    game_menu_open = false;
   }
+  result.game_menu_open = game_menu_open;
 
   // Inventory visibility is one coherent memory fact. The frame remains the
   // owner of item/context geometry, but OCR/title pixels never authorize an
   // open or closed state and unknown is never collapsed into closed.
+  const bool reeling_stage_visible = stage.observation.has_value() &&
+      stage.observation->stage ==
+          stage_detection::observed_fishing_stage::reeling;
   const auto memory = implementation_->memory.capture(
-      memory_capture_scope::inventory_state,
       frame->sequence,
       frame->captured_at_steady_ns,
-      frame->target.process);
+      frame->target.process,
+      reeling_stage_visible);
   const bool coherent_memory = memory.snapshot.has_value() &&
-      memory.snapshot->sequence == frame->sequence;
-  sonar::platform::inventory::open_state_evidence inventory_evidence;
-  if (coherent_memory &&
-      memory.snapshot->inventory.has_value()) {
-    const auto& observed = *memory.snapshot->inventory;
-    inventory_evidence = {
-        .is_open = observed.open,
-        .matched_signals = static_cast<std::uint32_t>(
-            observed.matched_votes),
-        .confidence = observed.confidence,
-        .coherent = true,
-    };
-  }
-  const auto inventory_state =
-      sonar::platform::inventory::normalize_open_state(inventory_evidence);
-  switch (inventory_state.state) {
+      memory.snapshot->sequence == frame->sequence &&
+      memory.snapshot->captured_at_steady_ns ==
+          frame->captured_at_steady_ns &&
+      memory.snapshot->game_generation == frame->target.process;
+  const auto inventory_state = coherent_memory &&
+          memory.snapshot->inventory_open_state.has_value()
+      ? *memory.snapshot->inventory_open_state
+      : sonar::platform::inventory::observed_state::unknown;
+  switch (inventory_state) {
     case sonar::platform::inventory::observed_state::open:
-      result.surface = visual.surface ==
-              inventory_store::inventory_surface::item_context_menu
-          ? inventory_store::inventory_surface::item_context_menu
-          : inventory_store::inventory_surface::inventory;
+      result.inventory_open = true;
+      if (game_menu_open == true ||
+          result.fishing_minigame_active == true ||
+          result.catch_screen_visible) {
+        // An independently positive mutually-exclusive surface makes the
+        // aggregate incoherent. Preserve the individual facts for diagnosis,
+        // but never turn that contradiction into actionable inventory
+        // geometry.
+        result.surface = inventory_store::inventory_surface::unknown;
+        result.items.clear();
+        result.remove_action.reset();
+      } else {
+        result.surface = visual.surface ==
+                inventory_store::inventory_surface::item_context_menu
+            ? inventory_store::inventory_surface::item_context_menu
+            : inventory_store::inventory_surface::inventory;
+      }
       break;
     case sonar::platform::inventory::observed_state::closed:
-      result.surface = game_menu_visible
-          ? inventory_store::inventory_surface::game_menu
-          : inventory_store::inventory_surface::gameplay;
+      result.inventory_open = false;
+      result.surface = !game_menu_open.has_value()
+          ? inventory_store::inventory_surface::unknown
+          : (*game_menu_open
+                ? inventory_store::inventory_surface::game_menu
+                : inventory_store::inventory_surface::gameplay);
       result.items.clear();
       result.remove_action.reset();
       break;
     case sonar::platform::inventory::observed_state::unknown:
-      result.surface = inventory_store::inventory_surface::unknown;
-      result.items.clear();
+      // A positive menu match remains useful to the recovery state machine and
+      // does not pretend that inventory memory said "closed". Current-frame
+      // item observations are retained for diagnostics/parity, but an unknown
+      // surface still prevents every inventory mutation.
+      result.surface = game_menu_open == true
+          ? inventory_store::inventory_surface::game_menu
+          : inventory_store::inventory_surface::unknown;
+      if (game_menu_open == true) {
+        result.items.clear();
+      }
       result.remove_action.reset();
       break;
   }
@@ -241,9 +278,9 @@ inventory_store::inventory_observation production_frame_observer::observe(
       .changed_bait_visible = visual.changed_bait_visible,
       .gear_visible = visual.gear_visible,
   };
-  // Inventory state uses its own memory scope and never depends on an active
-  // fish. Geometry still comes from the frame; absent exact build binding stays
-  // unknown instead of falling back to OCR/title pixels.
+  // Every available memory domain came from the one aggregate capture above.
+  // Inventory remains independent of an active fish, and absent exact binding
+  // stays unknown instead of falling back to OCR/title pixels.
   if (coherent_memory) {
     implementation_->current.reeling = memory.snapshot->reeling;
     implementation_->current.player_status = memory.snapshot->player_status;

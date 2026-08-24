@@ -1,10 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$CommonFeed = $env:SONAR_COMMON_FEED
+    [string]$CommonFeed = $env:SONAR_COMMON_FEED,
+    [string]$CommonMajesticCefInventoryPackage =
+        $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common_inventory_package.ps1")
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $requiredFiles = @(
@@ -18,9 +21,11 @@ $requiredFiles = @(
     "scripts\build_release_native.ps1",
     "scripts\build_developer_full_access.ps1",
     "scripts\verify_developer_full_access.ps1",
+    "scripts\admit_developer_full_access_launch.ps1",
     "scripts\run_developer_full_access.ps1",
     "scripts\smoke_release_native.ps1",
     "scripts\test_release_plumbing.ps1"
+    "scripts\common_inventory_package.ps1"
 )
 foreach ($relativePath in $requiredFiles) {
     $path = Join-Path $productRoot $relativePath
@@ -67,6 +72,18 @@ $commonFeed = (Resolve-Path -LiteralPath $commonFeed).Path
 $nativePackage = Join-Path $productRoot "..\..\.artifacts\sonar-native\0.1.1"
 $nativeWindowsPackage = Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.6"
 $nativeLicensingPackage = Join-Path $productRoot "..\..\.artifacts\sonar-native-licensing\0.1.2"
+$majesticCefInventoryPackage = if (
+    [string]::IsNullOrWhiteSpace($CommonMajesticCefInventoryPackage)) {
+    Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.0"
+}
+elseif ([IO.Path]::IsPathRooted($CommonMajesticCefInventoryPackage)) {
+    $CommonMajesticCefInventoryPackage
+}
+else {
+    Join-Path $productRoot $CommonMajesticCefInventoryPackage
+}
+$majesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
+    $majesticCefInventoryPackage
 $expected = @{
     (Join-Path $commonFeed "Sonar.UI.Wpf.0.2.19.nupkg") = "37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33"
     (Join-Path $commonFeed "emoji.wpf.0.3.4.nupkg") = "A9C0570F97961E3DC2B2BA9E41EB7B28808733D194742D837653478EECE7D191"

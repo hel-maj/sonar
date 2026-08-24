@@ -7,6 +7,8 @@ param(
     [string]$CommonNativePackage = $env:SONAR_COMMON_NATIVE_PACKAGE,
     [string]$CommonNativeWindowsPackage = $env:SONAR_COMMON_NATIVE_WINDOWS_PACKAGE,
     [string]$CommonNativeLicensingPackage = $env:SONAR_COMMON_NATIVE_LICENSING_PACKAGE,
+    [string]$CommonMajesticCefInventoryPackage =
+        $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
     [string]$CMakeExecutable = $env:SONAR_CMAKE_EXECUTABLE
 )
@@ -28,6 +30,7 @@ $arguments = @{
     CommonNativePackage = $CommonNativePackage
     CommonNativeWindowsPackage = $CommonNativeWindowsPackage
     CommonNativeLicensingPackage = $CommonNativeLicensingPackage
+    CommonMajesticCefInventoryPackage = $CommonMajesticCefInventoryPackage
     ProtocExecutable = $ProtocExecutable
     CMakeExecutable = $CMakeExecutable
 }

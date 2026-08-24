@@ -4,6 +4,8 @@ param(
     [string]$CommonNativePackage = $env:SONAR_COMMON_NATIVE_PACKAGE,
     [string]$CommonNativeWindowsPackage = $env:SONAR_COMMON_NATIVE_WINDOWS_PACKAGE,
     [string]$CommonNativeLicensingPackage = $env:SONAR_COMMON_NATIVE_LICENSING_PACKAGE,
+    [string]$CommonMajesticCefInventoryPackage =
+        $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
     [string]$CMakeExecutable = $env:SONAR_CMAKE_EXECUTABLE,
     [switch]$DeveloperFullAccess,
@@ -13,6 +15,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common_inventory_package.ps1")
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $noPythonGate = Join-Path $PSScriptRoot "test_no_python_runtime.ps1"
@@ -71,6 +74,7 @@ $requiredNativeTargets = @(
     "SonarFishingMaintenanceEpisodeBenchmark",
     "SonarFishingAutomationAdaptersTests",
     "SonarFishingProductionAdaptersTests",
+    "SonarFishingCommonInventoryOpenTests",
     "SonarFishingIpcContractsTests",
     "SonarFishingEventDeliveryTests",
     "SonarFishingSessionControlTests",
@@ -92,6 +96,7 @@ $expectedCTestNames = @(
     "sonar_fishing.garbage_disposal.golden",
     "sonar_fishing.equipment_recovery",
     "sonar_fishing.runtime_platform",
+    "sonar_fishing.runtime_platform_common_window_ownership",
     "sonar_fishing.runtime_safety",
     "sonar_fishing.entitlement",
     "sonar_fishing.game_chat",
@@ -117,6 +122,8 @@ $expectedCTestNames = @(
     "sonar_fishing.maintenance_episode",
     "sonar_fishing.automation_adapters",
     "sonar_fishing.production_adapters",
+    "sonar_fishing.common_inventory_open",
+    "sonar_fishing.common_inventory_open_package_ownership",
     "sonar_fishing.ipc.contract_golden",
     "sonar_fishing.ipc.event_delivery",
     "sonar_fishing.ipc.session_control",
@@ -481,6 +488,12 @@ $actualNativeLicensingManifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPat
 if ($actualNativeLicensingManifestHash -ne $expectedNativeLicensingManifestHash) {
     throw "Pinned native Licensing Common manifest hash mismatch: $actualNativeLicensingManifestHash"
 }
+$resolvedMajesticCefInventoryPackage = Resolve-Directory `
+    $CommonMajesticCefInventoryPackage `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.0") `
+    "Installed Sonar Majestic CEF Inventory package"
+$resolvedMajesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
+    $resolvedMajesticCefInventoryPackage
 $resolvedProtoc = Resolve-Executable `
     $ProtocExecutable `
     (Join-Path $productRoot "..\..\.artifacts\sonar-tools\protoc\35.1\bin\protoc.exe") `
@@ -630,7 +643,7 @@ $memoryObservationFixture = Join-Path $productRoot "tests\fixtures\memory_observ
 if (-not (Test-Path -LiteralPath $memoryObservationFixture -PathType Leaf)) {
     throw "Pinned memory-observation fixture is missing: $memoryObservationFixture"
 }
-$expectedMemoryObservationFixtureHash = "ACB3FA6C1D9E7983344E53906E748DB9C7EED67E07695013A7D77166FF6DE8DD"
+$expectedMemoryObservationFixtureHash = "2DA22D2FEE1663BACC8429D0561A4502A9D375DA9B1A31A8D479B2475337CB65"
 $actualMemoryObservationFixtureHash =
     (Get-FileHash -LiteralPath $memoryObservationFixture -Algorithm SHA256).Hash
 if ($actualMemoryObservationFixtureHash -ne $expectedMemoryObservationFixtureHash) {
@@ -640,8 +653,8 @@ $memoryObservationRows = @(
     Get-Content -LiteralPath $memoryObservationFixture |
         Where-Object { $_ -and -not $_.StartsWith("#", [StringComparison]::Ordinal) }
 )
-if ($memoryObservationRows.Count -ne 5) {
-    throw "Pinned memory-observation fixture must contain exactly 5 rows"
+if ($memoryObservationRows.Count -ne 6) {
+    throw "Pinned memory-observation fixture must contain exactly 6 rows"
 }
 $memoryObservationKinds = @(
     $memoryObservationRows |
@@ -717,6 +730,7 @@ Invoke-Checked $resolvedCMake @(
     "-DSONAR_COMMON_NATIVE_PACKAGE=$resolvedNativePackage",
     "-DSONAR_COMMON_NATIVE_WINDOWS_PACKAGE=$resolvedNativeWindowsPackage",
     "-DSONAR_COMMON_NATIVE_LICENSING_PACKAGE=$resolvedNativeLicensingPackage",
+    "-DSONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE=$resolvedMajesticCefInventoryPackage",
     "-DSONAR_PROTOC_EXECUTABLE=$resolvedProtoc"
 )
 Assert-GeneratedSolutionTargets $nativeBuild $requiredNativeTargets

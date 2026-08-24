@@ -164,6 +164,18 @@ void test_language_neutral_fixture_parity(
           std::abs(decoded_reeling->player_right_y) < 1e-9,
       "reeling_fixture_right_vector");
 
+  const auto& caught = find_row(rows, "reeling", "legacy_fish_caught");
+  require(caught.columns.size() == 6U, "reeling_caught_fixture_shape");
+  const auto caught_player = decode_hex(caught.columns[2]);
+  const auto caught_fish = decode_hex(caught.columns[3]);
+  const auto decoded_caught = observation::decode_reeling_evidence(
+      caught_player, caught_fish, fixture_reeling_layout());
+  require(decoded_caught.has_value() &&
+          decoded_caught->active == parse_bool(caught.columns[4]) &&
+          decoded_caught->fish_model_confirmed &&
+          decoded_caught->distance == std::stod(caught.columns[5]),
+      "reeling_caught_fixture_parity");
+
   const auto& inventory =
       find_row(rows, "inventory", "legacy_weighted_open");
   require(inventory.columns.size() == 6U, "inventory_fixture_shape");
@@ -288,6 +300,7 @@ struct fake_process_state final {
   std::map<std::uintptr_t, std::vector<std::byte>> memory;
   std::vector<sonar::platform::windows::memory_region_snapshot> regions;
   std::size_t region_queries{};
+  std::size_t exact_reads_to_fail{};
   bool generation_current{true};
 };
 
@@ -304,6 +317,10 @@ class fake_session final : public observation::readonly_memory_session {
   [[nodiscard]] bool read_exact(
       const std::uintptr_t address,
       const std::span<std::byte> destination) noexcept override {
+    if (state_->exact_reads_to_fail != 0U) {
+      --state_->exact_reads_to_fail;
+      return false;
+    }
     auto found = state_->memory.upper_bound(address);
     if (found == state_->memory.begin()) {
       return false;
@@ -612,6 +629,16 @@ void materialize_inventory_slot(
   }
 }
 
+template <typename Value>
+void write_value(
+    std::vector<std::byte>& bytes,
+    const std::size_t offset,
+    const Value& value) {
+  require(offset <= bytes.size() && sizeof(Value) <= bytes.size() - offset,
+      "memory_fixture_write_out_of_range");
+  std::memcpy(bytes.data() + offset, &value, sizeof(Value));
+}
+
 [[nodiscard]] std::shared_ptr<fake_process_state>
 make_inventory_binding_process(
     const observation::embedded_memory_build_profile& profile,
@@ -641,6 +668,239 @@ make_inventory_binding_process(
       {inventory_scan_base + 0x1000U, 0x1000U, 0U, 0x01U, 0U},
   };
   return game;
+}
+
+struct aggregate_resolver_fixture final {
+  observation::embedded_memory_build_profile profile;
+  std::shared_ptr<fake_process_state> game;
+  std::uintptr_t fish{};
+};
+
+[[nodiscard]] aggregate_resolver_fixture make_aggregate_resolver_fixture() {
+  constexpr std::uintptr_t module_base = 0x140000000ULL;
+  constexpr std::uintptr_t world = 0x200000000ULL;
+  constexpr std::uintptr_t player = 0x200001000ULL;
+  constexpr std::uintptr_t replay = 0x200002000ULL;
+  constexpr std::uintptr_t interface_value = 0x200003000ULL;
+  constexpr std::uintptr_t list = 0x200004000ULL;
+  constexpr std::uintptr_t fish = 0x200005000ULL;
+  constexpr std::size_t world_hit_offset = 0x100U;
+  constexpr std::size_t replay_hit_offset = 0x200U;
+  constexpr std::size_t world_slot_offset = 0x300U;
+  constexpr std::size_t replay_slot_offset = 0x308U;
+
+  auto profile = observation::embedded_memory_build_profiles().front();
+  profile.profile_id = "aggregate-resolver-fixture-v1";
+  profile.game.image_sha256 = std::string(64U, 'C');
+  profile.player_matrix_offsets = {0x40U};
+  profile.world_patterns = {{
+      .bytes = {0xA1, -1, -1, -1, -1},
+      .displacement_offset = 1U,
+      .instruction_length = 5U,
+      .dereference_offsets = {0x08U},
+  }};
+  profile.replay_pattern = {
+      .bytes = {0xB2, -1, -1, -1, -1},
+      .displacement_offset = 1U,
+      .instruction_length = 5U,
+      .dereference_offsets = {},
+  };
+  profile.inventory_binding = fixture_inventory_binding();
+
+  auto game = std::make_shared<fake_process_state>();
+  game->identity = {
+      .role = observation::process_role::game,
+      .generation = {404U, 444U},
+      .image_name = L"GTA5.exe",
+      .image_sha256 = profile.game.image_sha256,
+      .modules = {{
+          L"GTA5.exe", L"C:\\fixture\\GTA5.exe", module_base, 0x1000U}},
+  };
+
+  auto& module = game->memory[module_base];
+  module.assign(0x1000U, std::byte{0U});
+  module[world_hit_offset] = std::byte{0xA1U};
+  module[replay_hit_offset] = std::byte{0xB2U};
+  const auto world_displacement = static_cast<std::int32_t>(
+      module_base + world_slot_offset -
+      (module_base + world_hit_offset + 5U));
+  const auto replay_displacement = static_cast<std::int32_t>(
+      module_base + replay_slot_offset -
+      (module_base + replay_hit_offset + 5U));
+  write_value(module, world_hit_offset + 1U, world_displacement);
+  write_value(module, replay_hit_offset + 1U, replay_displacement);
+  write_value(module, world_slot_offset, world);
+  write_value(module, replay_slot_offset, replay);
+
+  auto& world_bytes = game->memory[world];
+  world_bytes.assign(0x20U, std::byte{0U});
+  write_value(world_bytes, 0x08U, player);
+
+  auto& player_bytes = game->memory[player];
+  player_bytes.assign(0x200U, std::byte{0U});
+  const std::uintptr_t player_vtable = module_base + 0x500U;
+  write_value(player_bytes, 0U, player_vtable);
+  const std::array<float, 3U> player_position{0.0F, 0.0F, 0.0F};
+  std::memcpy(
+      player_bytes.data() + 0x90U,
+      player_position.data(),
+      sizeof(player_position));
+  const std::array<float, 4U> player_right{1.0F, 0.0F, 0.0F, 0.0F};
+  std::memcpy(
+      player_bytes.data() + 0x40U,
+      player_right.data(),
+      sizeof(player_right));
+
+  auto& replay_bytes = game->memory[replay];
+  replay_bytes.assign(0x40U, std::byte{0U});
+  write_value(replay_bytes, 0x08U, interface_value);
+  auto& interface_bytes = game->memory[interface_value];
+  interface_bytes.assign(0x40U, std::byte{0U});
+  write_value(interface_bytes, 0U, list);
+  const std::int32_t count = 1;
+  write_value(interface_bytes, 0x18U, count);
+  auto& list_bytes = game->memory[list];
+  list_bytes.assign(0x10U, std::byte{0U});
+  write_value(list_bytes, 0U, fish);
+
+  auto& fish_bytes = game->memory[fish];
+  fish_bytes.assign(0x200U, std::byte{0U});
+  write_value(fish_bytes, 0x20U, profile.fish_model_hash);
+  const std::array<float, 3U> fish_position{3.0F, 4.0F, 0.0F};
+  std::memcpy(
+      fish_bytes.data() + 0x90U,
+      fish_position.data(),
+      sizeof(fish_position));
+  fish_bytes[profile.fish_active_offset] = std::byte{1U};
+
+  auto& inventory_bytes = game->memory[inventory_scan_base];
+  inventory_bytes.assign(0x1000U, std::byte{0U});
+  for (const auto offset : std::array{0x100U, 0x200U, 0x300U}) {
+    materialize_inventory_slot(
+        inventory_bytes, offset, *profile.inventory_binding, true);
+  }
+  game->regions = {
+      {inventory_scan_base, 0x1000U, 0x1000U, 0x04U, 0x20000U},
+      {inventory_scan_base + 0x1000U, 0x1000U, 0U, 0x01U, 0U},
+  };
+  return {
+      .profile = std::move(profile),
+      .game = std::move(game),
+      .fish = fish,
+  };
+}
+
+void test_aggregate_runtime_resolution_and_self_healing() {
+  auto fixture = make_aggregate_resolver_fixture();
+  fake_connector connector(fixture.game, nullptr);
+  observation::memory_capture_plan_resolver resolver(
+      connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &fixture.profile, 1U});
+  observation::memory_observer observer(connector);
+
+  const auto aggregate_plan = resolver.resolve_runtime_observation(
+      1U, 100U, fixture.game->identity.generation, true);
+  require(aggregate_plan.ready() && aggregate_plan.profile->require_reeling &&
+          !aggregate_plan.profile->require_inventory &&
+          aggregate_plan.plan->regions.size() == 3U &&
+          fixture.game->region_queries == 0U,
+      "aggregate_runtime_reeling_request_started_inventory_discovery");
+
+  // The stage gate must avoid every player/replay/fish lookup when no reeling
+  // cue exists, while still producing the inventory domain through the same
+  // coarse API.
+  auto idle_fixture = make_aggregate_resolver_fixture();
+  fake_connector idle_connector(idle_fixture.game, nullptr);
+  observation::memory_capture_plan_resolver idle_resolver(
+      idle_connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &idle_fixture.profile, 1U});
+  observation::memory_observer idle_observer(idle_connector);
+  const auto idle_plan = idle_resolver.resolve_runtime_observation(
+      1U, 100U, idle_fixture.game->identity.generation, false);
+  require(idle_plan.ready() && !idle_plan.profile->require_reeling &&
+          idle_plan.profile->require_inventory &&
+          idle_plan.plan->regions.size() == 6U,
+      "aggregate_runtime_idle_plan_not_inventory_only");
+  const auto idle = idle_observer.capture(*idle_plan.profile, *idle_plan.plan);
+  require(idle.ready() && !idle.snapshot->reeling.has_value() &&
+          idle.snapshot->inventory.has_value(),
+      "aggregate_runtime_idle_snapshot_missing_inventory");
+
+  const auto& first = aggregate_plan;
+  require(first.ready() && first.profile->require_reeling &&
+          !first.profile->require_inventory &&
+          first.plan->regions.size() == 3U,
+      "aggregate_runtime_reeling_plan_not_coarse");
+  const auto active = observer.capture(*first.profile, *first.plan);
+  require(active.ready() && active.snapshot->reeling.has_value() &&
+          active.snapshot->reeling->active &&
+          !active.snapshot->inventory.has_value(),
+      "aggregate_runtime_reeling_snapshot_changed_domain");
+
+  fixture.game->memory.at(fixture.fish)[fixture.profile.fish_active_offset] =
+      std::byte{0U};
+  const auto caught_plan = resolver.resolve_runtime_observation(
+      2U, 200U, fixture.game->identity.generation, true);
+  require(caught_plan.ready(), "aggregate_inactive_plan_missing");
+  fixture.game->exact_reads_to_fail = 1U;
+  const auto interrupted = observer.capture(
+      *caught_plan.profile, *caught_plan.plan);
+  require(
+      interrupted.failure == observation::capture_failure::read_failed &&
+          resolver.terminal_transition_pending(),
+      "aggregate_inactive_transition_lost_after_failed_capture");
+  resolver.prepare_capture_retry();
+  const auto retry_plan = resolver.resolve_runtime_observation(
+      2U, 200U, fixture.game->identity.generation, true);
+  require(retry_plan.ready() && resolver.terminal_transition_pending(),
+      "aggregate_inactive_retry_plan_missing");
+  const auto caught = observer.capture(*retry_plan.profile, *retry_plan.plan);
+  require(caught.ready() && caught.snapshot->reeling.has_value() &&
+          !caught.snapshot->reeling->active &&
+          caught.snapshot->reeling->fish_model_confirmed,
+      "aggregate_inactive_transition_not_published");
+  resolver.commit_capture(*caught.snapshot);
+  require(!resolver.terminal_transition_pending(),
+      "aggregate_inactive_transition_not_committed");
+
+  const auto after_caught_plan = resolver.resolve_runtime_observation(
+      3U, 300U, fixture.game->identity.generation, false);
+  require(after_caught_plan.ready() &&
+          !after_caught_plan.profile->require_reeling &&
+          after_caught_plan.profile->require_inventory,
+      "aggregate_inactive_anchor_was_replayed");
+  const auto after_caught = observer.capture(
+      *after_caught_plan.profile, *after_caught_plan.plan);
+  require(after_caught.ready() && !after_caught.snapshot->reeling.has_value() &&
+          after_caught.snapshot->inventory.has_value(),
+      "aggregate_missing_reeling_did_not_stay_unknown");
+
+  const auto queries_before_generation_change = fixture.game->region_queries;
+  ++fixture.game->identity.generation.creation_time_filetime_100ns;
+  fixture.game->memory.at(fixture.fish)[fixture.profile.fish_active_offset] =
+      std::byte{1U};
+  const auto recovered_inventory_plan = resolver.resolve_runtime_observation(
+      4U, 400U, fixture.game->identity.generation, false);
+  require(recovered_inventory_plan.ready() &&
+          fixture.game->region_queries > queries_before_generation_change,
+      "aggregate_generation_change_did_not_rediscover_inventory");
+  const auto recovered_inventory = observer.capture(
+      *recovered_inventory_plan.profile, *recovered_inventory_plan.plan);
+  require(recovered_inventory.ready() &&
+          recovered_inventory.snapshot->inventory.has_value(),
+      "aggregate_generation_change_inventory_capture_failed");
+  const auto recovered_plan = resolver.resolve_runtime_observation(
+      5U, 500U, fixture.game->identity.generation, true);
+  require(recovered_plan.ready(),
+      "aggregate_generation_change_did_not_rediscover_reeling");
+  const auto recovered = observer.capture(
+      *recovered_plan.profile, *recovered_plan.plan);
+  require(recovered.ready() && recovered.snapshot->reeling.has_value() &&
+          recovered.snapshot->reeling->active &&
+          !recovered.snapshot->inventory.has_value(),
+      "aggregate_generation_change_did_not_recover");
 }
 
 void test_inventory_scope_discovery_and_recovery() {
@@ -968,6 +1228,7 @@ int main() {
     test_embedded_build_registry_contract();
     test_inventory_scope_discovery_and_recovery();
     test_inventory_scope_typed_blockers();
+    test_aggregate_runtime_resolution_and_self_healing();
     test_independent_fish_identity_projection(rows);
     test_negative_and_profile_drift(rows);
     test_default_off_composition();

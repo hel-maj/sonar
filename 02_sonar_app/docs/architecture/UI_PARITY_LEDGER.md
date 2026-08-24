@@ -399,5 +399,5 @@ consumer only after:
 
 Current focused acceptance: Release build 0 warnings/errors, 209/209
 STA/lifecycle WPF tests, 7/7 managed IPC integration tests and native CTest
-45/45. Tests do not open the product window or run a live GTA/input/network
+48/48. Tests do not open the product window or run a live GTA/input/network
 adapter.

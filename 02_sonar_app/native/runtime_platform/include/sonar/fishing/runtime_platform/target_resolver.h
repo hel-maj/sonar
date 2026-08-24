@@ -25,14 +25,19 @@ struct target_resolution final {
 [[nodiscard]] target_resolution select_exact_game_target(
     std::span<const target_candidate> candidates) noexcept;
 
+// Product-owned eligibility policy passed to Common's bounded exact-generation
+// top-level client observer.
+[[nodiscard]] sonar::platform::windows::top_level_window_policy
+exact_game_window_policy() noexcept;
+
 class game_target_resolver {
  public:
   virtual ~game_target_resolver() = default;
   [[nodiscard]] virtual target_resolution resolve() noexcept = 0;
 };
 
-// Performs no work at construction. resolve() enumerates exact GTA5.exe
-// generations through Common, then visible top-level windows through Win32;
+// Performs no work at construction. resolve() discovers exact GTA5.exe
+// generations and their unique visible client windows through Common;
 // multiple eligible windows fail closed instead of choosing by order.
 class windows_game_target_resolver final : public game_target_resolver {
  public:

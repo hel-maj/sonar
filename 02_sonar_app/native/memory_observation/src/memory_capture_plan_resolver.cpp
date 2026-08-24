@@ -282,15 +282,18 @@ struct fish_identity final {
   return std::nullopt;
 }
 
-[[nodiscard]] bool active_exact_fish(
+[[nodiscard]] std::optional<bool> exact_fish_active_state(
     readonly_memory_session& session,
     const fish_identity& fish,
     const embedded_memory_build_profile& profile) noexcept {
   const auto hash = read_value<std::uint32_t>(session, fish.hash_address);
   const auto active = read_value<std::uint8_t>(
       session, fish.entity + profile.fish_active_offset);
-  return hash.has_value() && *hash == profile.fish_model_hash &&
-      active.has_value() && *active == 1U;
+  if (!hash.has_value() || *hash != profile.fish_model_hash ||
+      !active.has_value() || *active > 1U) {
+    return std::nullopt;
+  }
+  return *active == 1U;
 }
 
 [[nodiscard]] std::optional<double> fish_distance_squared(
@@ -366,7 +369,7 @@ struct fish_identity final {
           continue;
         }
         const fish_identity candidate{*entity, *hash_address};
-        if (!active_exact_fish(session, candidate, profile)) {
+        if (exact_fish_active_state(session, candidate, profile) != true) {
           continue;
         }
         const auto distance = fish_distance_squared(session, player, *entity);
@@ -434,10 +437,43 @@ void memory_capture_plan_resolver::reset() noexcept {
   replay_address_ = 0U;
   fish_address_ = 0U;
   fish_hash_address_ = 0U;
+  terminal_transition_pending_ = false;
+  terminal_transition_sequence_ = 0U;
+  terminal_transition_captured_at_steady_ns_ = 0U;
   player_right_offset_ = 0U;
   inventory_signature_hits_.clear();
   inventory_last_failure_ = inventory_binding_failure::none;
   inventory_retry_after_steady_ns_ = 0U;
+}
+
+void memory_capture_plan_resolver::commit_capture(
+    const coherent_memory_snapshot& snapshot) noexcept {
+  if (!terminal_transition_pending_ || !snapshot.reeling.has_value() ||
+      snapshot.reeling->active || !snapshot.reeling->fish_model_confirmed ||
+      snapshot.sequence != terminal_transition_sequence_ ||
+      snapshot.captured_at_steady_ns !=
+          terminal_transition_captured_at_steady_ns_ ||
+      snapshot.game_generation != generation_ || build_profile_ == nullptr ||
+      snapshot.profile_id != build_profile_->profile_id ||
+      snapshot.profile_revision != build_profile_->profile_revision) {
+    return;
+  }
+  fish_address_ = 0U;
+  fish_hash_address_ = 0U;
+  terminal_transition_pending_ = false;
+  terminal_transition_sequence_ = 0U;
+  terminal_transition_captured_at_steady_ns_ = 0U;
+}
+
+void memory_capture_plan_resolver::prepare_capture_retry() noexcept {
+  if (!terminal_transition_pending_) {
+    reset();
+  }
+}
+
+bool memory_capture_plan_resolver::terminal_transition_pending()
+    const noexcept {
+  return terminal_transition_pending_;
 }
 
 std::string memory_capture_plan_resolver::prepare_session(
@@ -515,13 +551,21 @@ resolved_memory_capture memory_capture_plan_resolver::resolve_reeling(
       replay_address_ = *replay;
       player_right_offset_ = right_offset;
     }
+    bool observed_inactive_cached_fish = false;
     const fish_identity current{fish_address_, fish_hash_address_};
-    if (fish_address_ == 0U || fish_hash_address_ == 0U ||
-        !active_exact_fish(*session_, current, *build_profile_) ||
-        !fish_distance_squared(*session_, player_address_, fish_address_)
-             .has_value()) {
+    const auto current_active = fish_address_ != 0U && fish_hash_address_ != 0U
+        ? exact_fish_active_state(*session_, current, *build_profile_)
+        : std::nullopt;
+    const bool current_ready = current_active.has_value() &&
+        (!*current_active ||
+         fish_distance_squared(*session_, player_address_, fish_address_)
+             .has_value());
+    if (!current_ready) {
       fish_address_ = 0U;
       fish_hash_address_ = 0U;
+      terminal_transition_pending_ = false;
+      terminal_transition_sequence_ = 0U;
+      terminal_transition_captured_at_steady_ns_ = 0U;
       const auto fish = resolve_fish(
           *session_, replay_address_, player_address_, *build_profile_);
       if (!fish.has_value()) {
@@ -529,6 +573,18 @@ resolved_memory_capture memory_capture_plan_resolver::resolve_reeling(
       }
       fish_address_ = fish->entity;
       fish_hash_address_ = fish->hash_address;
+    } else {
+      // This is the exact legacy fish_caught transition: a previously
+      // confirmed fish whose byte at +0x189 changed from 1 to 0. Publish that
+      // one fresh inactive sample. Keep the exact anchor pending until the
+      // adapter commits a successful coherent capture; this permits one
+      // bounded retry without replaying a last-known snapshot.
+      observed_inactive_cached_fish = !*current_active;
+      if (observed_inactive_cached_fish) {
+        terminal_transition_pending_ = true;
+        terminal_transition_sequence_ = sequence;
+        terminal_transition_captured_at_steady_ns_ = captured_at_steady_ns;
+      }
     }
     if (!session_->generation_current()) {
       reset();
@@ -588,6 +644,36 @@ resolved_memory_capture memory_capture_plan_resolver::resolve_reeling(
   } catch (...) {
     reset();
     return fail("memory_profile_resolution_failed");
+  }
+}
+
+resolved_memory_capture
+memory_capture_plan_resolver::resolve_runtime_observation(
+    const std::uint64_t sequence,
+    const std::uint64_t captured_at_steady_ns,
+    const sonar::platform::windows::process_generation& game_generation,
+    const bool reeling_stage_visible) noexcept {
+  try {
+    if (reeling_stage_visible) {
+      return resolve_reeling(
+          sequence, captured_at_steady_ns, game_generation);
+    }
+    auto inventory = resolve_inventory(
+        sequence, captured_at_steady_ns, game_generation);
+
+    if (!inventory.ready()) {
+      return fail(inventory.reason.empty()
+          ? std::string("memory_runtime_observation_unavailable")
+          : std::move(inventory.reason));
+    }
+    return {
+        .profile = std::move(inventory.profile),
+        .plan = std::move(inventory.plan),
+        .registry_sha256 = std::move(inventory.registry_sha256),
+    };
+  } catch (...) {
+    reset();
+    return fail("memory_runtime_observation_resolution_failed");
   }
 }
 

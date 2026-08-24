@@ -11,12 +11,9 @@ read-only observation. Она не нажимает клавиши, не упр�
 Текущий slice построен как Ports and Adapters плюс Aggregate Snapshot:
 
 ```text
-exact product target resolver
-  -> explicit reeling or inventory_state capture scope
-  -> capture_plan + expected process generations
-  -> least-rights Windows memory_connector
-  -> bounded exact reads
-  -> pure domain decoders
+exact product target resolver + same-frame visual stage
+  -> reeling: Fishing capture_plan + bounded exact reads
+  -> non-reeling: one Common inventory-open facade observation
   -> one coherent_memory_snapshot
   -> whole Engine episode policy
 ```
@@ -29,16 +26,27 @@ evidence получают один sequence, monotonic capture time, profile id/
 ## Ownership и зависимости
 
 - Sonar Common `SonarPlatformWindows 0.1.6` владеет least-rights
-  `readonly_process`, process generation и bounded exact `ReadProcessMemory`.
+  `readonly_process`, process generation, bounded exact `ReadProcessMemory` и
+  bounded `unique_top_level_client_observer` для exact process generation.
 - Fishing владеет допустимыми executable names/hashes, адресным profile,
-  decoder policy и смыслом evidence.
+  decoder policy, cross-process ambiguity и смыслом evidence. Product policy
+  требует visible non-minimized client, но сохраняет прежнюю eligibility для
+  owned/tool windows; обязательный Common cap 64 fail-closed при exhaustion.
 - Fishing adapter добавляет SHA-256 проверку image file, но не дублирует
-  `OpenProcess`, `ReadProcessMemory`, enumeration или generation logic Common.
+  `OpenProcess`, `ReadProcessMemory`, `EnumWindows` или generation logic Common.
+  Offline ownership scan запрещает возвращение локальной window enumeration.
 - Common target `Sonar::PlatformInventoryState` нормализует только общую
   трёхзначную семантику `unknown/closed/open`; Fishing по-прежнему владеет
   profile candidates, vote/confidence admission и surface geometry.
+- Exact-pinned Common `SonarMajesticCefInventory 0.1.0` владеет production CEF
+  renderer discovery, exact client admission, V8 decoding, coherent double-read
+  и hot binding. Fishing вызывает только `inventory_open.hpp`, владеет coarse
+  routing, product reason mapping, retry cadence и surface geometry. Manifest
+  pin: `B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8`.
 - Historical decoder semantics сохранены в language-neutral fixture; executable
   legacy oracle и runtime fallback удалены.
+- Полная разбивка historical memory/visual owners и полей находится в
+  [runtime observation parity matrix](RUNTIME_OBSERVATION_PARITY.md).
 
 Windows connector использует Common `memory_regions` access profile. Это
 добавляет только least-rights region enumeration к exact read; Fishing
@@ -92,8 +100,8 @@ Language-neutral fixture
 `tests/fixtures/memory_observation/e11-v1.tsv` фиксирует observable legacy
 semantics:
 
-- confirmed fish hash `802685111`, active byte, world positions и normalized
-  player right vector;
+- confirmed fish hash `802685111`, active и characterized `fish_caught`
+  inactive byte, world positions и normalized player right vector;
 - weighted inventory open/closed vote с legacy thresholds;
 - WebEngine indicator records `(food, water, health)` и пары inventory/backpack
   weight;
@@ -105,20 +113,35 @@ hash, ambiguous inventory vote и replayed sequence.
 
 ## Production admission и оставшиеся gaps
 
-Normal Engine теперь маршрутизирует reeling и inventory разными capture scopes.
-Inventory поэтому не требует active fish. Если exact build profile содержит
-binding, resolver выполняет bounded cold discovery, revalidates cached masked
-signatures на каждом плане и после drift делает ровно одну bounded rediscovery.
-Неудачная cold discovery не повторяется каждый frame: typed failure удерживает
-пятисекундный cooldown перед следующей bounded попыткой и оставляет state
-`unknown`. Screenshot detector сохраняет только
-item/context geometry и никогда не превращает неизвестность в closed.
+Normal Engine выполняет одну coarse capture operation. Positive visual reeling
+trigger вызывает только Fishing `resolve_reeling` + `memory_observer::capture`;
+Common inventory facade в этом path не вызывается. Остальные frames выполняют
+ровно один `inventory_open_acquisition::observe()`: его cold-to-hot discovery и
+double-read остаются одной Common operation. Поэтому cold CEF scan не попадает
+в latency-critical A/D path.
 
-Shipping registry пока не содержит ни одного admitted inventory binding, а
-actual current hash вообще не admitted. Следовательно, current runtime
-возвращает typed `profile_unavailable` / `memory_game_build_unsupported`;
-`memory_inventory_binding_unavailable` относится к старому admitted profile без
-binding. Ни один путь не публикует выдуманный `open/closed`. Полная
+После `unknown` product adapter повторяет cold attempt не чаще monotonic
+`250 ms -> 500 ms -> 1 s -> 2 s -> 4 s`, затем сохраняет cap `4 s`. Между
+deadline он создаёт свежий aggregate только с `unknown`; known `open/closed`
+никогда не кэшируются и hot Common facade снова вызывается на следующем
+requested frame. Смена GTA generation немедленно вызывает `reset`, очищает
+backoff и требует новую observation. Screenshot detector сохраняет только
+item/context geometry и никогда не превращает неизвестность в closed. Один
+capture read/decode/generation drift вызывает не более одной полной
+re-resolution с новым observer connection; повторный failure очищает pending
+resolver state и cached observer sessions, оставаясь unknown без stale fallback.
+Confirmed inactive fish остаётся pending до успешного coherent capture, поэтому
+первый read/decode failure не теряет terminal transition. После commit anchor
+удаляется; после исчерпания bounded retry он сбрасывается без replay.
+
+Обычная shipping composition запрещает встроенный Common non-shipping profile и
+остаётся `unknown/source_disabled` до promotion. Compile-isolated `Локальный
+доступ` явно разрешает только exact candidate
+`majestic-client-1.20.7-candidate-v1`, включая closed bootstrap; Common всё равно
+проверяет immutable client identity и generation. Старый Fishing binding и его
+`memory_inventory_binding_unavailable` остаются только characterization path и
+не являются production authority. Ни один путь не публикует выдуманный
+`open/closed`. Полная
 граница и подготовленный manual evidence entrypoint описаны в
 [inventory-state characterization](INVENTORY_STATE_CHARACTERIZATION.md).
 Player/status/chat поля также публикуются только при наличии admitted layout;

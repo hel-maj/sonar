@@ -28,6 +28,12 @@ logs/
 `Sonar.Engine.exe` — один native C++20 executable. Managed/native packages,
 protobuf code, logo, fish catalog и изображения встроены в два EXE.
 
+Native configure exact-pins installed
+`SonarMajesticCefInventory 0.1.0` / `Sonar::MajesticCefInventory`. Setup, full
+offline gate и оба clean release build проверяют SHA-256 manifest
+`B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8` и каждый
+listed payload. Sibling Common checkout и loose runtime dependency запрещены.
+
 ## Entrypoints
 
 Production package:
@@ -81,13 +87,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full
 ```
 
 Эта пара снимает только внешние licensing/entitlement и signed startup
-availability/update-block admission gates и сохраняет production
-memory, supported-build, window, foreground, capture, input и final safety
-gates. Builder по умолчанию маркирует версию как `1.0.0-local`; product UI
+availability/update-block admission gates и сохраняет production window,
+process/generation, foreground, capture, input и final safety gates. Она также
+compile-time разрешает только встроенный Common inventory candidate 1.20.7;
+ordinary shipping оставляет его denied/inert до promotion. Builder по умолчанию маркирует версию как `1.0.0-local`; product UI
 показывает `Локальный доступ` без key activation, raw feature IDs или internal
 channel. Ordinary `run_product.ps1` и local maintenance намеренно отвергают ее.
+Local-access run выполняет только быстрый manifest/hash/allowlist/runtime
+admission; offline suites, source ownership, dependency closure и secret scan
+остаются в build и отдельной verify-команде.
 Полный security contract описан в
 [ADR-0002](ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md).
+Inventory dependency/retry contract: [ADR-0004](ADR-0004-COMMON-CEF-INVENTORY-OPEN.md).
 
 Product-owned local maintenance для той же development-unsigned пары:
 
@@ -206,7 +217,7 @@ unsigned smoke не является доказательством signing ил
 ## Offline acceptance receipts 2026-08-24
 
 - Host/WPF focused gate: `209/209`, warnings/errors `0/0`;
-- native CTest: `45/45`; typed IPC integration: `7/7`;
+- native CTest: `48/48`; typed IPC integration: `7/7`;
 - deterministic offscreen UI matrix: 180 PNG для compact/medium/expanded
   layouts и 100/125/150/200% DPI в `build/ui-gallery-0219-final/`; manifest
   фиксирует Common UI `0.2.19` и имеет SHA-256

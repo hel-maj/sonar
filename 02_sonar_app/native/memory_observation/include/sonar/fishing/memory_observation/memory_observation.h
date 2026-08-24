@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "sonar/platform/windows/process.hpp"
+#include "sonar/platform/inventory/open_state.hpp"
 
 namespace sonar::fishing::memory_observation {
 
@@ -200,6 +201,8 @@ struct coherent_memory_snapshot final {
       webengine_generation;
   std::optional<reeling_evidence> reeling;
   std::optional<inventory_evidence> inventory;
+  std::optional<sonar::platform::inventory::observed_state>
+      inventory_open_state;
   std::optional<player_status_evidence> player_status;
   std::optional<chat_evidence> chat;
 };
@@ -277,6 +280,10 @@ class memory_observer final {
   [[nodiscard]] capture_result capture(
       const memory_observation_profile& profile,
       const capture_plan& plan) noexcept;
+
+  // Drop process handles after a bounded adapter failure without weakening
+  // sequence replay protection. The next fresh plan reconnects explicitly.
+  void reset_sessions() noexcept;
 
  private:
   memory_connector& connector_;
@@ -408,11 +415,28 @@ class memory_capture_plan_resolver final {
       const sonar::platform::windows::process_generation& game_generation)
       noexcept;
 
+  // Offline characterization compatibility seam. Production adapter code is
+  // forbidden from calling this legacy inventory branch; it uses
+  // resolve_reeling or the exact-pinned Common facade instead.
+  [[nodiscard]] resolved_memory_capture resolve_runtime_observation(
+      std::uint64_t sequence,
+      std::uint64_t captured_at_steady_ns,
+      const sonar::platform::windows::process_generation& game_generation,
+      bool reeling_stage_visible) noexcept;
+
+  // Historical Fishing binding resolver for fixtures/characterization only.
   [[nodiscard]] resolved_inventory_capture resolve_inventory(
       std::uint64_t sequence,
       std::uint64_t captured_at_steady_ns,
       const sonar::platform::windows::process_generation& game_generation)
       noexcept;
+
+  // A confirmed inactive fish remains pending until the corresponding fresh
+  // coherent snapshot succeeds. The adapter may preserve it for one bounded
+  // read/decode retry; every other cache is invalidated normally.
+  void commit_capture(const coherent_memory_snapshot& snapshot) noexcept;
+  void prepare_capture_retry() noexcept;
+  [[nodiscard]] bool terminal_transition_pending() const noexcept;
 
   void reset() noexcept;
 
@@ -432,6 +456,9 @@ class memory_capture_plan_resolver final {
   std::uintptr_t replay_address_{};
   std::uintptr_t fish_address_{};
   std::uintptr_t fish_hash_address_{};
+  bool terminal_transition_pending_{};
+  std::uint64_t terminal_transition_sequence_{};
+  std::uint64_t terminal_transition_captured_at_steady_ns_{};
   std::size_t player_right_offset_{};
   std::vector<std::uintptr_t> inventory_signature_hits_;
   inventory_binding_failure inventory_last_failure_{

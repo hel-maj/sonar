@@ -450,7 +450,9 @@ class windows_fishing_automation_session final
   runtime_platform::win32_client_capture_source capture_;
   stage_detection::majestic_fishing_stage_detector stage_detector_;
   automation_adapters::resolved_fishing_memory_source memory_{
-      memory_observation::make_windows_memory_connector()};
+      memory_observation::make_windows_memory_connector(),
+      automation_adapters::make_common_inventory_open_source(),
+      automation_adapters::make_inventory_retry_clock()};
   automation_adapters::mutable_runtime_policy_source policy_;
   runtime_platform::automation_lease_coordinator leases_;
   fishing_episode::fishing_episode_runner runner_;

@@ -16,7 +16,7 @@ elseif (-not [IO.Path]::IsPathRooted($BundleDirectory)) {
     $BundleDirectory = Join-Path $productRoot $BundleDirectory
 }
 
-& (Join-Path $PSScriptRoot "verify_developer_full_access.ps1") `
+& (Join-Path $PSScriptRoot "admit_developer_full_access_launch.ps1") `
     -BundleDirectory $BundleDirectory
 $BundleDirectory = (Resolve-Path -LiteralPath $BundleDirectory).Path
 $startInfo = [Diagnostics.ProcessStartInfo]::new()

@@ -14,7 +14,9 @@ target_include_directories(SonarFishingMemoryObservation
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 target_link_libraries(SonarFishingMemoryObservation
-    PUBLIC Sonar::PlatformWindowsProcess
+    PUBLIC
+        Sonar::PlatformWindowsProcess
+        Sonar::PlatformInventoryState
     PRIVATE bcrypt
 )
 target_compile_options(SonarFishingMemoryObservation

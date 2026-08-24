@@ -1,10 +1,7 @@
 #include "sonar/fishing/runtime_platform/target_resolver.h"
 
-#include <Windows.h>
-
 #include <algorithm>
 #include <cwctype>
-#include <unordered_set>
 #include <utility>
 
 #include "sonar/platform/windows/process.hpp"
@@ -23,31 +20,6 @@ namespace {
       [](const wchar_t a, const wchar_t b) {
         return std::towlower(a) == std::towlower(b);
       });
-}
-
-struct enumeration_context final {
-  const std::unordered_set<std::uint32_t>* process_ids{};
-  std::vector<target_candidate>* candidates{};
-};
-
-BOOL CALLBACK collect_window(const HWND window, const LPARAM parameter) {
-  auto* context = reinterpret_cast<enumeration_context*>(parameter);
-  if (context == nullptr || context->process_ids == nullptr ||
-      context->candidates == nullptr || IsWindowVisible(window) == FALSE) {
-    return TRUE;
-  }
-  DWORD process_id = 0;
-  if (GetWindowThreadProcessId(window, &process_id) == 0 || process_id == 0 ||
-      context->process_ids->contains(process_id) == false) {
-    return TRUE;
-  }
-  const auto observed = sonar::platform::windows::observe_window_client(
-      reinterpret_cast<sonar::platform::windows::native_window_handle>(window));
-  if (!observed.ready() || !observed.snapshot.has_value()) {
-    return TRUE;
-  }
-  context->candidates->push_back({L"GTA5.exe", *observed.snapshot});
-  return TRUE;
 }
 
 }  // namespace
@@ -84,6 +56,20 @@ target_resolution select_exact_game_target(
   }
 }
 
+sonar::platform::windows::top_level_window_policy
+exact_game_window_policy() noexcept {
+  sonar::platform::windows::top_level_window_policy policy;
+  policy.maximum_candidates =
+      sonar::platform::windows::maximum_top_level_window_candidates;
+  policy.require_visible = true;
+  policy.require_not_minimized = true;
+  // The previous Fishing eligibility contract did not reject an otherwise
+  // exact GTA client solely because it was owned or marked as a tool window.
+  policy.require_unowned = false;
+  policy.exclude_tool_windows = false;
+  return policy;
+}
+
 target_resolution windows_game_target_resolver::resolve() noexcept {
   try {
     const auto process_ids =
@@ -92,12 +78,53 @@ target_resolution windows_game_target_resolver::resolve() noexcept {
     if (process_ids.empty()) {
       return {.reason = "game_process_unavailable"};
     }
-    const std::unordered_set<std::uint32_t> exact_ids(
-        process_ids.begin(), process_ids.end());
     std::vector<target_candidate> candidates;
-    enumeration_context context{&exact_ids, &candidates};
-    if (EnumWindows(collect_window, reinterpret_cast<LPARAM>(&context)) == FALSE) {
-      return {.reason = "game_window_enumeration_failed"};
+    candidates.reserve(process_ids.size());
+    for (const auto process_id : process_ids) {
+      try {
+        auto process = sonar::platform::windows::readonly_process::open(
+            process_id,
+            sonar::platform::windows::process_access_profile::identity);
+        const auto generation = process.generation();
+        auto image_name = process.image_name();
+        if (!same_image_name(image_name, L"GTA5.exe")) {
+          continue;
+        }
+
+        sonar::platform::windows::unique_top_level_client_observer observer(
+            generation,
+            exact_game_window_policy());
+        const auto observed = observer.observe();
+        if (observed.ready() && observed.snapshot.has_value()) {
+          candidates.push_back({std::move(image_name), *observed.snapshot});
+          continue;
+        }
+
+        using reason =
+            sonar::platform::windows::unique_window_observation_reason;
+        switch (observed.reason) {
+          case reason::ambiguous:
+            return {.reason = "game_target_ambiguous"};
+          case reason::invalid_policy:
+          case reason::resource_limit:
+          case reason::system_failure:
+            return {.reason = "game_window_enumeration_failed"};
+          case reason::ready:
+            return {.reason = "game_target_resolution_failed"};
+          case reason::missing:
+          case reason::process_unavailable:
+          case reason::process_changed:
+          case reason::owner_changed:
+          case reason::not_visible:
+          case reason::minimized:
+          case reason::client_empty:
+            break;
+        }
+      } catch (const sonar::platform::windows::process_error&) {
+        // A PID may disappear or become inaccessible after exact-name
+        // enumeration. Preserve the prior behavior by ignoring that stale
+        // candidate while evaluating the remaining exact processes.
+      }
     }
     return select_exact_game_target(candidates);
   } catch (const sonar::platform::windows::process_error&) {

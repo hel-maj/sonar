@@ -279,6 +279,11 @@ std::unique_ptr<readonly_memory_session> disabled_memory_connector::connect(
 memory_observer::memory_observer(memory_connector& connector) noexcept
     : connector_(connector) {}
 
+void memory_observer::reset_sessions() noexcept {
+  game_session_.reset();
+  webengine_session_.reset();
+}
+
 capture_result memory_observer::capture(
     const memory_observation_profile& profile,
     const capture_plan& plan) noexcept {

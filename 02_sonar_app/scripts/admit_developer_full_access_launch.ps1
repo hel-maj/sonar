@@ -19,13 +19,7 @@ if (-not (Test-Path -LiteralPath $BundleDirectory -PathType Container)) {
     throw "developer_bundle_missing: $BundleDirectory"
 }
 $BundleDirectory = (Resolve-Path -LiteralPath $BundleDirectory).Path
+
 [void](Assert-FishingDeveloperFullAccessLaunchAdmission `
     $productRoot $BundleDirectory)
-& (Join-Path $PSScriptRoot "test_no_python_runtime.ps1") `
-    -ProductRoot $productRoot `
-    -BundleDirectory $BundleDirectory `
-    -BundleLifecycleStage Package
-Assert-FishingSystemDependencyClosure $BundleDirectory
-Assert-FishingHighConfidenceSecretScan $BundleDirectory
-
-Write-Output "PASS Fishing developer-full-access full verification: $BundleDirectory"
+Write-Output "PASS Fishing developer-full-access launch admission: $BundleDirectory"

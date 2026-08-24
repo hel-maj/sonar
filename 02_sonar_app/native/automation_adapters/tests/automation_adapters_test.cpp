@@ -1,5 +1,7 @@
 #include "sonar/fishing/automation_adapters/fishing_adapters.h"
 
+#include "../src/memory_capture_retry.h"
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -445,18 +447,179 @@ class one_frame_capture final : public platform::client_capture_source {
 class recording_memory final : public adapters::fishing_memory_source {
  public:
   [[nodiscard]] adapters::memory_snapshot_result capture(
-      const adapters::memory_capture_scope scope,
       const std::uint64_t,
       const std::uint64_t,
-      const sonar::platform::windows::process_generation&) noexcept override {
+      const sonar::platform::windows::process_generation&,
+      const bool reeling_stage_visible) noexcept override {
     ++calls;
-    scopes.push_back(scope);
+    reeling_requests.push_back(reeling_stage_visible);
     return {.reason = "fixture_memory_not_expected"};
   }
 
   std::size_t calls{};
-  std::vector<adapters::memory_capture_scope> scopes;
+  std::vector<bool> reeling_requests;
 };
+
+struct scripted_retry_state final {
+  std::size_t resolve_calls{};
+  std::size_t capture_calls{};
+  std::size_t prepare_calls{};
+  std::size_t commit_calls{};
+  std::size_t reset_calls{};
+  std::size_t observer_session_reset_calls{};
+  std::size_t failures_remaining{};
+  bool terminal_transition_pending{true};
+  bool requested_only_reeling{true};
+};
+
+class scripted_retry_resolver final {
+ public:
+  explicit scripted_retry_resolver(scripted_retry_state& state) noexcept
+      : state_(state) {}
+
+  [[nodiscard]] sonar::fishing::memory_observation::resolved_memory_capture
+  resolve_reeling(
+      const std::uint64_t sequence,
+      const std::uint64_t captured_at_steady_ns,
+      const sonar::platform::windows::process_generation& game_generation)
+      noexcept {
+    ++state_.resolve_calls;
+    return {
+        .profile = sonar::fishing::memory_observation::memory_observation_profile{
+            .profile_id = "retry-adapter-fixture-v1",
+            .profile_revision = 1U,
+        },
+        .plan = sonar::fishing::memory_observation::capture_plan{
+            .sequence = sequence,
+            .captured_at_steady_ns = captured_at_steady_ns,
+            .game_process_id = game_generation.process_id,
+            .expected_game_generation = game_generation,
+        },
+        .registry_sha256 = std::string(
+            sonar::fishing::memory_observation::
+                embedded_build_profile_registry_sha256),
+    };
+  }
+
+  void commit_capture(
+      const sonar::fishing::memory_observation::coherent_memory_snapshot&
+          snapshot) noexcept {
+    ++state_.commit_calls;
+    if (snapshot.reeling.has_value() && !snapshot.reeling->active) {
+      state_.terminal_transition_pending = false;
+    }
+  }
+
+  void prepare_capture_retry() noexcept {
+    ++state_.prepare_calls;
+  }
+
+  [[nodiscard]] bool terminal_transition_pending() const noexcept {
+    return state_.terminal_transition_pending;
+  }
+
+  void reset() noexcept {
+    ++state_.reset_calls;
+    state_.terminal_transition_pending = false;
+  }
+
+ private:
+  scripted_retry_state& state_;
+};
+
+class scripted_retry_observer final {
+ public:
+  explicit scripted_retry_observer(scripted_retry_state& state) noexcept
+      : state_(state) {}
+
+  [[nodiscard]] sonar::fishing::memory_observation::capture_result capture(
+      const sonar::fishing::memory_observation::memory_observation_profile&
+          profile,
+      const sonar::fishing::memory_observation::capture_plan& plan) noexcept {
+    ++state_.capture_calls;
+    if (state_.failures_remaining != 0U) {
+      --state_.failures_remaining;
+      return {
+          .failure =
+              sonar::fishing::memory_observation::capture_failure::read_failed,
+          .reason = "retry_adapter_fixture_read_failed",
+      };
+    }
+    return {
+        .snapshot =
+            sonar::fishing::memory_observation::coherent_memory_snapshot{
+                .sequence = plan.sequence,
+                .captured_at_steady_ns = plan.captured_at_steady_ns,
+                .profile_id = profile.profile_id,
+                .profile_revision = profile.profile_revision,
+                .game_generation = plan.expected_game_generation,
+                .reeling =
+                    sonar::fishing::memory_observation::reeling_evidence{
+                        .active = false,
+                        .fish_model_confirmed = true,
+                    },
+            },
+    };
+  }
+
+  void reset_sessions() noexcept {
+    ++state_.observer_session_reset_calls;
+  }
+
+ private:
+  scripted_retry_state& state_;
+};
+
+void terminal_memory_transition_is_bounded_and_committed_once() {
+  const sonar::platform::windows::process_generation generation{
+      .process_id = 101U,
+      .creation_time_filetime_100ns = 202U,
+  };
+
+  scripted_retry_state recovered{.failures_remaining = 1U};
+  scripted_retry_resolver recovered_resolver(recovered);
+  scripted_retry_observer recovered_observer(recovered);
+  const auto snapshot =
+      sonar::fishing::automation_adapters::detail::
+          capture_reeling_with_bounded_retry(
+              recovered_resolver,
+              recovered_observer,
+              71U,
+              9'000U,
+              generation);
+  require(snapshot.snapshot.has_value() &&
+          snapshot.snapshot->reeling.has_value() &&
+          !snapshot.snapshot->reeling->active,
+      "retry_adapter_inactive_snapshot_missing");
+  require(recovered.resolve_calls == 2U && recovered.capture_calls == 2U &&
+          recovered.prepare_calls == 1U && recovered.commit_calls == 1U &&
+          recovered.reset_calls == 0U &&
+          recovered.observer_session_reset_calls == 1U &&
+          !recovered.terminal_transition_pending &&
+          recovered.requested_only_reeling,
+      "retry_adapter_terminal_transition_not_committed_once");
+
+  scripted_retry_state exhausted{.failures_remaining = 2U};
+  scripted_retry_resolver exhausted_resolver(exhausted);
+  scripted_retry_observer exhausted_observer(exhausted);
+  const auto unavailable =
+      sonar::fishing::automation_adapters::detail::
+          capture_reeling_with_bounded_retry(
+              exhausted_resolver,
+              exhausted_observer,
+              72U,
+              9'100U,
+              generation);
+  require(!unavailable.snapshot.has_value() &&
+          unavailable.reason == "retry_adapter_fixture_read_failed" &&
+          exhausted.resolve_calls == 2U && exhausted.capture_calls == 2U &&
+          exhausted.prepare_calls == 1U && exhausted.commit_calls == 0U &&
+          exhausted.reset_calls == 1U &&
+          exhausted.observer_session_reset_calls == 2U &&
+          !exhausted.terminal_transition_pending &&
+          exhausted.requested_only_reeling,
+      "retry_adapter_exhaustion_left_pending_transition");
+}
 
 class recording_gate final : public adapters::immediate_action_gate {
  public:
@@ -662,6 +825,7 @@ int main(const int argc, const char* const argv[]) {
     screenshot_semantics_are_normalized_and_frozen(*factory.Get(), fixtures);
     exact_legacy_bubble_templates_are_fallback_cues(*factory.Get());
     coherent_frame_feeds_one_observation(*factory.Get(), fixtures[0]);
+    terminal_memory_transition_is_bounded_and_committed_once();
     one_lease_and_immediate_gate_own_mutation();
     policy_snapshot_is_coherent_and_stop_revokes_actions();
     if (argc == 2) {
@@ -685,7 +849,7 @@ int main(const int argc, const char* const argv[]) {
         }
       }
     }
-    std::cout << "PASS Fishing automation adapters offline fixtures 5/5\n";
+    std::cout << "PASS Fishing automation adapters offline fixtures 6/6\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

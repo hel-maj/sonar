@@ -63,6 +63,17 @@ find_package(
     NO_DEFAULT_PATH
 )
 
+if(NOT DEFINED SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE OR
+   NOT IS_DIRECTORY "${SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE}")
+    message(FATAL_ERROR
+        "SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE must point to installed Sonar Majestic CEF Inventory 0.1.0")
+endif()
+find_package(
+    SonarMajesticCefInventory 0.1.0 EXACT CONFIG REQUIRED
+    PATHS "${SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE}/lib/cmake/SonarMajesticCefInventory"
+    NO_DEFAULT_PATH
+)
+
 add_subdirectory(catch_quality)
 add_subdirectory(catch_disposition)
 add_subdirectory(session_statistics)

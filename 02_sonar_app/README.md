@@ -31,9 +31,12 @@ Host/Engine composition; запуск рыбалки остаётся fail-close
 - `scripts` - PowerShell entrypoints целевой версии.
 - `docs/architecture` - ADR, migration evidence и production cutover checklist.
 
-Общие IPC, process supervision, licensing verification и `Sonar.UI.Wpf 0.2.19`
-потребляются как точные immutable Sonar Common packages. Исходники Common в
-Fishing не копируются.
+Общие IPC, process supervision, licensing verification,
+`Sonar.UI.Wpf 0.2.19` и CEF inventory-open facade
+`SonarMajesticCefInventory 0.1.0` потребляются как точные immutable Sonar
+Common packages. Setup/release проверяют manifest facade с SHA-256
+`B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8` и все
+перечисленные payloads; исходники или sibling checkout Common не используются.
 
 ## Безопасные команды
 
@@ -134,6 +137,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full
 `-VerifyOnly` проверяет WinPS-compatible launch contract без запуска UI и
 используется regression-тестом.
 
+Run не повторяет offline suites, repository-wide no-Python scan, dependency
+closure и secret scan. Перед каждым стартом он выполняет только launch admission:
+проверяет exact local-access manifest, hashes и build IDs пары EXE,
+deterministic marker, строгий allowlist bundle и Desktop Runtime. Полная
+проверка остаётся отдельной командой `verify_developer_full_access.ps1`.
+
 Builder по умолчанию использует стабильную локальную версию `1.0.0-local`.
 Product UI показывает активный `Локальный доступ`, не просит ключ и не выводит
 raw feature IDs или технический channel. В local feature set входят только
@@ -151,6 +160,12 @@ lease и final safety gates не ослабляются. Production EXE не п�
 `--developer-full-access`, а ordinary run/install/update/rollback entrypoints
 отвергают такой bundle. Подробный контракт находится в
 [ADR-0002](docs/architecture/ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md).
+
+В этой compile-isolated композиции также явно разрешён только Common candidate
+`majestic-client-1.20.7-candidate-v1` для inventory-open. Обычная shipping
+композиция оставляет non-shipping profile запрещённым и observation inert до
+отдельного promotion. Детали coarse capture и retry находятся в
+[ADR-0004](docs/architecture/ADR-0004-COMMON-CEF-INVENTORY-OPEN.md).
 
 Точная матрица того, что работает в normal launch, а что остаётся выключенным
 до конкретного внешнего/архитектурного prerequisite, находится в

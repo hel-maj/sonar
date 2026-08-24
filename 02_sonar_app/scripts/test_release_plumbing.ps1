@@ -121,6 +121,22 @@ try {
     & (Join-Path $PSScriptRoot "run_developer_full_access.ps1") `
         -BundleDirectory $bundle `
         -VerifyOnly
+    $launchStatePath = Join-Path $bundle "config\state.dat"
+    $launchLogPath = Join-Path $bundle "logs\session.log"
+    [IO.File]::WriteAllBytes($launchStatePath, [byte[]](0x53, 0x46, 0x53, 0x31))
+    Set-Content -LiteralPath $launchLogPath -Value "launch log"
+    & (Join-Path $PSScriptRoot "run_developer_full_access.ps1") `
+        -BundleDirectory $bundle `
+        -VerifyOnly
+    Remove-Item -LiteralPath $launchStatePath,$launchLogPath -Force
+    $unexpectedLaunchFile = Join-Path $bundle "unexpected.txt"
+    Set-Content -LiteralPath $unexpectedLaunchFile -Value "unexpected"
+    Assert-Throws {
+        & (Join-Path $PSScriptRoot "run_developer_full_access.ps1") `
+            -BundleDirectory $bundle `
+            -VerifyOnly
+    } "developer_bundle_launch_layout_invalid"
+    Remove-Item -LiteralPath $unexpectedLaunchFile -Force
     $acceptedDeveloper.developerFullAccess = $false
     Write-FishingBundleManifest $manifestPath $acceptedDeveloper
     Assert-Throws {
@@ -352,8 +368,21 @@ try {
         $releaseBuilderText -notmatch 'PathMap=.*%2C\$BuildRoot=/_/out' -or
         $releaseBuilderText -notmatch 'Sonar\.Fishing\.Host\.exe' -or
         $releaseBuilderText -notmatch 'SonarFishingDeveloperFullAccess=true' -or
-        $releaseBuilderText -notmatch 'SONAR_FISHING_DEVELOPER_FULL_ACCESS') {
+        $releaseBuilderText -notmatch 'SONAR_FISHING_DEVELOPER_FULL_ACCESS' -or
+        $releaseBuilderText -notmatch
+            'SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE' -or
+        $releaseBuilderText -notmatch 'Assert-FishingCommonInventoryPackage') {
         throw "release_clean_build_contract_invalid"
+    }
+    $inventoryPackageGateText = Get-Content -Raw -LiteralPath `
+        (Join-Path $PSScriptRoot "common_inventory_package.ps1")
+    if ($inventoryPackageGateText -notmatch
+            'B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8' -or
+        $inventoryPackageGateText -notmatch
+            'common_inventory_payload_hash_mismatch' -or
+        $inventoryPackageGateText -notmatch
+            'common_inventory_unlisted_payload') {
+        throw "release_common_inventory_package_gate_invalid"
     }
 
     $releaseSmokeText = Get-Content -Raw -LiteralPath `
@@ -381,8 +410,16 @@ try {
         (Join-Path $PSScriptRoot "run_developer_full_access.ps1")
     if ($developerRunnerText -match '\.ArgumentList\.Add' -or
         $developerRunnerText -notmatch '\.Arguments\s*=\s*"--developer-full-access"' -or
+        $developerRunnerText -notmatch 'admit_developer_full_access_launch\.ps1' -or
         $developerRunnerText -notmatch '\[switch\]\$VerifyOnly') {
         throw "release_developer_runner_contract_invalid"
+    }
+    $developerAdmissionText = Get-Content -Raw -LiteralPath `
+        (Join-Path $PSScriptRoot "admit_developer_full_access_launch.ps1")
+    if ($developerAdmissionText -notmatch
+        'Assert-FishingDeveloperFullAccessLaunchAdmission' -or
+        $developerAdmissionText -match 'test_no_python_runtime|DependencyClosure|SecretScan') {
+        throw "release_developer_launch_admission_contract_invalid"
     }
     $normalLifecycleText = Get-Content -Raw -LiteralPath `
         (Join-Path $PSScriptRoot "test_product_lifecycle.ps1")
@@ -396,6 +433,7 @@ try {
 
     $releaseScripts = @(
         "release_common.ps1",
+        "common_inventory_package.ps1",
         "build_release_native.ps1",
         "package_native.ps1",
         "smoke_release_native.ps1",
@@ -404,6 +442,7 @@ try {
         "run_product.ps1",
         "build_developer_full_access.ps1",
         "verify_developer_full_access.ps1",
+        "admit_developer_full_access_launch.ps1",
         "run_developer_full_access.ps1",
         "invoke_local_release_maintenance.ps1",
         "test_product_lifecycle.ps1",

@@ -45,6 +45,9 @@ namespace {
     const inventory_store::inventory_observation& left,
     const inventory_store::inventory_observation& right) noexcept {
   if (left.sequence != right.sequence || left.surface != right.surface ||
+      left.inventory_open != right.inventory_open ||
+      left.game_menu_open != right.game_menu_open ||
+      left.fishing_minigame_active != right.fishing_minigame_active ||
       left.fishing_stage != right.fishing_stage ||
       left.catch_screen_visible != right.catch_screen_visible ||
       left.error != right.error || left.items.size() != right.items.size() ||

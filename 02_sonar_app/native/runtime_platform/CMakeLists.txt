@@ -36,3 +36,10 @@ add_test(
     NAME sonar_fishing.runtime_platform
     COMMAND SonarFishingRuntimePlatformTests
 )
+
+add_test(
+    NAME sonar_fishing.runtime_platform_common_window_ownership
+    COMMAND "${CMAKE_COMMAND}"
+        "-DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/src/target_resolver.cpp"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_common_window_ownership.cmake"
+)

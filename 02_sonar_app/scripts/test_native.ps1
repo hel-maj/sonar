@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$CommonFeed = $env:SONAR_COMMON_FEED
+    [string]$CommonFeed = $env:SONAR_COMMON_FEED,
+    [string]$CommonMajesticCefInventoryPackage =
+        $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE
 )
 
 Set-StrictMode -Version Latest
@@ -13,7 +15,12 @@ foreach ($scriptName in @(
     "test_ipc.ps1"
 )) {
     $scriptPath = Join-Path $PSScriptRoot $scriptName
-    if ($scriptName -in @("setup_native.ps1", "test_dotnet.ps1", "test_ipc.ps1")) {
+    if ($scriptName -in @("setup_native.ps1", "test_ipc.ps1")) {
+        & $scriptPath `
+            -CommonFeed $CommonFeed `
+            -CommonMajesticCefInventoryPackage $CommonMajesticCefInventoryPackage
+    }
+    elseif ($scriptName -eq "test_dotnet.ps1") {
         & $scriptPath -CommonFeed $CommonFeed
     }
     else {

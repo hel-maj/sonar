@@ -1,39 +1,41 @@
 # Fishing inventory open-state: admission и characterization
 
-Статус: runtime scope и fail-closed recovery реализованы; shipping binding для
-текущего GTA build отсутствует; manual characterization tool принят offline и
-ещё не запускался.
+Статус: production runtime переведён на exact-pinned Common CEF facade;
+исторический Fishing binding и manual tool сохранены только как development
+characterization, но больше не являются production authority.
 
 ## Runtime contract
 
 Inventory open-state отделён от reeling memory. `production_frame_observer`
-запрашивает `memory_capture_scope::inventory_state`, поэтому открытие/закрытие
-инвентаря не зависит от active fish, replay list или стадии рыбалки. Клавиша
-продуктового episode остаётся `TAB`.
+делает один coarse runtime observation. При positive reeling trigger он
+запрашивает только latency-critical reeling evidence; на остальных кадрах
+запрашивает inventory. Поэтому cold inventory discovery не блокирует A/D
+control, а открытие/закрытие инвентаря не зависит от active fish или replay
+list. Клавиша продуктового episode остаётся `TAB`.
 
-Путь состояния:
+Production путь состояния:
 
 ```text
-exact GTA image hash + process generation
-  -> optional product-owned embedded_inventory_binding
-  -> bounded cold signature discovery
-  -> generation-pinned cached binding
-  -> masked-signature revalidation on every plan
-  -> one automatic bounded rediscovery after drift
-  -> typed failure cooldown before another cold scan
-  -> coherent candidate reads
-  -> Common unknown / closed / open normalizer
+same-frame exact GTA process generation
+  -> one SonarMajesticCefInventory 0.1.0 observe()
+  -> Common exact client admission + bounded CEF/V8 discovery
+  -> Common coherent double-read + generation-pinned hot binding
+  -> Fishing unknown-only exponential retry (250 ms .. 4 s cap)
+  -> aggregate unknown / closed / open
 ```
 
 Screenshot и OCR владеют только геометрией item/context. Они не могут заменить
-memory state. Если exact profile не содержит binding, normal runtime возвращает
-typed `inventory_binding_failure::profile_unavailable` и stable reason
-`memory_inventory_binding_unavailable`. Actual current hash ещё не admitted и
-fail-closed раньше с тем же typed failure и reason
-`memory_game_build_unsupported`. В обоих случаях UI/episode получает `unknown`,
-а не `closed`.
+memory state. Обычная shipping composition передаёт Common `denied`, оставляет
+observation disabled и получает typed `production_inventory_source_disabled`.
+Compile-isolated Local Access явно разрешает только
+`majestic-client-1.20.7-candidate-v1` и closed bootstrap. Любая причина Common,
+inconsistent state либо GTA generation drift даёт `unknown`, а не `closed`.
+Known state не кэшируется; после unknown следующий cold attempt throttled, а
+смена generation reset-ит facade и retry немедленно.
 
-Admitted binding обязан фиксировать exact image profile, диапазон и byte budget
+Ниже зафиксирован только historical/development characterization contract; он
+не подключён к production adapter. Такой binding обязан фиксировать exact image
+profile, диапазон и byte budget
 сканирования, максимум region/hit count, masked pattern, exact slot stride/count,
 signal offsets и vote/confidence policy. Runtime дополнительно ограничивает
 cold scan 1 GiB, region 64 MiB, enumeration 32 768 regions, pattern 64 KiB и
@@ -43,11 +45,11 @@ Failed cold discovery не повторяется в каждом frame: state m
 bounded 5-second cooldown, сохраняя тот же typed blocker, и затем допускает
 новую попытку.
 
-Shipping registry schema `2` явно кодирует отсутствие inventory binding как
-`-`. Loose JSON, абсолютный адрес, wildcard build hash или импорт Hunting CEF
-address/layout не допускаются.
+Shipping registry schema `2` продолжает кодировать старый Fishing binding как
+`-`, но production adapter больше его не читает. Loose JSON, абсолютный адрес,
+wildcard build hash или копия Common/Hunting CEF verifier/layout не допускаются.
 
-## Почему legacy binding не promoted
+## Почему legacy binding остался только characterization
 
 Исторический Python detector действительно различал bytes `closed/open` через
 weighted vote, но сохранённый anchor не является production binding:
@@ -96,6 +98,14 @@ review, immutable profile fixture/hash pin, synthetic discovery/recovery tests
 toggle-run нужен только если первый receipt fail-closed или build изменился.
 
 ## Build/release isolation
+
+Shipping Engine линкует тот же immutable static package, но его compile-time
+composition остаётся disabled/denied до promotion shipping profile. Local
+Access включает только exact candidate; runtime setting не может изменить
+admission. `scripts/setup_native.ps1`, `scripts/test_ipc.ps1` и release builder
+проверяют exact version, manifest hash
+`B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8` и каждый
+manifest payload. Подробнее: [ADR-0004](ADR-0004-COMMON-CEF-INVENTORY-OPEN.md).
 
 Tool собирается только при OFF-by-default
 `SONAR_FISHING_BUILD_PROFILE_COMPATIBILITY_PROBE=ON`. Source/import CTest

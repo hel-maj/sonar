@@ -1491,36 +1491,42 @@ The Windows adapter reuses frozen Common `readonly_process` for least-rights
 process access, region enumeration and exact memory reads. Fishing adds only
 product image-hash, bounded scan and decoder/profile policy; it contains no
 local `OpenProcess`, `ReadProcessMemory` or process-enumeration clone. Normal
-Engine instantiates this adapter. Reeling and inventory-state are explicit
-separate scopes, so an inventory query no longer requires active fish.
+Engine instantiates this adapter for reeling only. Production coarse routing
+never calls inventory discovery on a positive same-frame reeling trigger. Other
+frames call the exact-pinned Common `SonarMajesticCefInventory 0.1.0` facade
+once; Common owns CEF/V8 discovery, exact client admission, coherent double-read
+and hot binding.
 
-Inventory binding state machine validates a cached masked signature on every
-plan and performs one bounded cold rediscovery after drift. Incomplete scan,
-ambiguous run or generation change stays fail-closed; failed cold discovery is
-throttled for five seconds instead of rescanning every frame. Registry schema `2`
-currently encodes no admitted inventory binding. The actual current hash first
-returns `memory_game_build_unsupported`; the sole older admitted profile returns
-`memory_inventory_binding_unavailable`. Decoder parity is not falsely reported
-as production state authority.
+Fishing caches only `unknown` with monotonic exponential retry from 250 ms to a
+4 s cap. It never caches known open/closed, and GTA generation change resets
+facade/backoff before an immediate fresh call. Ordinary shipping keeps the
+non-shipping profile denied/inert; compile-isolated Local Access admits only
+`majestic-client-1.20.7-candidate-v1`. The old Fishing masked-signature resolver
+remains development characterization and cannot become production authority.
 
-The five-row language-neutral fixture
+The six-row language-neutral fixture
 `tests/fixtures/memory_observation/e11-v1.tsv` has SHA-256
-`ACB3FA6C1D9E7983344E53906E748DB9C7EED67E07695013A7D77166FF6DE8DD`.
+`2DA22D2FEE1663BACC8429D0561A4502A9D375DA9B1A31A8D479B2475337CB65`.
 MSVC v143 `/W4 /WX` focused CTest covers decoder plus inventory discovery,
 cached-plan reuse, automatic relocation recovery, absent-profile and ambiguous
-signature blockers. Negative coverage includes image/profile and process-generation drift,
-short/oversize reads, unknown fish hash, ambiguous inventory vote, invalid
-UTF-8 and sequence replay. Five equal Release decoder benchmark runs measured
+signature blockers. Aggregate regressions cover the historical confirmed-fish
+`1 -> 0` completion sample, commit only after a coherent successful capture,
+preservation across one failed-read retry, no cold inventory discovery on the
+reeling path and full rediscovery after process-generation change. Negative coverage includes
+image/profile drift, short/oversize reads, unknown fish hash, ambiguous
+inventory vote, invalid UTF-8 and sequence replay. Five equal Release decoder benchmark runs measured
 a median `79.573 ms` for 250,000 aggregates (`318.290 ns` each), with no IPC.
 No hotspot was demonstrated, so no semantic optimization followed parity.
 
-E11 remains partial until the prepared non-shipping C++ characterization tool
-collects one controlled current-build `CLOSED/OPEN` sequence and offline review
-promotes a unique immutable binding. The tool never presses `TAB`, activates a
-window or captures a frame. Player-status/chat and live target-loss remain
-separate gates. The full boundary is
+E11 remains partial: Local Access Common candidate needs separate read-only/live
+acceptance, while ordinary shipping needs an independently evidenced Common
+profile promotion. The historical characterization tool never presses `TAB`,
+activates a window or captures a frame and does not modify runtime admission.
+Player-status/chat and live target-loss remain separate gates. The full boundary is
 [MEMORY_OBSERVATION_NATIVE.md](MEMORY_OBSERVATION_NATIVE.md) and
-[inventory characterization](INVENTORY_STATE_CHARACTERIZATION.md).
+[inventory characterization](INVENTORY_STATE_CHARACTERIZATION.md). The
+field-by-field historical source boundary is recorded in
+[RUNTIME_OBSERVATION_PARITY.md](RUNTIME_OBSERVATION_PARITY.md).
 
 The first guarded read-only pass on 2026-08-24 confirmed target, executable
 hash-read and capture, but the current GTA executable did not match the sole
@@ -1728,7 +1734,7 @@ Producer, projection, planner and individual transport failures cannot stop
 Host or fishing runtime. Event-pump failure does withdraw the whole generation
 and enters the same indefinite capped recovery from Phase 27.
 
-Focused acceptance is native CTest 45/45, managed IPC 7/7 and WPF/managed
+Focused acceptance is native CTest 48/48, managed IPC 7/7 and WPF/managed
 209/209. It covers bounded native order/no-replay, typed mapping, generation
 dedupe, delivery failure isolation, inventory-low edge behavior, event-pump
 recovery and local-access UI. No GTA, capture, focus, input, credentials or

@@ -7,6 +7,7 @@
 #include <string>
 
 #include "sonar/fishing/automation_adapters/frame_semantics.h"
+#include "sonar/fishing/automation_adapters/common_inventory_open.h"
 #include "sonar/fishing/automation_adapters/runtime_policy.h"
 #include "sonar/fishing/fishing_episode/fishing_episode.h"
 #include "sonar/fishing/runtime_platform/automation_lease.h"
@@ -21,48 +22,55 @@ struct memory_snapshot_result final {
   std::string reason;
 };
 
-enum class memory_capture_scope : std::uint8_t {
-  reeling,
-  inventory_state,
-};
-
 class fishing_memory_source {
  public:
   virtual ~fishing_memory_source() = default;
+  // One in-Engine aggregate operation. A positive reeling stage requests only
+  // latency-critical reeling evidence; other frames request inventory. No
+  // field is exposed as a separate Host/IPC call.
   [[nodiscard]] virtual memory_snapshot_result capture(
-      memory_capture_scope scope,
       std::uint64_t sequence,
       std::uint64_t captured_at_steady_ns,
-      const sonar::platform::windows::process_generation& game_generation)
+      const sonar::platform::windows::process_generation& game_generation,
+      bool reeling_stage_visible)
       noexcept = 0;
 };
 
 class unavailable_fishing_memory_source final : public fishing_memory_source {
  public:
   [[nodiscard]] memory_snapshot_result capture(
-      memory_capture_scope scope,
       std::uint64_t sequence,
       std::uint64_t captured_at_steady_ns,
-      const sonar::platform::windows::process_generation& game_generation)
+      const sonar::platform::windows::process_generation& game_generation,
+      bool reeling_stage_visible)
       noexcept override;
 };
 
 class resolved_fishing_memory_source final : public fishing_memory_source {
  public:
   explicit resolved_fishing_memory_source(
-      std::unique_ptr<memory_observation::memory_connector> connector);
+      std::unique_ptr<memory_observation::memory_connector> connector,
+      std::unique_ptr<inventory_open_source> inventory_open,
+      std::unique_ptr<inventory_retry_clock> retry_clock);
 
   [[nodiscard]] memory_snapshot_result capture(
-      memory_capture_scope scope,
       std::uint64_t sequence,
       std::uint64_t captured_at_steady_ns,
-      const sonar::platform::windows::process_generation& game_generation)
+      const sonar::platform::windows::process_generation& game_generation,
+      bool reeling_stage_visible)
       noexcept override;
 
  private:
   std::unique_ptr<memory_observation::memory_connector> connector_;
   std::unique_ptr<memory_observation::memory_capture_plan_resolver> resolver_;
   std::unique_ptr<memory_observation::memory_observer> observer_;
+  std::unique_ptr<inventory_open_source> inventory_open_;
+  std::optional<sonar::platform::windows::process_generation>
+      inventory_game_generation_;
+  std::unique_ptr<inventory_retry_clock> retry_clock_;
+  std::uint32_t inventory_unknown_streak_{};
+  std::uint64_t inventory_retry_not_before_ns_{};
+  std::string inventory_unknown_reason_;
 };
 
 class frame_fishing_observer final

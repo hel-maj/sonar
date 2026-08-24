@@ -358,6 +358,70 @@ function Read-FishingBundleManifest(
     return $manifest
 }
 
+function Assert-FishingLaunchBundleLayout([string]$BundleDirectory) {
+    $bundle = Get-FishingCanonicalPath $BundleDirectory
+    if (-not (Test-Path -LiteralPath $bundle -PathType Container)) {
+        throw "developer_bundle_missing: $bundle"
+    }
+
+    $expectedFiles = @("Sonar.exe", "Sonar.Engine.exe", "bundle-manifest.json")
+    $expectedDirectories = @("config", "logs")
+    $rootEntries = @(Get-ChildItem -LiteralPath $bundle -Force)
+    foreach ($entry in $rootEntries) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "developer_bundle_launch_layout_reparse_point: $($entry.Name)"
+        }
+    }
+    $actualFiles = @($rootEntries | Where-Object { -not $_.PSIsContainer } |
+        ForEach-Object Name | Sort-Object)
+    $actualDirectories = @($rootEntries | Where-Object { $_.PSIsContainer } |
+        ForEach-Object Name | Sort-Object)
+    if (($actualFiles -join "`n") -cne (($expectedFiles | Sort-Object) -join "`n") -or
+        ($actualDirectories -join "`n") -cne
+            (($expectedDirectories | Sort-Object) -join "`n")) {
+        throw "developer_bundle_launch_layout_invalid"
+    }
+
+    $configEntries = @(Get-ChildItem -LiteralPath (Join-Path $bundle "config") -Force)
+    if ($configEntries.Count -gt 1 -or
+        ($configEntries.Count -eq 1 -and
+         ($configEntries[0].PSIsContainer -or
+          $configEntries[0].Name -cne "state.dat" -or
+          ($configEntries[0].Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
+        throw "developer_bundle_launch_config_invalid"
+    }
+
+    $logEntries = @(Get-ChildItem -LiteralPath (Join-Path $bundle "logs") -Force)
+    foreach ($entry in $logEntries) {
+        if ($entry.PSIsContainer -or
+            $entry.Extension -cne ".log" -or
+            ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "developer_bundle_launch_logs_invalid"
+        }
+    }
+}
+
+function Assert-FishingDeveloperFullAccessLaunchAdmission(
+    [string]$ProductRoot,
+    [string]$BundleDirectory) {
+    $manifest = Read-FishingBundleManifest `
+        $ProductRoot `
+        $BundleDirectory `
+        "developer-full-access-unsigned" `
+        -AllowDeveloperFullAccess
+    if ($manifest.schemaVersion -ne 2 -or
+        $manifest.developerFullAccess -ne $true -or
+        $manifest.authenticode.required -ne $false) {
+        throw "developer_bundle_authority_contract_invalid"
+    }
+    if ($manifest.determinism.verified -ne $true) {
+        throw "developer_bundle_determinism_unverified"
+    }
+
+    Assert-FishingLaunchBundleLayout $BundleDirectory
+    Assert-FishingDesktopRuntime
+}
+
 function Assert-FishingDesktopRuntime {
     $runtimes = @(& dotnet --list-runtimes)
     if ($LASTEXITCODE -ne 0 -or

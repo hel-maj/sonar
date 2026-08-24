@@ -38,6 +38,16 @@ struct production_catch_observation final {
   std::string error;
 };
 
+namespace detail {
+
+// A completed detector pass with no trigger is a proven inactive mini-game.
+// Detector failure is unknown, and even a populated defensive DTO must not
+// turn the sentinel `none` stage into active merely because it has a value.
+[[nodiscard]] std::optional<bool> derive_fishing_minigame_active(
+    const stage_detection::stage_detection_result& detection) noexcept;
+
+}  // namespace detail
+
 // One capture owner projects the same client frame into catch, item/context
 // geometry and maintenance facts. Inventory openness is authoritative only
 // when the coherent memory snapshot normalizes to open/closed; OCR remains an

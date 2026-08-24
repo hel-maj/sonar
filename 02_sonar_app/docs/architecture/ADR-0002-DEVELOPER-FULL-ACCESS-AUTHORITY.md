@@ -70,10 +70,14 @@ Builder делает два clean deterministic build и по умолчанию
 `build/developer-full-access/bundle` с версией `1.0.0-local`. Verify проверяет exact manifest, hashes,
 обязательный `determinism.verified: true`, двухфайловый dependency closure,
 no-Python ownership и отсутствие секретов.
-Run всегда сначала выполняет verify, затем передает единственный явный
-developer argument. Launcher совместим с Windows PowerShell 5.1 и имеет
-`-VerifyOnly`, чтобы regression-проверка могла подтвердить manifest, binary
-pair и launch arguments без открытия UI.
+Run всегда сначала выполняет быстрый launch admission, затем передает
+единственный явный developer argument. Admission проверяет schema/channel,
+local-access marker, canonical manifest, hashes/build IDs пары EXE,
+deterministic marker, строгий bundle allowlist и Desktop Runtime, но не повторяет
+offline suites, repository-wide no-Python scan, dependency closure или secret
+scan. Полный verify остаётся отдельной явной командой. Launcher совместим с
+Windows PowerShell 5.1 и имеет `-VerifyOnly`, чтобы regression-проверка могла
+подтвердить admission и launch arguments без открытия UI.
 
 Product presentation не показывает этот internal mode. License page отображает
 активный `Локальный доступ`, скрывает key activation и заменяет raw feature IDs

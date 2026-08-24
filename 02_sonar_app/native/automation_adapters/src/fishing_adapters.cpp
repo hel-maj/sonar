@@ -1,5 +1,9 @@
 #include "sonar/fishing/automation_adapters/fishing_adapters.h"
 
+#include "memory_capture_retry.h"
+
+#include <algorithm>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -128,21 +132,25 @@ class guarded_fishing_mutation_session final
 }  // namespace
 
 memory_snapshot_result unavailable_fishing_memory_source::capture(
-    const memory_capture_scope scope,
     const std::uint64_t sequence,
     const std::uint64_t captured_at_steady_ns,
-    const sonar::platform::windows::process_generation& game_generation)
+    const sonar::platform::windows::process_generation& game_generation,
+    const bool reeling_stage_visible)
     noexcept {
-  static_cast<void>(scope);
   static_cast<void>(sequence);
   static_cast<void>(captured_at_steady_ns);
   static_cast<void>(game_generation);
+  static_cast<void>(reeling_stage_visible);
   return {.reason = "production_memory_profile_unavailable"};
 }
 
 resolved_fishing_memory_source::resolved_fishing_memory_source(
-    std::unique_ptr<memory_observation::memory_connector> connector)
-    : connector_(std::move(connector)) {
+    std::unique_ptr<memory_observation::memory_connector> connector,
+    std::unique_ptr<inventory_open_source> inventory_open,
+    std::unique_ptr<inventory_retry_clock> retry_clock)
+    : connector_(std::move(connector)),
+      inventory_open_(std::move(inventory_open)),
+      retry_clock_(std::move(retry_clock)) {
   if (connector_) {
     resolver_ = std::make_unique<
         memory_observation::memory_capture_plan_resolver>(*connector_);
@@ -152,53 +160,75 @@ resolved_fishing_memory_source::resolved_fishing_memory_source(
 }
 
 memory_snapshot_result resolved_fishing_memory_source::capture(
-    const memory_capture_scope scope,
     const std::uint64_t sequence,
     const std::uint64_t captured_at_steady_ns,
-    const sonar::platform::windows::process_generation& game_generation)
+    const sonar::platform::windows::process_generation& game_generation,
+    const bool reeling_stage_visible)
     noexcept {
+  if (!reeling_stage_visible) {
+    if (!inventory_open_ || !retry_clock_) {
+      return {.reason = "production_inventory_source_unavailable"};
+    }
+    if (inventory_game_generation_.has_value() &&
+        *inventory_game_generation_ != game_generation) {
+      inventory_open_->reset();
+      inventory_unknown_streak_ = 0U;
+      inventory_retry_not_before_ns_ = 0U;
+      inventory_unknown_reason_.clear();
+    }
+    inventory_game_generation_ = game_generation;
+    const auto now_ns = retry_clock_->now_steady_ns();
+    inventory_open_source_result observed;
+    if (inventory_retry_not_before_ns_ != 0U &&
+        now_ns < inventory_retry_not_before_ns_) {
+      observed.reason = inventory_unknown_reason_;
+    } else {
+      observed = inventory_open_->capture(game_generation);
+      if (observed.state ==
+          sonar::platform::inventory::observed_state::unknown) {
+        inventory_unknown_streak_ = std::min(
+            inventory_unknown_streak_ + 1U, 5U);
+        constexpr std::uint64_t base_delay_ns = 250'000'000ULL;
+        constexpr std::uint64_t maximum_delay_ns = 4'000'000'000ULL;
+        const auto delay_ns = std::min(
+            base_delay_ns << (inventory_unknown_streak_ - 1U),
+            maximum_delay_ns);
+        inventory_retry_not_before_ns_ =
+            now_ns > std::numeric_limits<std::uint64_t>::max() - delay_ns
+            ? std::numeric_limits<std::uint64_t>::max()
+            : now_ns + delay_ns;
+        inventory_unknown_reason_ = observed.reason.empty()
+            ? "production_inventory_state_unknown"
+            : observed.reason;
+        observed.reason = inventory_unknown_reason_;
+      } else {
+        inventory_unknown_streak_ = 0U;
+        inventory_retry_not_before_ns_ = 0U;
+        inventory_unknown_reason_.clear();
+      }
+    }
+    memory_observation::coherent_memory_snapshot snapshot{
+        .sequence = sequence,
+        .captured_at_steady_ns = captured_at_steady_ns,
+        .profile_id = std::string(common_inventory_open_package_version),
+        .profile_revision = 1U,
+        .game_generation = game_generation,
+        .inventory_open_state = observed.state,
+    };
+    return {
+        .snapshot = std::move(snapshot),
+        .reason = std::move(observed.reason),
+    };
+  }
   if (!resolver_ || !observer_) {
     return {.reason = "production_memory_connector_unavailable"};
   }
-  std::optional<memory_observation::memory_observation_profile> profile;
-  std::optional<memory_observation::capture_plan> plan;
-  std::string resolution_reason;
-  switch (scope) {
-    case memory_capture_scope::reeling: {
-      auto resolved = resolver_->resolve_reeling(
-          sequence, captured_at_steady_ns, game_generation);
-      if (resolved.ready()) {
-        profile = std::move(resolved.profile);
-        plan = std::move(resolved.plan);
-      } else {
-        resolution_reason = std::move(resolved.reason);
-      }
-      break;
-    }
-    case memory_capture_scope::inventory_state: {
-      auto resolved = resolver_->resolve_inventory(
-          sequence, captured_at_steady_ns, game_generation);
-      if (resolved.ready()) {
-        profile = std::move(resolved.profile);
-        plan = std::move(resolved.plan);
-      } else {
-        resolution_reason = std::move(resolved.reason);
-      }
-      break;
-    }
-  }
-  if (!profile.has_value() || !plan.has_value()) {
-    return {.reason = resolution_reason.empty()
-        ? "production_memory_profile_unavailable"
-        : std::move(resolution_reason)};
-  }
-  auto captured = observer_->capture(*profile, *plan);
-  if (!captured.ready()) {
-    return {.reason = captured.reason.empty()
-        ? "production_memory_capture_unavailable"
-        : std::move(captured.reason)};
-  }
-  return {.snapshot = std::move(captured.snapshot)};
+  return detail::capture_reeling_with_bounded_retry(
+      *resolver_,
+      *observer_,
+      sequence,
+      captured_at_steady_ns,
+      game_generation);
 }
 
 frame_fishing_observer::frame_fishing_observer(
@@ -251,12 +281,13 @@ frame_fishing_observer::observe(const std::stop_token stop_token) {
       stage.observation->stage ==
           stage_detection::observed_fishing_stage::reeling) {
     auto memory = memory_.capture(
-        memory_capture_scope::reeling,
         frame.sequence,
         frame.captured_at_steady_ns,
-        frame.target.process);
-    result.memory = std::move(memory.snapshot);
-    if (!result.memory.has_value()) {
+        frame.target.process,
+        true);
+    if (memory.snapshot.has_value() && memory.snapshot->reeling.has_value()) {
+      result.memory = std::move(memory.snapshot);
+    } else {
       result.error = memory.reason.empty()
           ? "fishing_memory_unavailable"
           : std::move(memory.reason);

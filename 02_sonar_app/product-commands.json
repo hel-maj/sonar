@@ -160,11 +160,11 @@
       "category": "fishing",
       "kind": "run",
       "title": "Запустить Fishing с локальным доступом",
-      "description": "Проверяет и запускает отдельную локальную сборку без лицензионного ограничения. Доступны только реально подключённые функции; игровые проверки остаются обязательными.",
+      "description": "Проверяет manifest, hashes и состав отдельной локальной сборки, затем запускает её без offline-тестов. Игровые проверки остаются обязательными.",
       "executable": "powershell.exe",
       "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\run_developer_full_access.ps1"],
       "workingDirectory": "{productRoot}",
-      "requiredPaths": ["{productRoot}\\scripts\\run_developer_full_access.ps1", "{productRoot}\\scripts\\verify_developer_full_access.ps1"],
+      "requiredPaths": ["{productRoot}\\scripts\\run_developer_full_access.ps1", "{productRoot}\\scripts\\admit_developer_full_access_launch.ps1"],
       "parameters": [
         {
           "id": "bundleDirectory",
