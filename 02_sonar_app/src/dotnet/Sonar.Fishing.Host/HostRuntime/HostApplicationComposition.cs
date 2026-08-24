@@ -12,6 +12,7 @@ using Sonar.Fishing.Host.StreamingPage;
 using Sonar.Fishing.Host.TelegramPage;
 using Sonar.Fishing.Host.AboutPage;
 using Sonar.Fishing.Host.Licensing;
+using Sonar.Fishing.Host.HostHotkeys;
 
 namespace Sonar.Fishing.Host.HostRuntime;
 
@@ -52,6 +53,7 @@ public sealed record HostApplicationComposition(
         IEngineHealthUseCase engineHealthUseCase,
         IFishingAutomationRuntime automationRuntime,
         ILicenseRuntimeLifecycle licenseRuntime,
+        IHostHotkeyRuntimeLifecycle hotkeyRuntime,
         Func<string, CancellationToken, Task<FishingLicenseActivationResult>> activateLicense,
         Action? clearDiagnostics = null)
     {
@@ -59,6 +61,7 @@ public sealed record HostApplicationComposition(
         ArgumentNullException.ThrowIfNull(engineHealthUseCase);
         ArgumentNullException.ThrowIfNull(automationRuntime);
         ArgumentNullException.ThrowIfNull(licenseRuntime);
+        ArgumentNullException.ThrowIfNull(hotkeyRuntime);
         ArgumentNullException.ThrowIfNull(activateLicense);
         return CreateCore(
             new HostRunOptions(HostRunMode.Production, null),
@@ -68,7 +71,8 @@ public sealed record HostApplicationComposition(
             activateLicense,
             engineHealthUseCase,
             licenseRuntime,
-            automationRuntime);
+            automationRuntime,
+            hotkeyRuntime);
     }
 
     private static HostApplicationComposition CreateCore(
@@ -79,7 +83,8 @@ public sealed record HostApplicationComposition(
         Func<string, CancellationToken, Task<FishingLicenseActivationResult>>? activateLicense = null,
         IEngineHealthUseCase? productionEngineHealth = null,
         ILicenseRuntimeLifecycle? licenseRuntime = null,
-        IFishingAutomationRuntime? automationRuntime = null)
+        IFishingAutomationRuntime? automationRuntime = null,
+        IHostHotkeyRuntimeLifecycle? hotkeyRuntime = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(state);
@@ -165,7 +170,12 @@ public sealed record HostApplicationComposition(
                 coordinator.Current.Secrets.TelegramBotToken);
             return Task.CompletedTask;
         }
-        var telegramProduct = new UnavailableTelegramProductUseCases();
+        ITelegramProductUseCases telegramProduct = options.Mode == HostRunMode.Production
+            ? new FishingTelegramProductUseCases(
+                automationRuntime ?? throw new InvalidOperationException(
+                    "production_automation_runtime_missing"),
+                () => coordinator?.Current ?? state)
+            : new UnavailableTelegramProductUseCases();
         var telegramNetwork = new TelegramNetworkRunner(
             ReadTelegramSettings,
             SaveTelegramSettingsAsync,
@@ -222,12 +232,18 @@ public sealed record HostApplicationComposition(
 
         return new HostApplicationComposition(
             shell,
-            new HostLifecycleCoordinator(engineHealth, telegramRuntime, licenseRuntime),
+            new HostLifecycleCoordinator(
+                engineHealth,
+                telegramRuntime,
+                licenseRuntime,
+                hotkeyRuntime),
             state);
     }
 
     private static string RequireEngineExecutable(HostRunOptions options) =>
         string.IsNullOrWhiteSpace(options.EngineExecutable)
-            ? throw new HostRunOptionsException("Требуется путь к автономному Engine.")
+            ? throw new HostRunOptionsException(
+                "Не удалось открыть выбранный режим. Запустите Sonar Fishing " +
+                "обычным способом.")
             : options.EngineExecutable;
 }

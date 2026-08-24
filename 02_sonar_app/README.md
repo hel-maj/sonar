@@ -1,6 +1,6 @@
 # Sonar Fishing
 
-Sonar Fishing переносится на целевую архитектуру из двух процессов:
+Sonar Fishing работает на целевой native-архитектуре из двух процессов:
 
 ```text
 Sonar.exe          WPF / C# / .NET 10
@@ -11,15 +11,17 @@ Product-owned исходники, тестовые entrypoints и build graph б
 Python, PySide6, Nuitka, wheelhouse или legacy launcher. Историческое поведение
 сохранено только в language-neutral fixtures и архитектурных документах.
 
-Текущая WPF/C++ версия запускается в безопасном offline режиме. Production
-package и smoke остаются fail-closed, пока machine-readable authority manifest
-не подтвердит полный cutover и release pipeline. Это не мешает собирать,
-тестировать и запускать offline Host/Engine без GTA, capture, input и сети.
+Обычный product entrypoint — `Sonar.exe` без аргументов. Он создаёт production
+Host/Engine composition; запуск рыбалки остаётся fail-closed до действующей
+подписанной лицензии, согласованного окна игры и всех runtime-safety gates.
+`--demo` и `--offline-engine <path>` сохранены только как явные режимы разработки.
 
 ## Структура
 
 - `src/dotnet/Sonar.Fishing.Host` - WPF Host, MVVM, настройки, licensing,
-  Telegram, streaming, update и process supervision.
+  глобальная start/stop hotkey, Telegram и process supervision. Streaming и
+  general-update cores остаются fail-closed до перечисленных production
+  prerequisites.
 - `native` - C++ Engine, detectors, memory observations, state machines,
   guarded mutation boundaries и offline IPC executable.
 - `contracts/ipc/v1` - versioned coarse Host/Engine contract.
@@ -29,7 +31,7 @@ package и smoke остаются fail-closed, пока machine-readable authori
 - `scripts` - PowerShell entrypoints целевой версии.
 - `docs/architecture` - ADR, migration evidence и production cutover checklist.
 
-Общие IPC, process supervision, licensing verification и WPF design system
+Общие IPC, process supervision, licensing verification и `Sonar.UI.Wpf 0.2.18`
 потребляются как точные immutable Sonar Common packages. Исходники Common в
 Fishing не копируются.
 
@@ -51,6 +53,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
 native CTest и typed IPC integration. Эквивалентный явный entrypoint:
 `scripts/test_native.ps1`.
 
+Native gate собирает generated Visual Studio graph одним `ALL_BUILD` с
+ограниченным parallelism. После configure скрипт проверяет, что каждый
+обязательный target существует в solution и является уникальным прямым
+`ProjectReference` в `ALL_BUILD.vcxproj`; обязательные имена CTest также должны
+быть уникальны и присутствовать, а дополнительные найденные тесты разрешены и
+тоже запускаются. Перед build удаляются только точные шесть benchmark EXE и два
+Engine EXE внутри проверенного build root, после чего `ALL_BUILD` обязан создать
+их заново. Старый бинарник не может подменить пересборку или успешный тест.
+
 Сборка текущих Host и Engine:
 
 ```powershell
@@ -66,11 +77,71 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_native.ps1 -No
 Команда не подключается к GTA и не разрешает capture, physical input или
 network adapters.
 
+Одноразовая read-only проверка реального observation path выполняется только
+после свежего явного подтверждения:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_live_observation_preflight.ps1 -ConfirmedLiveReadOnly
+```
+
+Она не запускает GTA и не отправляет input: проверяются exact target/focus,
+supported build profile, один frame + detector и один bounded memory aggregate.
+В stdout выходит только coarse readiness JSON. Полный протокол и причины
+отказа описаны в
+[live observation preflight](docs/architecture/LIVE_OBSERVATION_PREFLIGHT.md).
+
+Если preflight вернул `game_build_unsupported`, новый hash не подставляется в
+production автоматически. Для одной отдельной evidence-проверки существует
+diagnostic-only команда:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_build_profile_compatibility_probe.ps1 -ConfirmedLiveBuildProfileCompatibility
+```
+
+Она требует foreground active-reeling state, выполняется без кадра и ввода и
+только проверяет frozen layout как in-memory candidate. Даже успешный результат
+не добавляет production profile. Точный контракт описан в
+[build-profile compatibility probe](docs/architecture/BUILD_PROFILE_COMPATIBILITY_PROBE.md).
+
+## Обычный запуск готовой версии
+
+Сначала соберите локальный двухфайловый bundle, затем запустите его без
+development-аргументов:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package_native.ps1 -DevelopmentUnsigned -Version 0.0.0-dev
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_product.ps1 -BundleDirectory .\build\release\bundle
+```
+
+`run_product.ps1` проверяет canonical manifest, hashes и наличие .NET Desktop
+Runtime 10 x64, после чего запускает `Sonar.exe` с пустым списком аргументов.
+Это обычная версия приложения, а не demo/offline режим. Наличие команды запуска
+не обходит лицензию, startup availability, target, foreground или input-safety
+проверки.
+
+Точная матрица того, что работает в normal launch, а что остаётся выключенным
+до конкретного внешнего/архитектурного prerequisite, находится в
+[production cutover checklist](docs/architecture/PRODUCTION_CUTOVER_CHECKLIST.md#матрица-доступных-функций-normal-launch).
+Сопоставление каждой исторической пользовательской функции с native owner и
+runtime dependency находится в
+[product function audit](docs/architecture/PRODUCT_FUNCTION_AUDIT.md).
+
+Устойчивость именно готового bundle можно проверить без отправки команд
+автоматизации:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_product_lifecycle.ps1 -DevelopmentUnsigned -BundleDirectory .\build\release\bundle -DurationSeconds 30
+```
+
+Проверка запускает Host без аргументов, дожидается production Engine, наблюдает
+оба процесса и закрывает Host штатно. Она использует реальный startup endpoint,
+поэтому его signed admission остаётся обязательным.
+
 ## Package и smoke
 
-Production-команды fail closed, пока machine-readable authority manifest не
-подтвердит полный cutover. После admission package выполняет два clean build,
-сверяет unsigned hashes и требует Authenticode обоих EXE:
+Native cutover отражён в machine-readable authority manifest. Подписанный
+package выполняет два clean build, сверяет unsigned hashes и требует
+Authenticode обоих EXE:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package_native.ps1 -Version 1.2.3
@@ -84,6 +155,24 @@ authority claim:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package_native.ps1 -DevelopmentUnsigned -Version 0.0.0-dev
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke_native.ps1 -DevelopmentUnsigned -BundleDirectory .\build\release\bundle
 ```
+
+Smoke по умолчанию выполняет три независимых network-inert demo start/exit и
+три packaged production Engine crash/replacement цикла. Он не отправляет
+команду рыбалки, не захватывает GTA и после каждого цикла проверяет отсутствие
+процессов из изолированной копии.
+
+Локальную development-unsigned установку, обновление, откат или interrupted
+recovery выполняет только product-owned after-exit executor:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\invoke_local_release_maintenance.ps1 -Action Install -SourceBundle .\build\release\bundle -InstallDirectory .\build\sonar-fishing-local -DevelopmentUnsigned
+```
+
+Для `Update` и `Rollback` нужна новая пустая `-BackupDirectory`; `-DryRun`
+проверяет точные source/target/backup без изменения файлов. One-time import
+старой лицензии выполняется действием `ImportLicense`: переносится только ключ
+в DPAPI `state.dat`, а неподписанные id/role/features/timestamps игнорируются и
+должны быть повторно подтверждены backend.
 
 Перед build/launch обе команды проверяют repository-wide source ownership.
 Package stage содержит пустые `config/` и `logs/`; после первого запуска
@@ -115,8 +204,14 @@ Loose DLL, source, wheel, interpreter, PDB, asset, database, dump и history
 - [Engine migration evidence](docs/architecture/ENGINE_MIGRATION.md)
 - [Production cutover checklist](docs/architecture/PRODUCTION_CUTOVER_CHECKLIST.md)
 - [Native release pipeline](docs/architecture/NATIVE_RELEASE_PIPELINE.md)
+- [Live observation preflight](docs/architecture/LIVE_OBSERVATION_PREFLIGHT.md)
+- [Build-profile compatibility probe](docs/architecture/BUILD_PROFILE_COMPATIBILITY_PROBE.md)
+- [Product function audit](docs/architecture/PRODUCT_FUNCTION_AUDIT.md)
 - [UI parity ledger](docs/architecture/UI_PARITY_LEDGER.md)
 - [Code index](CODE_INDEX.md)
 
-Live GTA/window/capture/input/network проверки требуют отдельного readiness
-gate и не входят в обычные setup/test/build команды.
+Bounded read-only process/memory probe без требуемого user state, foreground,
+capture, overlay или input может выполняться автономно. Если требуется exact
+game state/foreground, capture/recording, interactive overlay или input, одна
+fresh readiness покрывает одну заранее подготовленную попытку; обычные
+setup/test/build команды остаются offline.

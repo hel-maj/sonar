@@ -1,4 +1,5 @@
 using Sonar.Fishing.Host.FishingSessionState;
+using Sonar.Fishing.Host.EngineIntegration;
 using Sonar.Fishing.Host.SettingsPersistence;
 using Sonar.Fishing.Host.StreamingPage;
 using Sonar.Fishing.Host.TelegramPage;
@@ -14,6 +15,7 @@ internal static class TelegramCommandDispatcherTests
         new("telegram_dispatcher_handles_unchanged_edit_and_falls_back_from_rejected_edit", EditFallbackMatches),
         new("telegram_runtime_reconfigures_transport_without_leaking_token", RuntimeLifecycleMatches),
         new("telegram_runtime_is_inert_when_network_policy_denies_it", RuntimeDeniedIsInert),
+        new("telegram_product_adapter_routes_only_native_fishing_capability", ProductAdapterRoutesFishing),
     ];
 
     private static void DispatchesUseCases()
@@ -179,9 +181,12 @@ internal static class TelegramCommandDispatcherTests
             "Token rotation did not replace the polling generation");
         coordinator.StopAsync().GetAwaiter().GetResult();
         coordinator.StopAsync().GetAwaiter().GetResult();
-        TestAssert.Throws<InvalidOperationException>(
-            () => coordinator.StartAsync().GetAwaiter().GetResult(),
-            "Terminally stopped Telegram runtime restarted");
+        coordinator.StartAsync().GetAwaiter().GetResult();
+        Task.Delay(50).GetAwaiter().GetResult();
+        TestAssert.Equal(
+            2,
+            Volatile.Read(ref starts),
+            "Terminally stopped Telegram runtime restarted or faulted on a late start");
 
         var description = new TelegramRuntimeConfiguration(true, true, settings, token).ToString();
         TestAssert.True(
@@ -233,6 +238,47 @@ internal static class TelegramCommandDispatcherTests
         coordinator.StartAsync().GetAwaiter().GetResult();
         coordinator.StopAsync().GetAwaiter().GetResult();
         TestAssert.Equal(0, Volatile.Read(ref starts), "Denied network policy started Telegram transport");
+    }
+
+    private static void ProductAdapterRoutesFishing()
+    {
+        var runtime = new FakeFishingAutomationRuntime();
+        var state = FishingHostState.Default with
+        {
+            License = FishingHostState.Default.License with
+            {
+                Features = ["fishing_bot", "statistics", "fishing_tackle", "stream"],
+            },
+        };
+        var product = new FishingTelegramProductUseCases(runtime, () => state);
+
+        var capabilities = product.Current.Capabilities;
+        TestAssert.True(capabilities.Fishing, "Native Telegram adapter hid fishing control");
+        TestAssert.True(capabilities.Statistics, "Native Telegram adapter hid statistics");
+        TestAssert.True(capabilities.Tackle, "Native Telegram adapter hid tackle data");
+        TestAssert.True(!capabilities.Streaming,
+            "Native Telegram adapter exposed an uncomposed streaming boundary");
+        TestAssert.True(!capabilities.PlayerStatus && !capabilities.GameControl &&
+            !capabilities.SystemControl,
+            "Native Telegram adapter exposed missing OS/game adapters");
+
+        var started = product.ExecuteAsync(
+            TelegramProductAction.ToggleFishing,
+            CancellationToken.None).GetAwaiter().GetResult();
+        TestAssert.True(started.Accepted && product.Current.Session.Running,
+            "Telegram start did not reach native Fishing runtime");
+        var stopped = product.ExecuteAsync(
+            TelegramProductAction.ToggleFishing,
+            CancellationToken.None).GetAwaiter().GetResult();
+        TestAssert.True(stopped.Accepted && !product.Current.Session.Running,
+            "Telegram stop did not reach native Fishing runtime");
+        var unsupported = product.ExecuteAsync(
+            TelegramProductAction.FocusGame,
+            CancellationToken.None).GetAwaiter().GetResult();
+        TestAssert.True(!unsupported.Accepted,
+            "Telegram adapter accepted a missing focus boundary");
+        TestAssert.Equal(1, runtime.StartCount, "Fishing start was not exactly once");
+        TestAssert.Equal(1, runtime.StopCount, "Fishing stop was not exactly once");
     }
 
     private static TelegramHostSettings EnabledSettings() => new(
@@ -292,6 +338,53 @@ internal static class TelegramCommandDispatcherTests
                     ? "🎮 Фокус возвращён игре"
                     : "✅ Команда принята"));
         }
+    }
+
+    private sealed class FakeFishingAutomationRuntime
+        : IFishingAutomationRuntime, IFishingAutomationStateSource
+    {
+        private FishingSessionStateSnapshot current = CopySession(
+            CreateProductState().Session,
+            running: false);
+
+        public event Action<FishingSessionStateSnapshot>? SessionStateChanged;
+
+        public bool HasActiveEntitlement => true;
+
+        public int StartCount { get; private set; }
+
+        public int StopCount { get; private set; }
+
+        public Task<FishingSessionStateSnapshot> StartAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StartCount++;
+            current = CopySession(current, running: true);
+            SessionStateChanged?.Invoke(current);
+            return Task.FromResult(current);
+        }
+
+        public Task<FishingSessionStateSnapshot> StopAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StopCount++;
+            current = CopySession(current, running: false);
+            SessionStateChanged?.Invoke(current);
+            return Task.FromResult(current);
+        }
+
+        private static FishingSessionStateSnapshot CopySession(
+            FishingSessionStateSnapshot source,
+            bool running) => new(
+                source.Revision + 1,
+                running,
+                stopping: false,
+                source.DetectedStage,
+                source.Totals,
+                source.TackleItems,
+                source.AcceptedSettingsRevision,
+                source.FishRows,
+                source.CatchSizes);
     }
 
     private sealed class FakeTelegramBotApi : ITelegramBotApi

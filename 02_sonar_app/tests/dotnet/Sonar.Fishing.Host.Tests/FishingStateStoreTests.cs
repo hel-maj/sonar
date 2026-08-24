@@ -22,6 +22,7 @@ internal static class FishingStateStoreTests
         new("dpapi_current_user_secret_round_trip", DpapiRoundTrip),
         new("legacy_json_settings_migrate_once_into_state_dat", LegacyJsonMigration),
         new("host_startup_owns_exact_config_state_dat_path", HostStartupOwnsExactStatePath),
+        new("host_startup_error_hides_internal_storage_path", HostStartupErrorHidesInternalPath),
         new("state_coordinator_serializes_custom_price_revision", CoordinatorSerializesCustomPrice),
         new("state_coordinator_serializes_stream_mode_revision", CoordinatorSerializesStreamMode),
     ];
@@ -223,6 +224,10 @@ internal static class FishingStateStoreTests
         TestAssert.True(!migrated.Telegram.Sounds.FocusLost, "Legacy focus sound policy changed");
         TestAssert.True(migrated.Telegram.Sounds.Meal, "Legacy default sound policy changed");
         TestAssert.Equal("license-legacy-secret", migrated.Secrets.LicenseKey, "License secret changed");
+        TestAssert.Equal(string.Empty, migrated.License.LicenseId,
+            "Unsigned legacy license id became current authority");
+        TestAssert.True(migrated.License.Features.Count == 0,
+            "Unsigned legacy feature list became current authority");
         TestAssert.True(File.Exists(store.StatePath), "state.dat was not created");
         TestAssert.True(
             !Directory.EnumerateFiles(sandbox.Path, "*_settings.json").Any(),
@@ -246,6 +251,29 @@ internal static class FishingStateStoreTests
                 .Select(System.IO.Path.GetFileName)
                 .SequenceEqual(["state.dat"], StringComparer.Ordinal),
             "Host startup created a loose config dependency");
+    }
+
+    private static void HostStartupErrorHidesInternalPath()
+    {
+        using var sandbox = new TemporaryDirectory();
+        var invalidApplicationRoot = System.IO.Path.Combine(sandbox.Path, "not-a-directory");
+        File.WriteAllText(invalidApplicationRoot, "occupied");
+
+        try
+        {
+            HostStateBootstrap.LoadForApplicationDirectory(invalidApplicationRoot);
+            throw new InvalidOperationException("Invalid application root was accepted");
+        }
+        catch (HostStateStartupException exception)
+        {
+            TestAssert.True(
+                !exception.Message.Contains("state.dat", StringComparison.OrdinalIgnoreCase) &&
+                !exception.Message.Contains("config", StringComparison.OrdinalIgnoreCase),
+                "Startup dialog exposed the internal settings path");
+            TestAssert.True(
+                exception.Message.Contains("настройки приложения", StringComparison.OrdinalIgnoreCase),
+                "Startup dialog did not identify the affected user data");
+        }
     }
 
     private static void CoordinatorSerializesCustomPrice()

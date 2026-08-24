@@ -71,7 +71,6 @@ if ($PSCmdlet.ParameterSetName -eq "OfflineEngine") {
     --configuration $Configuration `
     --no-build `
     --no-restore `
-    --nologo `
     "-p:CommonFeed=$CommonFeed" `
     "-p:SonarProtocExecutable=$ProtocExecutable" `
     "-p:RestorePackagesPath=$packageCache" `

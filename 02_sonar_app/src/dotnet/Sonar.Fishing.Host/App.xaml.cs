@@ -10,6 +10,8 @@ using Sonar.Fishing.Host.EngineIntegration.Supervision;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.SettingsPersistence;
 using Sonar.Fishing.Host.StartupGate;
+using Sonar.Fishing.Host.HostHotkeys;
+using Sonar.Fishing.Host.UpdateRuntime;
 
 namespace Sonar.Fishing.Host;
 
@@ -27,6 +29,16 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (ReleaseMaintenanceCommand.IsRequest(e.Args))
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var exitCode = await ReleaseMaintenanceCommand.ExecuteAsync(
+                    e.Args,
+                    CancellationToken.None)
+                .ConfigureAwait(true);
+            Shutdown(exitCode);
+            return;
+        }
         _diagnostics = TryOpenDiagnostics();
 
         try
@@ -64,7 +76,7 @@ public partial class App : Application
             TryLog(ProductDiagnosticLevel.Warning, "host.start.rejected", "run options invalid");
             MessageBox.Show(
                 exception.Message,
-                "Sonar Fishing - режим запуска",
+                "Не удалось запустить Sonar Fishing",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             Shutdown(2);
@@ -214,6 +226,11 @@ public partial class App : Application
         var automationRuntime = new EngineFishingAutomationRuntime(
             supervisor,
             () => state.Current.Fishing);
+        var hotkeyRuntime = new StartStopHotkeyRuntime(
+            new Win32HotkeyStateReader(),
+            () => state.Current.Fishing,
+            automationRuntime,
+            ProductWindowFocusProbe.IsActive);
         _licenseHttpClient = CreateLicenseHttpClient();
         var licenseService = new FishingLicenseActivationService(
             new KeygenLicenseApiClient(_licenseHttpClient),
@@ -228,6 +245,7 @@ public partial class App : Application
             healthUseCase,
             automationRuntime,
             _licenseRuntime,
+            hotkeyRuntime,
             _licenseRuntime.ActivateAsync,
             clearDiagnostics);
     }

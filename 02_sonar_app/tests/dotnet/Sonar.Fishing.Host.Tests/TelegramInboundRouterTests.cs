@@ -158,7 +158,11 @@ internal static class TelegramInboundRouterTests
     private static void MenuPlannerMatches()
     {
         var full = TelegramMenuPlanner.BuildMainMenu(
-            new TelegramMenuCapabilities(true, true, true, true),
+            new TelegramMenuCapabilities(
+                true, true, true, true,
+                PlayerStatus: true,
+                GameControl: true,
+                SystemControl: true),
             fishingRunning: false);
         TestAssert.Equal("🎣 Меню рыболовного бота", full.Text, "Main menu title changed");
         TestAssert.Equal(8, full.Rows.Count, "Full Telegram menu row count changed");
@@ -169,18 +173,25 @@ internal static class TelegramInboundRouterTests
             "Main menu first row changed");
         TestAssert.Equal("🚤 Запустить", full.Rows[4][0].Text, "Stopped menu action changed");
         var running = TelegramMenuPlanner.BuildMainMenu(
-            new TelegramMenuCapabilities(true, true, true, true),
+            new TelegramMenuCapabilities(
+                true, true, true, true,
+                PlayerStatus: true,
+                GameControl: true,
+                SystemControl: true),
             fishingRunning: true);
         TestAssert.Equal("🛑 Остановить", running.Rows[4][0].Text, "Running menu action changed");
 
         var limited = TelegramMenuPlanner.BuildMainMenu(
             new TelegramMenuCapabilities(false, false, false, false),
             fishingRunning: true);
-        TestAssert.Equal(6, limited.Rows.Count, "Limited Telegram menu row count changed");
+        TestAssert.Equal(1, limited.Rows.Count, "Limited Telegram menu exposed unavailable rows");
         TestAssert.True(
             limited.Rows.SelectMany(row => row).All(button =>
                 button.CallbackData is not "action:stats" and not "action:tackle" and
-                    not "menu:stream" and not "action:start_stop"),
+                    not "menu:stream" and not "action:start_stop" and
+                    not "action:player_status" and not "action:scan_player_status" and
+                    not "action:focus_game" and not "action:screen" and
+                    not "action:shutdown_pc" and not "action:shutdown_game"),
             "Limited menu exposed a gated action");
 
         var quality = TelegramMenuPlanner.BuildStreamQuality("720p");

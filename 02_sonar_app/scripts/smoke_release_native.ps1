@@ -2,7 +2,9 @@
 param(
     [string]$BundleDirectory = "",
     [switch]$DevelopmentUnsigned,
-    [switch]$StaticOnly
+    [switch]$StaticOnly,
+    [ValidateRange(2, 10)]
+    [int]$Cycles = 3
 )
 
 Set-StrictMode -Version Latest
@@ -88,6 +90,23 @@ function Invoke-PackagedEngineRecoveryProbe([string]$BundlePath) {
     }
 }
 
+function Assert-NoBundleProcessResidue([string]$BundlePath) {
+    $expected = @(
+        (Get-FishingCanonicalPath (Join-Path $BundlePath "Sonar.exe")),
+        (Get-FishingCanonicalPath (Join-Path $BundlePath "Sonar.Engine.exe"))
+    )
+    $residue = @(Get-CimInstance Win32_Process `
+        -Filter "Name = 'Sonar.exe' OR Name = 'Sonar.Engine.exe'" `
+        -ErrorAction Stop |
+        Where-Object {
+            $_.ExecutablePath -and
+            $expected -contains (Get-FishingCanonicalPath ([string]$_.ExecutablePath))
+        })
+    if ($residue.Count -ne 0) {
+        throw "release_process_residue_detected"
+    }
+}
+
 if (-not $DevelopmentUnsigned) {
     Assert-ProductionAuthority
 }
@@ -129,52 +148,61 @@ $tempDotnet = Join-Path $env:TEMP ".net"
 $tempBefore = Get-FishingDirectoryFingerprint $tempDotnet
 
 $hostProcess = $null
-try {
-    $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $hostPath
-    # The packaged Engine intentionally rejects offline diagnostic authority.
-    # Start the real Host in its network-inert demo composition, then exercise
-    # the actual production pair and crash recovery through the managed probe.
-    $startInfo.Arguments = "--demo"
-    $startInfo.WorkingDirectory = $smokeRoot
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-    $hostProcess = [Diagnostics.Process]::Start($startInfo)
-    if ($null -eq $hostProcess) {
-        throw "release_host_start_failed"
-    }
-    Wait-FishingHostReady `
-        $hostProcess $statePath ([TimeSpan]::FromSeconds(30))
-    if (-not $hostProcess.CloseMainWindow()) {
-        throw "release_host_normal_close_unavailable"
-    }
-    if (-not $hostProcess.WaitForExit(15000)) {
-        throw "release_host_normal_exit_timeout"
-    }
-    if ($hostProcess.ExitCode -ne 0) {
-        throw "release_host_normal_exit_failed: $($hostProcess.ExitCode)"
-    }
-}
-finally {
-    if ($null -ne $hostProcess) {
-        $hostProcess.Refresh()
-        if (-not $hostProcess.HasExited) {
-            Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue
-            $hostProcess.WaitForExit(5000) | Out-Null
+for ($cycle = 1; $cycle -le $Cycles; $cycle++) {
+    try {
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $hostPath
+        # The packaged Engine intentionally rejects offline diagnostic authority.
+        # Start the real Host in its network-inert demo composition, then exercise
+        # the actual production pair and crash recovery through the managed probe.
+        $startInfo.Arguments = "--demo"
+        $startInfo.WorkingDirectory = $smokeRoot
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+        $hostProcess = [Diagnostics.Process]::Start($startInfo)
+        if ($null -eq $hostProcess) {
+            throw "release_host_start_failed"
         }
-        $hostProcess.Dispose()
+        Wait-FishingHostReady `
+            $hostProcess $statePath ([TimeSpan]::FromSeconds(30))
+        if (-not $hostProcess.CloseMainWindow()) {
+            throw "release_host_normal_close_unavailable"
+        }
+        if (-not $hostProcess.WaitForExit(15000)) {
+            throw "release_host_normal_exit_timeout"
+        }
+        if ($hostProcess.ExitCode -ne 0) {
+            throw "release_host_normal_exit_failed: $($hostProcess.ExitCode)"
+        }
     }
+    finally {
+        if ($null -ne $hostProcess) {
+            $hostProcess.Refresh()
+            if (-not $hostProcess.HasExited) {
+                Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue
+                $hostProcess.WaitForExit(5000) | Out-Null
+            }
+            $hostProcess.Dispose()
+            $hostProcess = $null
+        }
+    }
+    Assert-NoBundleProcessResidue $smokeRoot
+    Invoke-PackagedEngineRecoveryProbe $smokeRoot
+    Assert-NoBundleProcessResidue $smokeRoot
 }
 
 & $noPythonGate `
     -ProductRoot $productRoot `
     -BundleDirectory $smokeRoot `
-    -BundleLifecycleStage Installed
+    -BundleLifecycleStage FirstActivation
 [void](Read-FishingBundleManifest $productRoot $smokeRoot $expectedMode)
 Assert-FishingSystemDependencyClosure $smokeRoot
 Assert-FishingHighConfidenceSecretScan $smokeRoot
-Invoke-PackagedEngineRecoveryProbe $smokeRoot
+& $noPythonGate `
+    -ProductRoot $productRoot `
+    -BundleDirectory $smokeRoot `
+    -BundleLifecycleStage CrashRecovery
 
 $tempAfter = Get-FishingDirectoryFingerprint $tempDotnet
 if ($tempBefore -cne $tempAfter) {
@@ -185,4 +213,4 @@ if (@(Get-ChildItem -LiteralPath $smokeRoot -Directory -Force |
     throw "release_transaction_residue_detected"
 }
 
-Write-Output "PASS Fishing $expectedMode packaged Host start/exit and production Engine crash/recovery smoke"
+Write-Output "PASS Fishing $expectedMode packaged $Cycles-cycle Host start/exit and production Engine crash/recovery smoke"

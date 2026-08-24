@@ -12,9 +12,10 @@ tunnel. UI, Telegram и Overview продолжают потреблять то�
 `IStreamingController`; fine-grained process/network операции наружу не
 выносятся.
 
-Этот slice не подключает production composition, не содержит и не запускает
-реальные FFmpeg/cloudflared binaries, не открывает сокет, не ищет окно игры и
-не выполняет GTA/capture/input/network действие. Он также не объявляет готовой
+Normal production composition пока намеренно подключает
+`UnavailableStreamingController`: UI показывает недоступное состояние, а
+mutation-команды выключены. Репозиторий не содержит и не запускает реальные
+encoder/tunnel binaries, не открывает streaming socket и не объявляет готовой
 аутентифицированную viewer implementation или chat use-case bridge.
 
 ## Lifecycle and ownership
@@ -80,6 +81,32 @@ choose the product-owned transient root and prove normal-exit plus crash-recover
 cleanup against the strict two-EXE bundle allowlist. Until that happens the
 production composition must continue using `UnavailableStreamingController`.
 
+## Проверка допустимого Windows encoder path
+
+Историческая Python-версия не содержала собственного encoder: она скачивала и
+запускала внешний FFmpeg для HLS, а публичный URL давала через cloudflared или
+tunnelmole. Найденный локальный FFmpeg — Gyan static GPLv3 build примерно
+101 MiB с x264/x265. Его нельзя молча встроить в проприетарный strict two-EXE
+bundle без отдельного решения по лицензии, source offer/notices и provenance.
+Найденный cloudflared также является внешним payload примерно 54 MiB; для него
+нужны frozen version, origin, license/notices и exact hash.
+
+Встроенный Windows path исследован по Microsoft documentation:
+
+- `Windows.Graphics.Capture` поддерживает создание capture item по HWND;
+- Media Foundation предоставляет H.264 encoder и Sink Writer;
+- штатные Media Foundation sinks перечисляют MP4/3GP/ASF/MP3, но не HLS;
+- Sink Writer не выполняет автоматически resize и frame-rate conversion.
+
+Следовательно, Media Foundation может заменить часть capture/encode chain, но
+не является готовой заменой legacy HLS pipeline. Для production всё равно нужны
+product-owned color/scale/timing conversion, HLS mux/segment sink, authenticated
+viewer/session server, viewer accounting, public HTTPS tunnel and cleanup.
+Канонические ссылки: [capture by HWND](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow),
+[Sink Writer](https://learn.microsoft.com/en-us/windows/win32/medfound/using-the-sink-writer),
+[supported formats](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation),
+[codec objects](https://learn.microsoft.com/en-us/windows/win32/medfound/codecobjects).
+
 ## Offline acceptance
 
 Eleven new managed tests use only fake executable, process, capture and network
@@ -97,15 +124,16 @@ semantics-changing optimization was made.
 
 ## Remaining production gates
 
-- freeze signed, redistributable FFmpeg/cloudflared payloads, licenses and exact
-  hashes, then embed them in Host resources;
+- choose and approve either (a) a redistributable external encoder/tunnel set
+  with frozen provenance, license/notices and exact hashes or (b) the in-process
+  Windows capture/H.264 path plus a new product-owned HLS mux/segment sink;
 - implement the guarded product capture-source adapter for current game/chat
   client bounds without fixed display geometry;
 - implement the authenticated loopback HLS/viewer server, bounded viewer count,
   media workspace lifecycle and stale-workspace crash recovery;
+- provide an approved public HTTPS tunnel and its authentication/URL policy;
 - connect one coarse chat-mode use case and the licensed production composition;
 - complete privacy/security review of the public tunnel and authenticated viewer
   surface;
 - run separately authorized real process/network acceptance, start/exit/crash
   recovery, signing/update and final two-EXE allowlist gates.
-

@@ -77,6 +77,7 @@ internal static class Program
             .Concat(StreamingPageTests.Create())
             .Concat(StreamingRuntimeTests.Create())
             .Concat(UpdateRuntimeTests.Create())
+            .Concat(LocalReleaseMaintenanceTests.Create())
             .Concat(ProductDiagnosticLogTests.Create())
             .Concat(StartStopHotkeyTests.Create())
             .Concat(FishingEntitlementTests.Create())

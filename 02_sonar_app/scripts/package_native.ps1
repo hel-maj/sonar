@@ -4,6 +4,7 @@ param(
     [string]$OutputDirectory = "",
     [switch]$DevelopmentUnsigned,
     [switch]$SkipOfflineTests,
+    [string]$CommonFeed = $env:SONAR_COMMON_FEED,
     [string]$SignToolPath = $env:SONAR_FISHING_SIGNTOOL,
     [string]$SigningCertificateThumbprint = $env:SONAR_FISHING_SIGNING_CERT_THUMBPRINT,
     [string]$TimestampUrl = $env:SONAR_FISHING_TIMESTAMP_URL
@@ -41,6 +42,7 @@ if (-not (Test-Path -LiteralPath $implementation -PathType Leaf)) {
 $arguments = @{
     Version = $Version
     OutputDirectory = $OutputDirectory
+    CommonFeed = $CommonFeed
     SignToolPath = $SignToolPath
     SigningCertificateThumbprint = $SigningCertificateThumbprint
     TimestampUrl = $TimestampUrl

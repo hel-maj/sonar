@@ -1,7 +1,8 @@
 # Native Engine IPC session control
 
-Статус: deterministic native admission/lifecycle slice; live GTA, capture и
-physical input не подключены.
+Статус: production no-argument Host/Engine composition подключена; live GTA,
+capture и physical input остаются закрытыми до явной команды пользователя и
+проходят entitlement/settings/target/foreground/final-mutation gates.
 
 ## Контракт
 
@@ -57,12 +58,20 @@ coalesce-ить устаревший snapshot того же topic при backpre
 
 ## Safety boundary
 
-Этот slice не конструирует live observer, capture source, mutation adapter или
-input lease и не вызывает whole fishing episode. Current production Keygen RSA
-trust root по-прежнему отсутствует, поэтому реальный production entitlement и
-accepted start остаются закрыты. Перед будущим live composition нужны отдельные
-continuous entitlement/settings/window/focus gates непосредственно у final
-mutation port и fresh readiness-gated acceptance.
+Normal production composition конструирует concrete Windows target resolver,
+coherent client capture, memory/text observers, whole fishing/inventory/
+maintenance runners и один exclusive guarded mutation lease. Они не выполняют
+физические действия при простом запуске приложения: session создаётся только
+после coarse `StartFishingSessionRequest`, принятого entitlement и актуальных
+settings. Непосредственно перед каждым side effect Engine повторно проверяет
+process/window generation, foreground/client geometry, entitlement/settings/
+lifecycle revisions и input packet budget; неоднозначность закрывает действие.
+
+Production Keygen RSA public key и key id встроены в Host и передаются Engine в
+raw signed entitlement envelope. Остаточные gates — авторизованная проверка
+реальной GTA-сборки, expiry/revocation, target loss, held-input crash cleanup и
+signed release acceptance; startup/lifecycle тесты не обходят эти gates и не
+отправляют automation commands.
 
 ## Offline tests
 

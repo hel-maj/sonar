@@ -2,7 +2,9 @@
 param(
     [string]$BundleDirectory = "",
     [switch]$DevelopmentUnsigned,
-    [switch]$StaticOnly
+    [switch]$StaticOnly,
+    [ValidateRange(2, 10)]
+    [int]$Cycles = 3
 )
 
 Set-StrictMode -Version Latest
@@ -41,6 +43,7 @@ if (-not (Test-Path -LiteralPath $implementation -PathType Leaf)) {
 }
 $arguments = @{
     BundleDirectory = $BundleDirectory
+    Cycles = $Cycles
 }
 if ($DevelopmentUnsigned) {
     $arguments.DevelopmentUnsigned = $true

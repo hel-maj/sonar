@@ -34,8 +34,8 @@ public sealed record HostRunOptions(
         }
 
         throw new HostRunOptionsException(
-            "Запустите Sonar без параметров. Для разработки доступны только " +
-            "--demo и --offline-engine <путь к инертному Engine>.");
+            "Не удалось запустить приложение. Используйте обычную команду " +
+            "запуска Sonar Fishing.");
     }
 }
 

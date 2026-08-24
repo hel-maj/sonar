@@ -18,10 +18,12 @@ internal static class ReleaseInstallLayout
             .ToArray();
         foreach (var file in ReleaseFiles)
         {
-            if (!File.Exists(Path.Combine(root, file)))
+            var payload = Path.Combine(root, file);
+            if (!File.Exists(payload))
             {
                 throw new InvalidOperationException("release_install_payload_missing");
             }
+            ValidateNoReparseFile(payload);
         }
 
         foreach (var directory in Directory.EnumerateDirectories(
@@ -43,9 +45,15 @@ internal static class ReleaseInstallLayout
             ValidateNoReparseDirectories(fullPath);
         }
 
+        ValidateRuntimeDirectory(root, "config", path =>
+            string.Equals(path, "state.dat", StringComparison.Ordinal));
+        ValidateRuntimeDirectory(root, "logs", path =>
+            string.Equals(Path.GetExtension(path), ".log", StringComparison.Ordinal));
+
         foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             var fullPath = Path.GetFullPath(path);
+            ValidateNoReparseFile(fullPath);
             if (allowedTransactionRoots.Any(transactionRoot =>
                     fullPath.StartsWith(
                         transactionRoot + Path.DirectorySeparatorChar,
@@ -93,12 +101,16 @@ internal static class ReleaseInstallLayout
 
     internal static void ValidatePayloadDirectory(string directory)
     {
-        if (Directory.EnumerateDirectories(directory, "*", SearchOption.AllDirectories).Any())
+        if (Directory.EnumerateDirectories(directory, "*", SearchOption.TopDirectoryOnly).Any())
         {
             throw new InvalidOperationException("release_staging_allowlist_invalid");
         }
         var files = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-            .Select(path => NormalizeRelative(directory, path))
+            .Select(path =>
+            {
+                ValidateNoReparseFile(path);
+                return NormalizeRelative(directory, path);
+            })
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
         var expected = ReleaseFiles.OrderBy(path => path, StringComparer.Ordinal).ToArray();
@@ -141,6 +153,38 @@ internal static class ReleaseInstallLayout
             {
                 pending.Push(child);
             }
+        }
+    }
+
+    private static void ValidateRuntimeDirectory(
+        string root,
+        string name,
+        Func<string, bool> acceptsFileName)
+    {
+        var directory = Path.Combine(root, name);
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+        if (Directory.EnumerateDirectories(directory, "*", SearchOption.TopDirectoryOnly).Any())
+        {
+            throw new InvalidOperationException("release_install_allowlist_invalid");
+        }
+        foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+        {
+            ValidateNoReparseFile(path);
+            if (!acceptsFileName(Path.GetFileName(path)))
+            {
+                throw new InvalidOperationException("release_install_allowlist_invalid");
+            }
+        }
+    }
+
+    private static void ValidateNoReparseFile(string path)
+    {
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new InvalidOperationException("release_install_reparse_point");
         }
     }
 

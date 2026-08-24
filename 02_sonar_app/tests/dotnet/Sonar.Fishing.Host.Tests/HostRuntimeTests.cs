@@ -1,6 +1,7 @@
 using Sonar.Fishing.Host.EngineHealth;
 using Sonar.Fishing.Host.EngineIntegration;
 using Sonar.Fishing.Host.HostRuntime;
+using Sonar.Fishing.Host.HostHotkeys;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.SettingsPersistence;
@@ -23,7 +24,10 @@ internal static class HostRuntimeTests
         new("host_lifecycle_disposes_long_lived_engine_session", LifecycleDisposesSession),
         new("host_lifecycle_starts_and_stops_telegram_runtime_exactly_once", LifecycleOwnsTelegram),
         new("host_lifecycle_starts_and_stops_license_runtime_exactly_once", LifecycleOwnsLicense),
+        new("host_lifecycle_starts_and_stops_hotkey_runtime_exactly_once", LifecycleOwnsHotkeys),
         new("host_lifecycle_stop_before_content_render_never_restarts_runtime", LifecycleStopBeforeStartIsTerminal),
+        new("host_lifecycle_concurrent_start_stop_is_terminal_and_idempotent", LifecycleConcurrentStartStopIsIdempotent),
+        new("host_window_start_fault_exits_nonzero_without_unhandled_exception", WindowStartFaultExitsNonzero),
         new("host_window_defers_second_close_after_synchronous_stop", WindowDefersSecondClose),
         new("host_window_stop_fault_exits_nonzero_without_hanging", WindowStopFaultExitsNonzero),
         new("host_window_stop_timeout_exits_nonzero_without_hanging", WindowStopTimeoutExitsNonzero),
@@ -36,9 +40,18 @@ internal static class HostRuntimeTests
         var production = HostRunOptions.Parse(Array.Empty<string>());
         TestAssert.Equal(HostRunMode.Production, production.Mode, "Default product mode changed");
         TestAssert.True(production.EngineExecutable is null, "Production mode retained a dev Engine path");
-        TestAssert.Throws<HostRunOptionsException>(
-            () => HostRunOptions.Parse(["--offline-engine"]),
-            "Offline mode accepted a missing Engine path");
+        try
+        {
+            _ = HostRunOptions.Parse(["--offline-engine"]);
+            throw new InvalidOperationException("Offline mode accepted a missing Engine path");
+        }
+        catch (HostRunOptionsException exception)
+        {
+            TestAssert.True(
+                !exception.Message.Contains("--", StringComparison.Ordinal) &&
+                !exception.Message.Contains("Engine", StringComparison.OrdinalIgnoreCase),
+                "User-facing run error exposed developer flags or process topology");
+        }
 
         var demo = HostRunOptions.Parse(["--demo"]);
         TestAssert.Equal(HostRunMode.Demo, demo.Mode, "Demo mode changed");
@@ -47,6 +60,21 @@ internal static class HostRuntimeTests
         var offline = HostRunOptions.Parse(["--offline-engine", "engine.exe"]);
         TestAssert.Equal(HostRunMode.OfflineEngine, offline.Mode, "Offline mode changed");
         TestAssert.Equal("engine.exe", offline.EngineExecutable!, "Engine path changed");
+
+        try
+        {
+            _ = HostApplicationComposition.Create(
+                new HostRunOptions(HostRunMode.OfflineEngine, null),
+                FishingHostState.Default);
+            throw new InvalidOperationException("Offline composition accepted a missing file path");
+        }
+        catch (HostRunOptionsException exception)
+        {
+            TestAssert.True(
+                !exception.Message.Contains("Engine", StringComparison.OrdinalIgnoreCase) &&
+                !exception.Message.Contains("Host", StringComparison.OrdinalIgnoreCase),
+                "User-facing composition error exposed process topology");
+        }
     }
 
     private static void DemoCompositionIsInert()
@@ -163,6 +191,25 @@ internal static class HostRuntimeTests
         TestAssert.Equal(1, license.StopCount, "License runtime stopped more than once");
     }
 
+    private static void LifecycleOwnsHotkeys()
+    {
+        var health = EngineHealthViewModel.CreateOffline(new SuccessfulHealthUseCase());
+        var hotkeys = new FakeHotkeyRuntimeLifecycle();
+        var lifecycle = new HostLifecycleCoordinator(
+            health,
+            telegram: null,
+            license: null,
+            hotkeys);
+
+        lifecycle.StartAsync().GetAwaiter().GetResult();
+        lifecycle.StartAsync().GetAwaiter().GetResult();
+        lifecycle.StopAsync().GetAwaiter().GetResult();
+        lifecycle.StopAsync().GetAwaiter().GetResult();
+
+        TestAssert.Equal(1, hotkeys.StartCount, "Hotkey runtime started more than once");
+        TestAssert.Equal(1, hotkeys.StopCount, "Hotkey runtime stopped more than once");
+    }
+
     private static void LifecycleStopBeforeStartIsTerminal()
     {
         var healthUseCase = new SuccessfulHealthUseCase();
@@ -184,6 +231,53 @@ internal static class HostRuntimeTests
             "Late content render restarted license refresh after terminal Host stop");
         TestAssert.Equal(1, license.StopCount,
             "Terminal Host stop did not close license runtime exactly once");
+    }
+
+    private static void LifecycleConcurrentStartStopIsIdempotent()
+    {
+        for (var iteration = 0; iteration < 64; iteration++)
+        {
+            var healthUseCase = new SuccessfulHealthUseCase();
+            var health = EngineHealthViewModel.CreateOffline(healthUseCase);
+            var telegram = new FakeTelegramRuntimeLifecycle();
+            var license = new FakeLicenseRuntimeLifecycle();
+            var lifecycle = new HostLifecycleCoordinator(health, telegram, license);
+
+            var start = Task.Run(lifecycle.StartAsync);
+            var stop = Task.Run(lifecycle.StopAsync);
+            Task.WaitAll(start, stop);
+            lifecycle.StartAsync().GetAwaiter().GetResult();
+            lifecycle.StopAsync().GetAwaiter().GetResult();
+
+            TestAssert.True(
+                healthUseCase.CallCount is 0 or 1,
+                "Concurrent lifecycle race started Engine health more than once");
+            TestAssert.True(
+                telegram.StartCount is 0 or 1,
+                "Concurrent lifecycle race started Telegram more than once");
+            TestAssert.True(
+                license.StartCount is 0 or 1,
+                "Concurrent lifecycle race started license refresh more than once");
+            TestAssert.Equal(1, telegram.StopCount,
+                "Concurrent lifecycle race stopped Telegram more than once");
+            TestAssert.Equal(1, license.StopCount,
+                "Concurrent lifecycle race stopped license refresh more than once");
+        }
+    }
+
+    private static void WindowStartFaultExitsNonzero()
+    {
+        var result = ExerciseWindowStartup(
+            new WindowLifecycle(
+                Task.FromException(new InvalidOperationException("fixture")),
+                Task.CompletedTask),
+            TimeSpan.FromSeconds(1));
+
+        TestAssert.True(result.Closed, "Faulted lifecycle start left the Host window open");
+        TestAssert.Equal(
+            MainWindow.LifecycleStartupFailureExitCode,
+            result.ShutdownExitCode,
+            "Faulted lifecycle start did not request controlled nonzero shutdown");
     }
 
     private static void WindowDefersSecondClose()
@@ -277,6 +371,61 @@ internal static class HostRuntimeTests
         }
 
         TestAssert.True(!timedOut, "Host window close exceeded the bounded regression budget");
+        return new WindowCloseResult(closed, shutdownExitCode);
+    }
+
+    private static WindowCloseResult ExerciseWindowStartup(
+        IHostLifecycle lifecycle,
+        TimeSpan shutdownTimeout)
+    {
+        var composition = HostApplicationComposition.Create(
+            new HostRunOptions(HostRunMode.Demo, null),
+            FishingHostState.Default);
+        var shutdownExitCode = 0;
+        var closed = false;
+        var timedOut = false;
+        var frame = new DispatcherFrame();
+        var timeout = new DispatcherTimer(
+            TimeSpan.FromSeconds(2),
+            DispatcherPriority.Send,
+            (_, _) =>
+            {
+                timedOut = true;
+                frame.Continue = false;
+            },
+            Dispatcher.CurrentDispatcher);
+        var window = new MainWindow(
+            composition.Shell,
+            lifecycle,
+            shutdownTimeout,
+            exitCode => shutdownExitCode = exitCode)
+        {
+            ShowActivated = false,
+            ShowInTaskbar = false,
+            Left = -10_000,
+            Top = -10_000,
+        };
+        window.Closed += (_, _) =>
+        {
+            closed = true;
+            frame.Continue = false;
+        };
+
+        try
+        {
+            window.Show();
+            Dispatcher.PushFrame(frame);
+        }
+        finally
+        {
+            timeout.Stop();
+            if (!closed)
+            {
+                window.Close();
+            }
+        }
+
+        TestAssert.True(!timedOut, "Host startup failure exceeded the bounded regression budget");
         return new WindowCloseResult(closed, shutdownExitCode);
     }
 
@@ -442,11 +591,44 @@ internal static class HostRuntimeTests
         }
     }
 
+    private sealed class FakeHotkeyRuntimeLifecycle : IHostHotkeyRuntimeLifecycle
+    {
+        public int StartCount { get; private set; }
+
+        public int StopCount { get; private set; }
+
+        public Task StartAsync()
+        {
+            StartCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync()
+        {
+            StopCount++;
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed record WindowCloseResult(bool Closed, int ShutdownExitCode);
 
-    private sealed class WindowLifecycle(Task stopTask) : IHostLifecycle
+    private sealed class WindowLifecycle : IHostLifecycle
     {
-        public Task StartAsync() => Task.CompletedTask;
+        private readonly Task startTask;
+        private readonly Task stopTask;
+
+        internal WindowLifecycle(Task stopTask)
+            : this(Task.CompletedTask, stopTask)
+        {
+        }
+
+        internal WindowLifecycle(Task startTask, Task stopTask)
+        {
+            this.startTask = startTask;
+            this.stopTask = stopTask;
+        }
+
+        public Task StartAsync() => startTask;
 
         public Task StopAsync() => stopTask;
     }

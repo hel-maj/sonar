@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -224,6 +225,35 @@ class unavailable_memory final : public adapters::fishing_memory_source {
   }
 };
 
+class inventory_memory final : public adapters::fishing_memory_source {
+ public:
+  explicit inventory_memory(const bool open) : open_(open) {}
+
+  [[nodiscard]] adapters::memory_snapshot_result capture(
+      const std::uint64_t sequence,
+      const std::uint64_t captured_at_steady_ns,
+      const sonar::platform::windows::process_generation& game_generation)
+      noexcept override {
+    return {
+        .snapshot = sonar::fishing::memory_observation::coherent_memory_snapshot{
+            .sequence = sequence,
+            .captured_at_steady_ns = captured_at_steady_ns,
+            .profile_id = "fixture-profile",
+            .profile_revision = 1U,
+            .game_generation = game_generation,
+            .inventory = sonar::fishing::memory_observation::inventory_evidence{
+                .open = open_,
+                .matched_votes = 6U,
+                .confidence = 0.95,
+            },
+        },
+    };
+  }
+
+ private:
+  bool open_{};
+};
+
 class queued_text final : public adapters::runtime_text_recognizer {
  public:
   explicit queued_text(std::vector<std::string> values)
@@ -246,7 +276,7 @@ class queued_text final : public adapters::runtime_text_recognizer {
 
 [[nodiscard]] std::unique_ptr<adapters::production_frame_observer> observer(
     repeating_capture& capture,
-    unavailable_memory& memory,
+    adapters::fishing_memory_source& memory,
     adapters::mutable_runtime_policy_source& policy,
     adapters::runtime_text_recognizer& text,
     sonar::fishing::stage_detection::majestic_fishing_stage_detector& stage) {
@@ -284,7 +314,7 @@ void catch_frame_produces_one_typed_fact(IWICImagingFactory& factory) {
 void inventory_frame_rejects_unmatched_slots(IWICImagingFactory& factory) {
   repeating_capture capture(load_frame(
       factory, SONAR_FISHING_INVENTORY_FISH_FIXTURE, 1U));
-  unavailable_memory memory;
+  inventory_memory memory(true);
   adapters::mutable_runtime_policy_source policy;
   queued_text text({"Окружение Инвентарь", "Окружение Инвентарь"});
   sonar::fishing::stage_detection::majestic_fishing_stage_detector stage;
@@ -305,6 +335,87 @@ void inventory_frame_rejects_unmatched_slots(IWICImagingFactory& factory) {
   require(context.surface == inventory::inventory_surface::inventory &&
           !context.remove_action.has_value(),
       "production_context_action_fabricated");
+}
+
+void inventory_visibility_is_memory_authoritative(
+    IWICImagingFactory& factory) {
+  repeating_capture capture(load_frame(
+      factory, SONAR_FISHING_INVENTORY_FISH_FIXTURE, 1U));
+  inventory_memory closed_memory(false);
+  adapters::mutable_runtime_policy_source policy;
+  queued_text text({"Окружение Инвентарь"});
+  sonar::fishing::stage_detection::majestic_fishing_stage_detector stage;
+  auto closed = observer(capture, closed_memory, policy, text, stage);
+  const auto contradicted = closed->observe({});
+  require(contradicted.surface == inventory::inventory_surface::gameplay &&
+          contradicted.items.empty() &&
+          !contradicted.remove_action.has_value(),
+      "production_visual_inventory_overrode_memory_closed");
+
+  repeating_capture unknown_capture(load_frame(
+      factory, SONAR_FISHING_INVENTORY_FISH_FIXTURE, 2U));
+  unavailable_memory unavailable;
+  adapters::mutable_runtime_policy_source unknown_policy;
+  queued_text unknown_text({"Окружение Инвентарь"});
+  auto unknown = observer(
+      unknown_capture, unavailable, unknown_policy, unknown_text, stage);
+  const auto unavailable_fact = unknown->observe({});
+  require(unavailable_fact.surface == inventory::inventory_surface::unknown &&
+          unavailable_fact.items.empty() &&
+          !unavailable_fact.remove_action.has_value(),
+      "production_unknown_inventory_collapsed_into_visual_state");
+}
+
+void memory_open_preserves_context_geometry(IWICImagingFactory& factory) {
+  auto frame = load_frame(
+      factory, SONAR_FISHING_INVENTORY_PRODUCTION_FIXTURE, 1U);
+  const auto& fish = asset(
+      "marlin", detail::visual_asset_kind::fish, "any");
+  const auto& remove = asset(
+      "remove", detail::visual_asset_kind::context_action, "fhd");
+  constexpr std::uint32_t column = 3U;
+  constexpr std::uint32_t row = 8U;
+  const double cell_width = (0.7800 - 0.6100) / 6.0;
+  const double cell_height = (0.9430 - 0.0850) / 17.0;
+  const sonar::fishing::stage_detection::normalized_rect item_bounds{
+      0.6100 + cell_width * column,
+      0.0850 + cell_height * row,
+      cell_width,
+      cell_height,
+  };
+  const auto center_x = static_cast<std::uint32_t>(std::llround(
+      (item_bounds.x + item_bounds.width / 2.0) * frame.width));
+  const auto center_y = static_cast<std::uint32_t>(std::llround(
+      (item_bounds.y + item_bounds.height / 2.0) * frame.height));
+  blit_asset(
+      frame, fish, center_x - fish.width / 2U, center_y - fish.height / 2U);
+  const auto search_left = static_cast<std::uint32_t>(std::llround(
+      (item_bounds.x - 0.12) * frame.width));
+  const auto search_top = static_cast<std::uint32_t>(std::llround(
+      (item_bounds.y - 0.10) * frame.height));
+  blit_asset(
+      frame,
+      remove,
+      search_left + (std::max)(2U, remove.width / 24U) * 5U,
+      search_top + (std::max)(2U, remove.height / 3U) * 5U);
+
+  repeating_capture capture(std::move(frame));
+  inventory_memory memory(true);
+  adapters::mutable_runtime_policy_source policy;
+  queued_text text({"Окружение Инвентарь"});
+  sonar::fishing::stage_detection::majestic_fishing_stage_detector stage;
+  auto target = observer(capture, memory, policy, text, stage);
+  target->expect_context_item("inventory:8:3", item_bounds);
+  const auto fact = target->observe({});
+  require(
+      fact.surface == inventory::inventory_surface::item_context_menu &&
+          fact.remove_action.has_value() &&
+          fact.remove_action->item_instance_id == "inventory:8:3" &&
+          std::ranges::any_of(fact.items, [](const auto& item) {
+            return item.instance_id == "inventory:8:3" &&
+                item.item_id == "marlin";
+          }),
+      "production_memory_open_lost_context_geometry");
 }
 
 void embedded_assets_drive_positive_inventory_and_context_matches(
@@ -366,7 +477,7 @@ void gameplay_frame_projects_tackle_without_fixed_resolution(
     IWICImagingFactory& factory) {
   repeating_capture capture(load_frame(
       factory, SONAR_FISHING_TACKLE_PRODUCTION_FIXTURE, 1U));
-  unavailable_memory memory;
+  inventory_memory memory(false);
   adapters::mutable_runtime_policy_source policy;
   queued_text text({"", ""});
   sonar::fishing::stage_detection::majestic_fishing_stage_detector stage;
@@ -528,13 +639,16 @@ int main() {
         "production_fixture_factory_failed");
     catch_frame_produces_one_typed_fact(*factory.Get());
     inventory_frame_rejects_unmatched_slots(*factory.Get());
+    inventory_visibility_is_memory_authoritative(*factory.Get());
+    memory_open_preserves_context_geometry(*factory.Get());
     embedded_assets_drive_positive_inventory_and_context_matches(
         *factory.Get());
       gameplay_frame_projects_tackle_without_fixed_resolution(*factory.Get());
       one_session_lease_guards_catch_and_inventory(*factory.Get());
       shutdown_is_cleanup_first_and_uses_a_non_input_final_gate(*factory.Get());
       return 0;
-  } catch (const std::exception&) {
+  } catch (const std::exception& exception) {
+    std::cerr << exception.what() << '\n';
     return 1;
   }
 }

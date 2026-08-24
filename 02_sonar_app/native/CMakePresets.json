@@ -14,7 +14,7 @@
       "architecture": "x64",
       "toolset": "v143",
       "cacheVariables": {
-        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-native-windows/0.1.1",
+        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-native-windows/0.1.6",
         "SONAR_COMMON_NATIVE_LICENSING_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-native-licensing/0.1.2"
       }
     }

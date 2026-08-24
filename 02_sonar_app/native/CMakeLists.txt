@@ -23,16 +23,26 @@ option(
     "Build the shipping Sonar.Engine.exe IPC composition"
     OFF
 )
+option(
+    SONAR_FISHING_BUILD_LIVE_OBSERVATION_PREFLIGHT
+    "Build the non-shipping one-shot read-only GTA observation preflight"
+    OFF
+)
+option(
+    SONAR_FISHING_BUILD_PROFILE_COMPATIBILITY_PROBE
+    "Build the non-shipping one-shot GTA build-profile compatibility probe"
+    OFF
+)
 
 enable_testing()
 
 if(NOT DEFINED SONAR_COMMON_NATIVE_WINDOWS_PACKAGE OR
    NOT IS_DIRECTORY "${SONAR_COMMON_NATIVE_WINDOWS_PACKAGE}")
     message(FATAL_ERROR
-        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE must point to installed Sonar Platform Windows 0.1.1")
+        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE must point to installed Sonar Platform Windows 0.1.6")
 endif()
 find_package(
-    SonarPlatformWindows 0.1.1 EXACT CONFIG REQUIRED
+    SonarPlatformWindows 0.1.6 EXACT CONFIG REQUIRED
     PATHS "${SONAR_COMMON_NATIVE_WINDOWS_PACKAGE}/lib/cmake/SonarPlatformWindows"
     NO_DEFAULT_PATH
 )
@@ -66,6 +76,8 @@ add_subdirectory(game_chat)
 add_subdirectory(fishing_stage_detection)
 add_subdirectory(inventory_store)
 add_subdirectory(memory_observation)
+add_subdirectory(live_observation_preflight)
+add_subdirectory(build_profile_compatibility_probe)
 add_subdirectory(fishing_episode)
 add_subdirectory(maintenance_episode)
 add_subdirectory(automation_adapters)
@@ -103,4 +115,14 @@ if(SONAR_FISHING_BUILD_OFFLINE_IPC OR SONAR_FISHING_BUILD_PRODUCTION_ENGINE)
         NO_DEFAULT_PATH
     )
     add_subdirectory(engine_ipc)
+endif()
+
+if(SONAR_FISHING_BUILD_PROFILE_COMPATIBILITY_PROBE AND
+   TARGET SonarFishingEngine)
+    add_test(
+        NAME sonar_fishing.build_profile_compatibility_probe_shipping_binary_exclusion
+        COMMAND "${CMAKE_COMMAND}"
+            "-DENGINE=$<TARGET_FILE:SonarFishingEngine>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/build_profile_compatibility_probe/cmake/verify_shipping_binary_exclusion.cmake"
+    )
 endif()

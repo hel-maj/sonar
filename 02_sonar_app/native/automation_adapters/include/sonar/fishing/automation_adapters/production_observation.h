@@ -38,8 +38,10 @@ struct production_catch_observation final {
   std::string error;
 };
 
-// One capture owner projects the same client frame into catch, inventory and
-// maintenance facts. OCR remains an internal bounded adapter; frames and OCR
+// One capture owner projects the same client frame into catch, item/context
+// geometry and maintenance facts. Inventory openness is authoritative only
+// when the coherent memory snapshot normalizes to open/closed; OCR remains an
+// internal bounded geometry adapter and unknown fails closed. Frames and OCR
 // calls never cross Host IPC. All geometry is normalized to the current client
 // area and every returned sequence is suitable for the immediate final gate.
 class production_frame_observer final

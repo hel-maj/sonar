@@ -195,6 +195,8 @@ function Build-FishingEngine(
         "-T", "v143",
         "-DSONAR_FISHING_BUILD_OFFLINE_IPC=OFF",
         "-DSONAR_FISHING_BUILD_PRODUCTION_ENGINE=ON",
+        "-DSONAR_FISHING_BUILD_LIVE_OBSERVATION_PREFLIGHT=OFF",
+        "-DSONAR_FISHING_BUILD_PROFILE_COMPATIBILITY_PROBE=OFF",
         "-DSONAR_COMMON_NATIVE_PACKAGE=$ResolvedNativePackage",
         "-DSONAR_COMMON_NATIVE_WINDOWS_PACKAGE=$ResolvedNativeWindowsPackage",
         "-DSONAR_COMMON_NATIVE_LICENSING_PACKAGE=$ResolvedNativeLicensingPackage",
@@ -247,10 +249,10 @@ if (-not $DevelopmentUnsigned) {
 }
 
 if ($SkipOfflineTests) {
-    & (Join-Path $PSScriptRoot "setup_native.ps1")
+    & (Join-Path $PSScriptRoot "setup_native.ps1") -CommonFeed $CommonFeed
 }
 else {
-    & (Join-Path $PSScriptRoot "test_native.ps1")
+    & (Join-Path $PSScriptRoot "test_native.ps1") -CommonFeed $CommonFeed
 }
 
 Assert-FishingDesktopRuntime
@@ -264,7 +266,7 @@ $resolvedNativePackage = Resolve-RequiredDirectory `
     "Sonar Platform IPC native package"
 $resolvedNativeWindowsPackage = Resolve-RequiredDirectory `
     $CommonNativeWindowsPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.1") `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.6") `
     "Sonar Platform Windows native package"
 $resolvedNativeLicensingPackage = Resolve-RequiredDirectory `
     $CommonNativeLicensingPackage `

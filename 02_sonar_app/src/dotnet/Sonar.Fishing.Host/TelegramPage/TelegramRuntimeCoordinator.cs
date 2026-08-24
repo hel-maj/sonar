@@ -86,7 +86,11 @@ public sealed class TelegramRuntimeCoordinator : ITelegramRuntimeLifecycle
         {
             if (terminallyStopped)
             {
-                throw new InvalidOperationException("telegram_runtime_stopped");
+                // Stop is terminal for this coordinator. A late WPF
+                // ContentRendered callback must remain fail-closed without
+                // turning an already completed shutdown into an unhandled
+                // process exception.
+                return Task.CompletedTask;
             }
             if (supervisorTask is not null)
             {

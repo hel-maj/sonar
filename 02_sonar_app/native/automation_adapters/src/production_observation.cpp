@@ -2,6 +2,8 @@
 
 #include "production_visual_detector.h"
 
+#include "sonar/platform/inventory/open_state.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <optional>
@@ -165,7 +167,6 @@ inventory_store::inventory_observation production_frame_observer::observe(
           ? std::optional<stage_detection::normalized_rect>(
                 implementation_->expected_context_bounds)
           : std::nullopt);
-  result.surface = visual.surface;
   result.items = std::move(visual.items);
   result.remove_action = std::move(visual.remove_action);
   result.catch_screen_visible =
@@ -173,14 +174,59 @@ inventory_store::inventory_observation production_frame_observer::observe(
   if (stage.observation.has_value()) {
     result.fishing_stage = stage.observation->stage;
   }
+  bool game_menu_visible = false;
   if (!inventory_title && result.fishing_stage ==
           stage_detection::observed_fishing_stage::none &&
       !result.catch_screen_visible) {
     const auto menu = implementation_->text.recognize(
         *frame, {0.50, 0.70, 0.49, 0.29});
     if (menu.reason.empty() && contains_menu_affordance(menu.text)) {
-      result.surface = inventory_store::inventory_surface::game_menu;
+      game_menu_visible = true;
     }
+  }
+
+  // Inventory visibility is one coherent memory fact. The frame remains the
+  // owner of item/context geometry, but OCR/title pixels never authorize an
+  // open or closed state and unknown is never collapsed into closed.
+  const auto memory = implementation_->memory.capture(
+      frame->sequence,
+      frame->captured_at_steady_ns,
+      frame->target.process);
+  const bool coherent_memory = memory.snapshot.has_value() &&
+      memory.snapshot->sequence == frame->sequence;
+  sonar::platform::inventory::open_state_evidence inventory_evidence;
+  if (coherent_memory &&
+      memory.snapshot->inventory.has_value()) {
+    const auto& observed = *memory.snapshot->inventory;
+    inventory_evidence = {
+        .is_open = observed.open,
+        .matched_signals = static_cast<std::uint32_t>(
+            observed.matched_votes),
+        .confidence = observed.confidence,
+        .coherent = true,
+    };
+  }
+  const auto inventory_state =
+      sonar::platform::inventory::normalize_open_state(inventory_evidence);
+  switch (inventory_state.state) {
+    case sonar::platform::inventory::observed_state::open:
+      result.surface = visual.surface ==
+              inventory_store::inventory_surface::item_context_menu
+          ? inventory_store::inventory_surface::item_context_menu
+          : inventory_store::inventory_surface::inventory;
+      break;
+    case sonar::platform::inventory::observed_state::closed:
+      result.surface = game_menu_visible
+          ? inventory_store::inventory_surface::game_menu
+          : inventory_store::inventory_surface::gameplay;
+      result.items.clear();
+      result.remove_action.reset();
+      break;
+    case sonar::platform::inventory::observed_state::unknown:
+      result.surface = inventory_store::inventory_surface::unknown;
+      result.items.clear();
+      result.remove_action.reset();
+      break;
   }
 
   implementation_->current = {
@@ -198,11 +244,7 @@ inventory_store::inventory_observation production_frame_observer::observe(
   // every stage, not only while reeling. Reeling evidence remains optional;
   // player status is retained for the immediately following maintenance
   // decision without a Host round trip.
-  const auto memory = implementation_->memory.capture(
-      frame->sequence,
-      frame->captured_at_steady_ns,
-      frame->target.process);
-  if (memory.snapshot.has_value()) {
+  if (coherent_memory) {
     implementation_->current.reeling = memory.snapshot->reeling;
     implementation_->current.player_status = memory.snapshot->player_status;
   }

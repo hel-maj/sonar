@@ -297,6 +297,6 @@ public sealed class TelegramSettingsPageViewModel : ObservableObject
         AcceptSaved(result);
         InteractionMessage = result.EnableRequestRejected
             ? $"Telegram сохранён выключенным: {result.EnableBlockReason}"
-            : "Настройки Telegram сохранены";
+            : string.Empty;
     }
 }

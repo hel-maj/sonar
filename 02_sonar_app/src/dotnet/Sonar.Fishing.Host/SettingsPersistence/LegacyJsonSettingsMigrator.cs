@@ -131,14 +131,14 @@ public sealed class LegacyJsonSettingsMigrator
                 Boolean(source, "sound_focus_lost", true)));
     }
 
-    private static LicenseHostSettings ImportLicense(JsonElement source) => new(
-        Text(source, "license_id"),
-        Text(source, "last_validated_at"),
-        Text(source, "expires_at"),
-        Text(source, "role", "user") is { Length: > 0 } role ? role : "user",
-        Text(source, "group", "legacy") is { Length: > 0 } group ? group : "legacy",
-        StringList(source, "features"),
-        StringList(source, "denied_features"));
+    // Legacy metadata was not a signed entitlement. Only the secret identifier
+    // is migrated; timestamps, role, group and feature lists gain authority
+    // solely after the current backend response is verified again.
+    private static LicenseHostSettings ImportLicense(JsonElement source)
+    {
+        _ = source;
+        return LicenseHostSettings.Default;
+    }
 
     private static JsonDocument ReadObject(string path)
     {

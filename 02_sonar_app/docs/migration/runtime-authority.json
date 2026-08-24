@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "recorded_at": "2026-08-22",
+  "recorded_at": "2026-08-23",
   "production": {
-    "authority": "Python/PySide6 LegacyEngineFacade over FishingBot",
-    "entrypoint": "src/sonar/app.py",
-    "composition_root": "src/sonar/ui/main_window.py",
-    "facade": "src/sonar/fishing_session/legacy_engine_facade.py",
-    "catch_disposition_oracle": "src/sonar/fishing/catch_disposition.py",
-    "side_effect_owner": "effective Python FishingBot",
-    "effective_behavior_manifest": "docs/migration/effective-python-behavior.json"
+    "authority": "WPF C# Host with native C++ Engine",
+    "entrypoint": "src/dotnet/Sonar.Fishing.Host/App.xaml",
+    "launch_contract": "Sonar.exe with no arguments",
+    "host_composition_root": "src/dotnet/Sonar.Fishing.Host/App.xaml.cs::CreateProductionComposition",
+    "engine_composition_root": "native/engine_ipc/src/production_composition.cpp",
+    "side_effect_owner": "windows_fishing_automation_session behind runtime safety and entitlement gates",
+    "python_runtime_allowed": false
   },
   "offline_ipc_slice": {
-    "authority": "none",
+    "authority": "diagnostic only",
     "managed_gate": "src/dotnet/Sonar.Fishing.Host/EngineIntegration/OfflineEngineDiagnosticGate.cs",
     "native_target": "SonarFishingOfflineEngine",
     "cmake_option": "SONAR_FISHING_BUILD_OFFLINE_IPC",
@@ -29,8 +29,8 @@
         "target": "SonarFishingStageDetection",
         "corpus": "tests/fixtures/fishing_stage/screenshots-v1.tsv",
         "embedded_assets": "native/fishing_stage_detection/assets/manifest-v1.tsv",
-        "live_capture_composed": false,
-        "host_command": false,
+        "live_capture_composed": true,
+        "host_command": "start-fishing-session (coarse composition only)",
         "side_effects": false
       }
     },
@@ -38,52 +38,42 @@
       "inventory-store.run": {
         "version": "1.0",
         "target": "SonarFishingInventoryStore",
-        "corpus": "tests/fixtures/inventory_store/episode-v1.tsv",
-        "live_observer_composed": false,
-        "live_mutation_composed": false,
-        "host_command": false,
-        "side_effects": false,
-        "final_sequence_gate": "inventory_mutation_port"
+        "live_observer_composed": true,
+        "live_mutation_composed": true,
+        "host_command": "start-fishing-session (coarse composition only)",
+        "final_sequence_gate": "guarded_production_mutation_port"
       },
       "fishing-episode.run": {
         "version": "1.0",
         "target": "SonarFishingEpisode",
-        "corpus": "tests/fixtures/fishing_episode/e13-v1.tsv",
-        "live_observer_composed": false,
-        "live_mutation_composed": false,
-        "host_command": false,
-        "side_effects": false,
-        "final_sequence_gate": "fishing_mutation_session"
+        "live_observer_composed": true,
+        "live_mutation_composed": true,
+        "host_command": "start-fishing-session (coarse composition only)",
+        "final_sequence_gate": "runtime_safety_action_gate"
       },
       "meal-recovery.run": {
         "version": "1.0",
         "target": "SonarFishingMaintenanceEpisode",
-        "corpus": "tests/fixtures/maintenance_episode/episode-v1.tsv",
-        "live_observer_composed": false,
-        "live_mutation_composed": false,
-        "host_command": false,
-        "side_effects": false,
-        "final_sequence_gate": "inventory_mutation_port"
+        "live_observer_composed": true,
+        "live_mutation_composed": true,
+        "host_command": "start-fishing-session (coarse composition only)",
+        "final_sequence_gate": "guarded_production_mutation_port"
       },
       "garbage-disposal.run": {
         "version": "1.0",
         "target": "SonarFishingMaintenanceEpisode",
-        "corpus": "tests/fixtures/maintenance_episode/episode-v1.tsv",
-        "live_observer_composed": false,
-        "live_mutation_composed": false,
-        "host_command": false,
-        "side_effects": false,
-        "final_sequence_gate": "inventory_mutation_port"
+        "live_observer_composed": true,
+        "live_mutation_composed": true,
+        "host_command": "start-fishing-session (coarse composition only)",
+        "final_sequence_gate": "guarded_production_mutation_port"
       },
       "equipment-recovery.run": {
         "version": "1.0",
         "target": "SonarFishingMaintenanceEpisode",
-        "corpus": "tests/fixtures/maintenance_episode/episode-v1.tsv",
-        "live_observer_composed": false,
-        "live_mutation_composed": false,
-        "host_command": false,
-        "side_effects": false,
-        "final_sequence_gate": "inventory_mutation_port"
+        "live_observer_composed": true,
+        "live_mutation_composed": true,
+        "host_command": "start-fishing-session (coarse composition only)",
+        "final_sequence_gate": "guarded_production_mutation_port"
       }
     },
     "managed_handshake_owner": "Sonar.Platform.Ipc.Contracts 0.1.1",
@@ -92,87 +82,88 @@
     "common_feed_fallback": "P:/projects/neiro/.artifacts/sonar-feed",
     "common_native_fallback": "P:/projects/neiro/.artifacts/sonar-native/0.1.1",
     "common_native_manifest_sha256": "695B6BFAD82A3052A5021BA55F9F833D81672DA755BF98626CC66CFB3DACAE0C",
-    "common_native_windows_fallback": "P:/projects/neiro/.artifacts/sonar-native-windows/0.1.1",
-    "common_native_windows_manifest_sha256": "052F20CF47881FEDB75E25128BB48970798BF22B726DBD71482AFC282907BBAE",
+    "common_native_windows_fallback": "P:/projects/neiro/.artifacts/sonar-native-windows/0.1.6",
+    "common_native_windows_manifest_sha256": "EE61031CBC06550FD478892EFECD250FD4786790C5687F260B2D40B85B5C9446",
     "common_managed_licensing_package": "Sonar.Licensing.Verification 0.1.3",
     "common_managed_licensing_sha256": "CA1DAC5C5220872F15130C863AB5D12E85709AC19D4972AFC7193C8223FA7518",
     "common_native_licensing_fallback": "P:/projects/neiro/.artifacts/sonar-native-licensing/0.1.2",
     "common_native_licensing_manifest_sha256": "E777E623A2974E07CF4338670C3A41DF13BCDB8990F447987BB1BC0FF21834AC",
     "protoc_fallback": "P:/projects/neiro/.artifacts/sonar-tools/protoc/35.1/bin/protoc.exe",
     "side_effects_enabled": false,
-    "common_native_mechanisms": [
-      "local_pipe_client_pair",
-      "session_header_factory",
-      "incoming_sequence_gate",
-      "heartbeat_responder",
-      "peer_liveness_tracker",
-      "priority_frame_queue",
-      "latest_frame_buffer"
-    ],
-    "common_native_windows_mechanisms": [
-      "readonly_process",
-      "observe_window_client",
-      "validate_foreground_window",
-      "input_packet_budget"
-    ],
     "signed_entitlement": {
       "host_raw_envelope_verification": true,
       "engine_independent_raw_envelope_verification": true,
       "product_claims_fail_closed": true,
-      "production_rsa_public_key_embedded": false,
+      "production_rsa_public_key_embedded": true,
       "startup_block_ed25519_reused": false,
-      "automation_admission": "blocked: entitlement_trust_root_missing"
+      "automation_admission": "enabled only after current signed entitlement, target and runtime-safety gates"
     },
     "accepted_settings_source": "validated Host config/state.dat snapshot",
-    "production_cutover": false
+    "production_cutover": true
   },
   "nonshipping_characterization": {
     "authority": "none",
-    "application_seam": "src/sonar/fishing_session/legacy_engine_facade.py",
-    "aggregate_snapshot": "revisioned bot/session/tackle projection",
-    "purpose": "temporary parity oracle for direct C++ capability migration",
+    "source_present": false,
     "runtime_bridge": false,
     "python_package_workflow": false,
     "shipping_allowed": false,
-    "removal_required_before_cutover": true
+    "removal_complete": true
   },
   "wpf_migration_host": {
-    "authority": "none",
+    "authority": "production product Host",
     "entrypoint": "src/dotnet/Sonar.Fishing.Host/App.xaml",
-    "explicit_modes": ["--demo", "--offline-engine"],
-    "implicit_default_mode": false,
-    "session_and_tackle_source": "real inert C++ session snapshot in offline mode; immutable fake state in demo",
-    "settings_source": "exact application-directory config/state.dat with DPAPI CurrentUser secrets and one-time legacy JSON migration",
-    "offline_engine_health_source": "real contained IPC diagnostic receipt and aggregate C++ session event",
-    "side_effects_enabled": false,
-    "production_cutover": false
+    "normal_mode": "no arguments",
+    "explicit_development_modes": ["--demo", "--offline-engine <path>"],
+    "implicit_default_mode": true,
+    "session_and_tackle_source": "native production Engine aggregate session snapshots",
+    "settings_source": "exact application-directory config/state.dat with DPAPI CurrentUser secrets",
+    "engine_health_source": "contained production Engine pair in normal mode; isolated diagnostic Engine in offline mode",
+    "side_effects_enabled": "only after signed entitlement, coherent target, foreground and immediate safety gates",
+    "production_cutover": true
+  },
+  "host_feature_composition": {
+    "native_fishing_start_stop": true,
+    "host_start_stop_hotkey": true,
+    "license_activation_and_refresh": true,
+    "telegram_transport": true,
+    "telegram_native_fishing_start_stop": true,
+    "telegram_statistics_and_tackle": true,
+    "streaming": {
+      "controller_and_containment_core": true,
+      "production_capture_network_chat_composition": false,
+      "embedded_encoder_and_tunnel_payloads": false
+    },
+    "telegram_player_scan_screenshot_focus_and_shutdown": false,
+    "production_memory_profile": {
+      "reeling_regions": true,
+      "player_status_regions": false,
+      "chat_regions": false
+    },
+    "about_update_action_exposed": false,
+    "startup_signed_admission": true,
+    "general_update_transaction_composed": false
   },
   "assertions": [
-    "Python composition constructs LegacyEngineFacade over the existing FishingBot.",
-    "Python production source has no reference to the offline native Engine or managed gate.",
-    "The native executable refuses startup unless the explicit offline gate marker is present.",
-    "The managed and native product source ownership gates reject Python/PySide/Nuitka/legacy runtime dependencies.",
-    "The Host assigns the child to a Common kill-on-close Job before handshake.",
-    "The Host accepts both private pipe channels through the Common PID-gated server pair.",
-    "The runnable WPF Host requires an explicit demo or offline Engine mode and does not expose production commands.",
-    "No Python pipe framing, PID verification, handshake, heartbeat, or security loop exists in the product repository.",
-    "No product Python bridge setup or worker entrypoint exists; Python remains a nonshipping characterization oracle only.",
-    "The handshake advertises no side-effect support and accepts no side-effect authority.",
-    "The Host applies one complete validated persisted settings snapshot and the Engine exposes its exact accepted revision.",
-    "The Engine event channel has one cancellable writer: safety/lifecycle frames are priority-bounded and latest aggregate snapshots coalesce through frozen Common buffers.",
-    "The Engine rejects semantically duplicate hotkeys and the Host blocks saving the same conflict.",
-    "Fishing consumes the frozen Common Windows process, window and packet-budget package without copying those generic mechanisms.",
-    "The real native chat capture, detector and mutation adapters exist only behind disabled composition; no offline IPC command can construct or invoke them.",
-    "Native chat mutations use exact-budget complete pulse batches, partial-prefix release cleanup and cancellable waits without granting production side-effect authority.",
-    "The native fishing-stage detector consumes only embedded hash-pinned templates and immutable frames; live capture is not composed and no Host frame/detector command exists.",
-    "The native inventory-store episode owns menu dismissal, stage exit, inventory open, item reflow, remove confirmation, bounded cleanup and optional resume behind one final-sequence mutation port; no live observer, mutation adapter or Host command is composed.",
-    "The native fishing episode owns casting, hooking and reeling as one cancellable Engine operation over coherent stage/memory observations and one exclusive lease; every typed intent reaches an immediate final gate, while the live observer and mutation adapter remain disabled and no Host step command exists.",
-    "The native meal, garbage and equipment recovery capabilities execute as coarse Engine-owned operations inside the same inventory session and exact-sequence mutation port; bounded confirmation, recovery and terminal outcomes cannot bypass the disabled live composition.",
-    "Host and Engine independently verify the same exact signed entitlement raw bytes and product claims through frozen Common managed 0.1.3 and native 0.1.2 packages.",
-    "The production Keygen RSA public key is absent; the unrelated startup-block Ed25519 key is never reused and automation admission remains fail-closed.",
-    "FishingBot calls the Python catch-disposition oracle before its existing keep/release side effect.",
-    "The offline catch-disposition result is diagnostic and cannot authorize physical input.",
-    "The offline native target is disabled by default and excluded from current packaging."
+    "Sonar.exe with no arguments is the normal product entrypoint and creates the production WPF Host composition.",
+    "The Host starts only the colocated hash-verified Sonar.Engine.exe through Common process containment.",
+    "The production Engine composes Win32 capture, memory observation and guarded mutation adapters inside one coarse fishing session.",
+    "No product automation command can bypass signed entitlement, coherent target, foreground, packet-budget and immediate runtime-safety gates.",
+    "The explicit --offline-engine mode remains diagnostic and never grants production side-effect authority.",
+    "The production Keygen RSA public key is embedded and independently enforced by Host and Engine.",
+    "Fishing product source, tests and entrypoints contain no Python runtime or Python product composition.",
+    "The normal Host lifecycle owns one global rising-edge start/stop hotkey reader over the latest persisted gesture and the existing coarse entitlement-gated automation command.",
+    "Telegram long polling is production-composed; native fishing start/stop, current statistics and tackle projections use the same production runtime.",
+    "The current production memory profile proves reeling regions only; player-status and chat regions are absent and cannot be reported as memory authority.",
+    "The native game-chat episode is offline-tested but is not instantiated by normal production composition.",
+    "Streaming has tested core contracts but no complete production composition because capture, authenticated network, chat bridge and embedded tool payload owners are absent.",
+    "Telegram player scan, screenshot, focus, game shutdown and PC shutdown remain fail-closed because no native product adapter is composed.",
+    "About exposes no dead update action; only signed startup admission is production-composed until the release endpoint, trust and after-exit executor exist."
   ],
-  "removal_gate": "Change production authority only after product behavior parity, coarse session contract, safety and crash gates, release allowlist verification, explicit cutover, and rollback acceptance."
+  "remaining_release_gates": [
+    "successful normal no-argument lifecycle against the current signed startup service",
+    "authorized live GTA acceptance of every automation stage without bypassing safety gates",
+    "production Authenticode signing and timestamp verification",
+    "install, update, rollback and crash-recovery allowlist acceptance"
+  ],
+  "cutover_status": "Native source, build and runtime authority cutover is complete; live acceptance and signed distribution remain separate release gates."
 }

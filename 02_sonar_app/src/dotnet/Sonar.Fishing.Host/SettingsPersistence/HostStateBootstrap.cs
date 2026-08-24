@@ -30,8 +30,8 @@ public static class HostStateBootstrap
                                           ArgumentException)
         {
             throw new HostStateStartupException(
-                "Не удалось безопасно загрузить config/state.dat. " +
-                "Запуск остановлен, чтобы не потерять настройки.",
+                "Не удалось безопасно загрузить настройки приложения. " +
+                "Запуск остановлен, чтобы не потерять их.",
                 exception);
         }
     }

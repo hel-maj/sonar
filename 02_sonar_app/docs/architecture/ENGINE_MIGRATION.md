@@ -1,7 +1,13 @@
 # Sonar Fishing Engine migration
 
-Статус: implementation начата, Phase 1 Python isolation, Phase 2 C++ offline
-parity, Phase 3 inert WPF shell, Phase 4 offline Host/Engine IPC, Phase 5 Common
+Статус: native source/build/runtime cutover выполнен. WPF/C# Host и C++20
+Engine являются единственным product runtime; no-argument launch выбирает
+manifest-bound production composition без Python. Оставшиеся задачи относятся
+к live GTA acceptance, streaming adapters, signing/install/update/rollback и
+release evidence, а не к возврату legacy runtime.
+
+Ниже сохранён последовательный implementation log: Phase 1 Python isolation,
+Phase 2 C++ offline parity, Phase 3 inert WPF shell, Phase 4 offline Host/Engine IPC, Phase 5 Common
 boundary hardening, Phase 6 catch-disposition parity, Phase 7 product UI parity
 ledger и inert session summary, Phase 8 runnable offline WPF Host, Phase 9
 nonshipping Python characterization seam, Phase 10 native session statistics +
@@ -22,12 +28,13 @@ bounded embedded-only Host streaming lifecycle, Phase 33 native fishing-stage
 visual detection, Phase 34 signed Host release transaction core, Phase 35
 native inventory/menu/store-fish episode, Phase 36 native coherent memory
 observation, Phase 39 native whole fishing episode and Phase 40 native
-meal/garbage/equipment whole episodes;
-production cutover не начат
+meal/garbage/equipment whole episodes. Эти phase-описания исторические; текущий
+authoritative статус capability находится в
+[production cutover checklist](PRODUCTION_CUTOVER_CHECKLIST.md).
 
 Дата аудита: 2026-07-23
 
-Дата последней implementation проверки: 2026-08-22
+Дата последней implementation проверки: 2026-08-23
 
 Managed migration builds pin .NET SDK 10.0.400 through root `global.json`;
 package/feed hashes remain enforced by the product-owned test entrypoints.
@@ -40,11 +47,11 @@ Product decision: [ADR-0001](ADR-0001-WPF-CSHARP-CPP-ENGINE.md)
 - `tests`: 41 file, около 11 913 строк и 565 `test_*` functions.
 - PySide runtime surface концентрирован в нескольких files, но
   `src/sonar/ui/main_window.py` имеет 4513 строк и является composition root.
-- На момент baseline C#, C++, XAML и versioned IPC schema отсутствовали.
-  Текущее Phase 40 состояние содержит product-owned offline C++ libraries,
-  запускаемый WPF migration Host с явными demo/offline modes, product schema и
-  отдельный offline Engine executable. Python production composition и
-  authority не изменены.
+- На момент baseline C#, C++, XAML и versioned IPC schema отсутствовали. Это
+  только исторический baseline: текущий checkout содержит shipping WPF Host,
+  C++ Engine, typed IPC, normal no-argument production mode и отдельные явные
+  demo/offline diagnostics. Python product source и production composition
+  удалены из target graph.
 - Worktree был dirty до аудита; существующие изменения не являются частью
   этого документа.
 
@@ -419,7 +426,7 @@ Dependency direction проверена по restore assets:
 
 ```text
 Sonar.Fishing.Host
-  -> exact PackageReference Sonar.UI.Wpf [0.2.13]
+  -> exact PackageReference Sonar.UI.Wpf [0.2.18]
   -> Phase 4 Platform IPC PackageReference, currently pinned [0.1.1]
   -> product Sonar.Fishing.Ipc.Contracts ProjectReference
   -> Microsoft Windows Desktop Runtime/SDK references
@@ -427,8 +434,8 @@ Sonar.Fishing.Host
 
 `ProjectReference` или source copy из Common отсутствуют. Product-local
 `ProjectReference` на Fishing contracts добавлен только в Phase 4. Текущий
-UI package 0.2.13 проверен из stable workspace feed с SHA-256
-`A2A7BB255E511729E5A2FC1157E72C34D5A19C0EEA03969596B62BFB6FDDD221`.
+UI package 0.2.18 проверен из candidate feed с SHA-256
+`737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6`.
 Phase 3 WPF tests ссылаются через `ProjectReference` только на product Host
 project.
 
@@ -581,8 +588,8 @@ Managed package hashes frozen workspace feed `.artifacts/sonar-feed` (его м�
   `0CF50FDAFFF00608F0B5742C39A15B3AB24CF79329DA8B07A01404E9F7A45214`;
 - `Sonar.Platform.Processes.0.1.0.nupkg` -
   `03DEE12DCB7F2C30A21921A9198CA5388D93A682B8CCE69658CAD0E1996AE5EB`;
-- `Sonar.UI.Wpf.0.2.13.nupkg` -
-  `A2A7BB255E511729E5A2FC1157E72C34D5A19C0EEA03969596B62BFB6FDDD221`.
+- `Sonar.UI.Wpf.0.2.18.nupkg` -
+  `737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6`.
 
 Phase 5 removed temporary Common duplicates:
 
@@ -1052,7 +1059,7 @@ operation was added and no measured hotspot exists.
 
 ### Phase 20-22 - Common UI, mutable statistics and Windows safety boundary
 
-The complete eight-page WPF composition consumes frozen `Sonar.UI.Wpf 0.2.13`
+The complete eight-page WPF composition consumes frozen `Sonar.UI.Wpf 0.2.18`
 without copied Common source. It uses the shared responsive AppShell/AppBrand,
 4/8/12 grid and page/settings/table/master-detail/state patterns, embeds the
 Fishing logo and 31 fish images, preserves plain-letter hotkeys through the
@@ -1060,7 +1067,7 @@ Common `HotkeyGesture` contract and renders 132 deterministic compact/medium/
 expanded and DPI variants. Statistics owns atomic custom-price revisions and a
 coarse session reset command.
 
-Native target preflight consumes frozen `SonarPlatformWindows 0.1.1` for
+Native target preflight consumes frozen `SonarPlatformWindows 0.1.6` for
 least-rights process identity/generation, coherent window validation and the
 pure packet budget. Product policy still owns entitlement/settings/lifecycle
 ordering. No GTA process/window, capture or input action has run. Native CTest
@@ -1478,6 +1485,16 @@ readiness and shared input-lease gates. Live multi-build/profile-drift and
 target-loss evidence require a later explicit readiness review. The full
 boundary is [MEMORY_OBSERVATION_NATIVE.md](MEMORY_OBSERVATION_NATIVE.md).
 
+The first guarded read-only pass on 2026-08-24 confirmed target, executable
+hash-read and capture, but the current GTA executable did not match the sole
+embedded profile, so reeling memory remained fail-closed. A separate
+OFF-by-default [build-profile compatibility probe](BUILD_PROFILE_COMPATIBILITY_PROBE.md)
+now evaluates that unknown hash only as a distinct in-memory candidate with
+complete unique anchor scans, bounded entity count, exact active-fish identity,
+coherent snapshot and post-capture revalidation. It is not linked into Engine,
+does not reuse registry admission identity/SHA semantics and cannot add a
+profile or authorize input.
+
 ### Phase 39 - native whole fishing episode
 
 Effective `_prepare_fishing_start`, `_casting_control_loop`, `_do_hooking` and
@@ -1582,19 +1599,20 @@ remain open. The detailed contract is
   and atomic product revisions are green offline; final activation/crash/update
   bundle lifecycle matrix is not implemented. Persistent history in target is
   intentionally absent.
-- Engine-verifiable entitlement contract and cross-language fixture are green,
-  but the exact production Keygen RSA public key/key id are absent; physical
-  admission, package and smoke therefore remain fail closed.
+- Engine-verifiable entitlement, embedded production Keygen RSA public key/key
+  id, HTTPS activation/refresh/cache/revocation and independent raw-envelope
+  verification are production-composed. Authorized expiry/revocation/live
+  acceptance remains open; no test substitutes a trust root.
 - Fishing-stage CV assets and FHD/2K/4K geometry corpus are frozen and green;
   catch-screen plus tackle/item-info OCR/native detector corpora remain open.
-- Inventory/menu/store-fish sequencing, retries, reflow, confirmations and
-  cleanup are green offline; the E14 menu/item observer, guarded shared-lease
-  mutation adapter, real target-loss and hard-crash evidence remain open.
-- Reeling/inventory/player-status/chat memory decoding, exact generation/hash
-  admission, coherent bounded aggregation and the whole cast/hook/reel episode
-  are green offline; the signed production profile, target resolver, semantic
-  cast/hook detector composition and guarded live multi-build evidence remain
-  open. The Windows connector and live mutation port are not wired.
+- Inventory/menu/store-fish sequencing, E14 menu/item observation and the
+  guarded shared production mutation lease are composed. Authentic target-loss,
+  multi-resolution confirmation and hard-crash evidence remain open.
+- Reeling/inventory/player-status/chat memory decoding, exact embedded
+  generation/hash profile admission, concrete Windows connector, target
+  resolver, coherent capture/aggregation and guarded cast/hook/reel mutation
+  are production-composed. Only the exact supported build is admitted;
+  authorized live build/target-loss/hard-crash evidence remains open.
 - Streaming lifecycle/order/cancellation/restart/cleanup and Common process
   containment are green under offline fakes, but signed embedded payloads,
   guarded capture, authenticated viewer/network/chat adapters, production
@@ -1617,6 +1635,6 @@ remain open. The detailed contract is
 - Queue count/byte bounds and per-frame Common limits are explicit; production
   p50/p95/max latency and pressure samples are not measured yet.
 
-Runnable WPF migration Host уже выполнен без этих dependencies. Gaps блокируют
-production WPF/C++ authority cutover and release,
-но не explicit demo/offline diagnostic mode.
+Runnable WPF Host и C++ Engine production authority cutover выполнен. Эти gaps
+блокируют утверждение signed/live release readiness для конкретного окружения,
+но не normal no-argument product launch и не explicit demo/offline diagnostics.

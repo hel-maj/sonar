@@ -13,8 +13,7 @@
             <StackPanel>
                 <common:PageHeader
                     x:Name="SettingsHeader"
-                    Title="Настройки"
-                    Subtitle="Выберите поведение и горячие клавиши">
+                    Title="Настройки">
                     <common:PageHeader.Actions>
                         <StackPanel Orientation="Horizontal">
                             <common:ActionButton
@@ -37,7 +36,7 @@
                 <common:NotificationBanner
                     Margin="0,24,0,0"
                     Header="{Binding ViewModel.SaveStatus, ElementName=Root}"
-                    Tone="Success">
+                    Tone="Warning">
                     <common:NotificationBanner.Style>
                         <Style
                             BasedOn="{StaticResource {x:Type common:NotificationBanner}}"
@@ -54,8 +53,7 @@
 
                 <common:SettingsSection
                     Margin="0,24,0,0"
-                    Header="Поведение"
-                    Description="Все изменения применятся после нажатия «Сохранить».">
+                    Header="Поведение">
                     <StackPanel>
                         <common:SettingItem Header="Автоматически использовать еду" Description="Восстанавливать показатели игрока по заданным порогам">
                             <common:ToggleSwitch IsChecked="{Binding ViewModel.AutoMeal, ElementName=Root, Mode=TwoWay}" />

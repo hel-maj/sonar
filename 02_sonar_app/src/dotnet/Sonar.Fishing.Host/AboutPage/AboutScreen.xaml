@@ -37,22 +37,7 @@
                         Value="{Binding ViewModel.Subscription, ElementName=Root}" />
                 </layout:ResponsiveGrid>
 
-                <common:Card Margin="0,24,0,0" Header="Обновление">
-                    <StackPanel>
-                        <TextBlock
-                            Text="{Binding ViewModel.UpdateStatus, ElementName=Root}"
-                            TextWrapping="Wrap" />
-                        <common:ActionButton
-                            Margin="0,16,0,0"
-                            HorizontalAlignment="Left"
-                            AutomationProperties.Name="Скачать обновление"
-                            Content="Скачать обновление"
-                            IsEnabled="{Binding ViewModel.CanDownloadUpdate, ElementName=Root}"
-                            Role="Primary" />
-                    </StackPanel>
-                </common:Card>
-
-                <common:Card Margin="0,16,0,0" Header="Диагностика">
+                <common:Card Margin="0,24,0,0" Header="Диагностика">
                     <StackPanel>
                         <TextBlock
                             Text="{Binding ViewModel.DiagnosticsStatus, ElementName=Root}"

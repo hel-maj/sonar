@@ -35,7 +35,10 @@ public sealed record TelegramMenuCapabilities(
     bool Fishing,
     bool Statistics,
     bool Tackle,
-    bool Streaming);
+    bool Streaming,
+    bool PlayerStatus = false,
+    bool GameControl = false,
+    bool SystemControl = false);
 
 public static class TelegramMenuPlanner
 {
@@ -63,9 +66,18 @@ public static class TelegramMenuPlanner
         {
             fishingTools.Add(new TelegramMenuButton("🎒 Снаряжение", "action:tackle"));
         }
-        fishingTools.Add(new TelegramMenuButton("📊 Показатели", "action:player_status"));
-        rows.Add(fishingTools);
-        rows.Add([new TelegramMenuButton("🔎 Просканировать показатели", "action:scan_player_status")]);
+        if (capabilities.PlayerStatus)
+        {
+            fishingTools.Add(new TelegramMenuButton("📊 Показатели", "action:player_status"));
+        }
+        if (fishingTools.Count > 0)
+        {
+            rows.Add(fishingTools);
+        }
+        if (capabilities.PlayerStatus)
+        {
+            rows.Add([new TelegramMenuButton("🔎 Просканировать показатели", "action:scan_player_status")]);
+        }
         if (capabilities.Fishing)
         {
             rows.Add([
@@ -74,12 +86,26 @@ public static class TelegramMenuPlanner
                     "action:start_stop"),
             ]);
         }
-        rows.Add([new TelegramMenuButton("🎮 Вернуть фокус игре", "action:focus_game")]);
-        rows.Add([new TelegramMenuButton("📸 Скриншот игры", "action:screen")]);
-        rows.Add([
-            new TelegramMenuButton("🖥 Выключить ПК", "action:shutdown_pc"),
-            new TelegramMenuButton("🎮 Выключить игру", "action:shutdown_game"),
-        ]);
+        if (capabilities.GameControl)
+        {
+            rows.Add([new TelegramMenuButton("🎮 Вернуть фокус игре", "action:focus_game")]);
+            rows.Add([new TelegramMenuButton("📸 Скриншот игры", "action:screen")]);
+        }
+        if (capabilities.GameControl && capabilities.SystemControl)
+        {
+            rows.Add([
+                new TelegramMenuButton("🖥 Выключить ПК", "action:shutdown_pc"),
+                new TelegramMenuButton("🎮 Выключить игру", "action:shutdown_game"),
+            ]);
+        }
+        else if (capabilities.GameControl)
+        {
+            rows.Add([new TelegramMenuButton("🎮 Выключить игру", "action:shutdown_game")]);
+        }
+        else if (capabilities.SystemControl)
+        {
+            rows.Add([new TelegramMenuButton("🖥 Выключить ПК", "action:shutdown_pc")]);
+        }
         return new TelegramMenuPlan("🎣 Меню рыболовного бота", rows);
     }
 

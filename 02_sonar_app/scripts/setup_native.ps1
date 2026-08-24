@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$CommonFeed = $env:SONAR_COMMON_FEED
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -46,18 +48,30 @@ if (-not ($cmakeCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType 
     throw "CMake from Visual Studio 2022 is not available"
 }
 
-$commonFeed = Join-Path $productRoot "..\..\.artifacts\sonar-feed"
+$commonFeed = if ([string]::IsNullOrWhiteSpace($CommonFeed)) {
+    Join-Path $productRoot "..\..\.artifacts\sonar-feed"
+}
+elseif ([IO.Path]::IsPathRooted($CommonFeed)) {
+    $CommonFeed
+}
+else {
+    Join-Path $productRoot $CommonFeed
+}
+if (-not (Test-Path -LiteralPath $commonFeed -PathType Container)) {
+    throw "Pinned dependency feed is missing: $commonFeed"
+}
+$commonFeed = (Resolve-Path -LiteralPath $commonFeed).Path
 $nativePackage = Join-Path $productRoot "..\..\.artifacts\sonar-native\0.1.1"
-$nativeWindowsPackage = Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.1"
+$nativeWindowsPackage = Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.6"
 $nativeLicensingPackage = Join-Path $productRoot "..\..\.artifacts\sonar-native-licensing\0.1.2"
 $expected = @{
-    (Join-Path $commonFeed "Sonar.UI.Wpf.0.2.13.nupkg") = "A2A7BB255E511729E5A2FC1157E72C34D5A19C0EEA03969596B62BFB6FDDD221"
+    (Join-Path $commonFeed "Sonar.UI.Wpf.0.2.18.nupkg") = "737CB6EAC3FDB7A25D20D0B74626F6912092848C2697A8E200A9570CFDF955F6"
     (Join-Path $commonFeed "emoji.wpf.0.3.4.nupkg") = "A9C0570F97961E3DC2B2BA9E41EB7B28808733D194742D837653478EECE7D191"
     (Join-Path $commonFeed "stfu.0.1.1.nupkg") = "BDD1BAEEEC5FF16B74D0354B88393D002A6E8ECBB19793AB900B9151CE686B3A"
     (Join-Path $commonFeed "jeremyansel.hlsl.targets.1.0.13.nupkg") = "4F4CC76E9EFD35F605042FB6D8BD64EF1203F2174DED65217779BB049CFB22E8"
     (Join-Path $commonFeed "Sonar.Licensing.Verification.0.1.3.nupkg") = "CA1DAC5C5220872F15130C863AB5D12E85709AC19D4972AFC7193C8223FA7518"
     (Join-Path $nativePackage "SHA256SUMS.txt") = "695B6BFAD82A3052A5021BA55F9F833D81672DA755BF98626CC66CFB3DACAE0C"
-    (Join-Path $nativeWindowsPackage "SHA256SUMS.txt") = "052F20CF47881FEDB75E25128BB48970798BF22B726DBD71482AFC282907BBAE"
+    (Join-Path $nativeWindowsPackage "SHA256SUMS.txt") = "EE61031CBC06550FD478892EFECD250FD4786790C5687F260B2D40B85B5C9446"
     (Join-Path $nativeLicensingPackage "SHA256SUMS.txt") = "E777E623A2974E07CF4338670C3A41DF13BCDB8990F447987BB1BC0FF21834AC"
 }
 foreach ($pair in $expected.GetEnumerator()) {

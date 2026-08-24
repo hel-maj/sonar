@@ -39,8 +39,8 @@
                 <common:NotificationBanner
                     x:Name="TelegramInteractionBanner"
                     Margin="0,24,0,0"
-                    Header="Готовность Telegram"
-                    Tone="Info">
+                    Header="{Binding ViewModel.InteractionMessage, ElementName=Root}"
+                    Tone="Warning">
                     <common:NotificationBanner.Style>
                         <Style
                             BasedOn="{StaticResource {x:Type common:NotificationBanner}}"
@@ -55,9 +55,6 @@
                             </Style.Triggers>
                         </Style>
                     </common:NotificationBanner.Style>
-                    <TextBlock
-                        Text="{Binding ViewModel.InteractionMessage, ElementName=Root}"
-                        TextWrapping="Wrap" />
                 </common:NotificationBanner>
 
                 <common:SettingsSection

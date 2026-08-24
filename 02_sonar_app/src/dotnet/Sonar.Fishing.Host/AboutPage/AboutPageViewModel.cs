@@ -15,8 +15,9 @@ public sealed class AboutPageViewModel : ObservableObject
         this.clearDiagnostics = clearDiagnostics;
         var assembly = typeof(AboutPageViewModel).Assembly;
         Version = assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-        Build = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? Version;
+        var informationalVersion =
+            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        Build = ToUserBuild(informationalVersion, Version);
         diagnosticsStatus = clearDiagnostics is null
             ? "Журнал недоступен"
             : "При обращении в поддержку приложите журнал";
@@ -29,10 +30,6 @@ public sealed class AboutPageViewModel : ObservableObject
 
     public string Subscription => "Определяется лицензией";
 
-    public string UpdateStatus => "Проверка обновлений недоступна";
-
-    public bool CanDownloadUpdate => false;
-
     public bool CanClearDiagnostics => clearDiagnostics is not null;
 
     public string DiagnosticsStatus
@@ -42,6 +39,18 @@ public sealed class AboutPageViewModel : ObservableObject
     }
 
     public IRelayCommand ClearDiagnosticsCommand { get; }
+
+    private static string ToUserBuild(string? informationalVersion, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            return fallback;
+        }
+        var metadataSeparator = informationalVersion.IndexOf('+');
+        return metadataSeparator > 0
+            ? informationalVersion[..metadataSeparator]
+            : informationalVersion;
+    }
 
     private void ClearDiagnostics()
     {

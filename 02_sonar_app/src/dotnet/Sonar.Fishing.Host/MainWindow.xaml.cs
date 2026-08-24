@@ -9,6 +9,7 @@ namespace Sonar.Fishing.Host;
 public partial class MainWindow : Window
 {
     internal const int LifecycleShutdownFailureExitCode = 6;
+    internal const int LifecycleStartupFailureExitCode = 7;
     private static readonly TimeSpan DefaultShutdownTimeout = TimeSpan.FromSeconds(10);
 
     private readonly IHostLifecycle _lifecycle;
@@ -54,7 +55,46 @@ public partial class MainWindow : Window
     private async void OnContentRendered(object? sender, EventArgs e)
     {
         ContentRendered -= OnContentRendered;
-        await _lifecycle.StartAsync().ConfigureAwait(true);
+        try
+        {
+            await _lifecycle.StartAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception) when (_closing)
+        {
+            // The close path already owns cleanup and the final exit status.
+            Trace.TraceWarning(
+                $"Host lifecycle startup ended while closing: {exception.GetType().Name}");
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError(
+                $"Host lifecycle startup failed: {exception.GetType().Name}");
+            _closing = true;
+            await StopAfterStartupFailureAsync().ConfigureAwait(true);
+        }
+    }
+
+    private async Task StopAfterStartupFailureAsync()
+    {
+        var stopTask = _lifecycle.StopAsync();
+        try
+        {
+            await stopTask.WaitAsync(_shutdownTimeout).ConfigureAwait(true);
+        }
+        catch (Exception)
+        {
+            if (!stopTask.IsCompleted)
+            {
+                _ = ObserveLateStopAsync(stopTask);
+            }
+        }
+
+        _allowClose = true;
+        _shutdownApplication(LifecycleStartupFailureExitCode);
+        if (IsVisible)
+        {
+            Close();
+        }
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)

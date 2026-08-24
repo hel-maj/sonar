@@ -5,6 +5,7 @@ using System.Windows.Threading;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.IO;
+using System.Diagnostics;
 using Sonar.Fishing.Host.AboutPage;
 using Sonar.Fishing.Host.FishingPage;
 using Sonar.Fishing.Host.LicensePage;
@@ -30,6 +31,8 @@ internal static class DesignSystemCompositionTests
         new("embedded_fishing_brand_has_no_loose_runtime_asset", BrandIsEmbedded),
         new("all_eight_product_pages_are_composed_from_common_patterns", AllPagesAreComposed),
         new("settings_page_persists_one_complete_next_revision", SettingsSaveIsAtomic),
+        new("rapid_product_settings_toggles_preserve_final_intent_without_banner_spam", RapidSettingsTogglesRemainResponsive),
+        new("repeated_product_navigation_and_focus_never_resolve_unset_value", RepeatedNavigationAndFocusRemainStable),
         new("settings_combo_projects_selected_record_label", SettingsComboProjectsSelectedLabel),
         new("product_text_inputs_use_common_keyed_templates", ProductTextInputsUseCommonTemplates),
         new("settings_threshold_sliders_use_common_template_without_geometry_change", SettingsSlidersUseCommonTemplate),
@@ -145,6 +148,107 @@ internal static class DesignSystemCompositionTests
         TestAssert.True(!persisted.Behavior.AutoMeal, "Behavior edit was not persisted");
         TestAssert.Equal("F8", persisted.Hotkeys.StartStop, "Hotkey edit was not normalized");
         TestAssert.True(!viewModel.IsDirty, "Saved settings remained dirty");
+        TestAssert.Equal(string.Empty, viewModel.SaveStatus, "Successful settings save exposed a flash banner");
+    }
+
+    private static void RapidSettingsTogglesRemainResponsive()
+    {
+        FishingRuntimeSettings? persisted = null;
+        var viewModel = new FishingSettingsPageViewModel(
+            FishingRuntimeSettings.CreateDefault(revision: 17),
+            settings => persisted = settings);
+        var screen = new SettingsScreen { ViewModel = viewModel };
+        Arrange(screen, new Size(1_280, 800));
+        var toggle = WpfTestVisualTree.FindDescendants<ToggleSwitch>(screen).First();
+        var saveStatusChanges = 0;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(FishingSettingsPageViewModel.SaveStatus))
+            {
+                saveStatusChanges++;
+            }
+        };
+
+        const int toggleCount = 501;
+        var elapsed = Stopwatch.StartNew();
+        for (var index = 0; index < toggleCount; index++)
+        {
+            toggle.SetCurrentValue(
+                ToggleButton.IsCheckedProperty,
+                !(toggle.IsChecked ?? false));
+        }
+        Dispatcher.CurrentDispatcher.Invoke(
+            () => { },
+            DispatcherPriority.Background);
+        elapsed.Stop();
+
+        TestAssert.True(
+            elapsed.Elapsed < TimeSpan.FromSeconds(2),
+            $"Rapid product toggles blocked the STA dispatcher for {elapsed.Elapsed}");
+        TestAssert.True(!viewModel.AutoMeal, "Rapid product toggles lost the final intent");
+        TestAssert.True(viewModel.SaveCommand.CanExecute(null), "Final toggle state was not saveable");
+        viewModel.SaveCommand.Execute(null);
+        TestAssert.True(persisted is not null, "Rapid product settings were not persisted");
+        TestAssert.True(!persisted!.Behavior.AutoMeal, "Persisted settings lost the final toggle intent");
+        TestAssert.Equal<ulong>(18, persisted.Revision, "Rapid toggles advanced more than one saved revision");
+        TestAssert.Equal(0, saveStatusChanges, "Rapid toggles emitted transient save-banner state");
+        TestAssert.Equal(string.Empty, viewModel.SaveStatus, "Rapid toggle save exposed a banner");
+    }
+
+    private static void RepeatedNavigationAndFocusRemainStable()
+    {
+        var shell = new FishingHostShell
+        {
+            ViewModel = FishingHostShellViewModel.CreatePreview(),
+        };
+        Arrange(shell, new Size(1_280, 800));
+        var routes = new Action[]
+        {
+            () => shell.ViewModel.ShowOverviewCommand.Execute(null),
+            () => shell.ViewModel.ShowFishingCommand.Execute(null),
+            () => shell.ViewModel.ShowSettingsCommand.Execute(null),
+            () => shell.ViewModel.ShowStatisticsCommand.Execute(null),
+            () => shell.ViewModel.ShowStreamingCommand.Execute(null),
+            () => shell.ViewModel.ShowTelegramCommand.Execute(null),
+            () => shell.ViewModel.ShowAboutCommand.Execute(null),
+            () => shell.ViewModel.ShowLicenseCommand.Execute(null),
+        };
+        var observedControls = 0;
+        var traversalAttempts = 0;
+        for (var pass = 0; pass < 3; pass++)
+        {
+            foreach (var route in routes)
+            {
+                route();
+                Arrange(shell, new Size(1_280, 800));
+                Dispatcher.CurrentDispatcher.Invoke(
+                    () => { },
+                    DispatcherPriority.Background);
+                var pageHost = TestAssert.IsType<ContentControl>(
+                    shell.FindName("PageHost"),
+                    "Page host is missing during focus stability pass");
+                foreach (var control in WpfTestVisualTree.FindDescendants<Control>(pageHost)
+                             .Where(item => item.Focusable && item.IsEnabled &&
+                                 item.Visibility == Visibility.Visible)
+                             .Take(8))
+                {
+                    control.ApplyTemplate();
+                    FocusManager.SetFocusedElement(shell, control);
+                    _ = control.MoveFocus(new TraversalRequest(
+                        FocusNavigationDirection.Next));
+                    traversalAttempts++;
+                    var focusVisual = control.GetValue(Control.FocusVisualStyleProperty);
+                    TestAssert.True(
+                        !ReferenceEquals(focusVisual, DependencyProperty.UnsetValue),
+                        $"{control.GetType().Name} resolved FocusVisualStyle to UnsetValue");
+                    observedControls++;
+                }
+            }
+        }
+        TestAssert.True(observedControls >= 24, "Product focus pass did not exercise enough controls");
+        TestAssert.True(
+            traversalAttempts == observedControls,
+            "Product keyboard traversal did not cover every focused control");
     }
 
     private static void SettingsComboProjectsSelectedLabel()
@@ -349,6 +453,10 @@ internal static class DesignSystemCompositionTests
         TestAssert.Equal("fake-token", persisted!.BotToken, "Telegram token changed during Host save");
         TestAssert.True(persisted.Settings.Notifications.FocusLost, "Telegram policy edit was lost");
         TestAssert.True(!viewModel.IsDirty, "Saved Telegram settings remained dirty");
+        TestAssert.Equal(
+            string.Empty,
+            viewModel.InteractionMessage,
+            "Successful Telegram save exposed a flash banner");
     }
 
     private static void TelegramCredentialEditorsAreVisible()

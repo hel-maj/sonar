@@ -23,6 +23,7 @@ target_link_libraries(SonarFishingAutomationAdapters
         Sonar::FishingRuntimePlatform
         Sonar::FishingRuntimeSafety
         Sonar::FishingStageDetection
+        Sonar::PlatformInventoryState
         advapi32
         windowsapp
 )

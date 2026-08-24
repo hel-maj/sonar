@@ -20,6 +20,7 @@ internal static class UpdateRuntimeTests
         new("release_swap_exception_rolls_back_old_pair", SwapExceptionRollsBack),
         new("release_recovery_rolls_back_interrupted_generation", InterruptedGenerationRecovers),
         new("release_staging_rejects_non_newer_version", NonNewerVersionIsRejected),
+        new("release_install_layout_rejects_nested_or_loose_runtime_artifacts", RuntimeDirectoriesAreExact),
         new("uninstall_plan_requires_exact_confirmation_and_safe_install_root", UninstallPlanIsSafe),
     ];
 
@@ -347,6 +348,35 @@ internal static class UpdateRuntimeTests
                 sourceTree.Root,
                 SafeUninstallPlan.ConfirmationPhrase),
             "Uninstall plan accepted a source tree");
+    }
+
+    private static void RuntimeDirectoriesAreExact()
+    {
+        using var install = TempInstall.Create();
+        var config = Directory.CreateDirectory(Path.Combine(install.Root, "config")).FullName;
+        var logs = Directory.CreateDirectory(Path.Combine(install.Root, "logs")).FullName;
+        File.WriteAllText(Path.Combine(config, "state.dat"), "state");
+        File.WriteAllText(Path.Combine(logs, "sonar.log"), "log");
+        ReleaseInstallLayout.ValidateSteadyState(install.Root);
+
+        var looseLog = Path.Combine(logs, "python.py");
+        File.WriteAllText(looseLog, "forbidden");
+        TestAssert.Throws<InvalidOperationException>(
+            () => ReleaseInstallLayout.ValidateSteadyState(install.Root),
+            "Install layout accepted a non-log runtime artifact");
+        File.Delete(looseLog);
+
+        var nestedLogs = Directory.CreateDirectory(Path.Combine(logs, "archive")).FullName;
+        TestAssert.Throws<InvalidOperationException>(
+            () => ReleaseInstallLayout.ValidateSteadyState(install.Root),
+            "Install layout accepted a nested logs directory");
+        Directory.Delete(nestedLogs);
+
+        var looseConfig = Path.Combine(config, "settings.json");
+        File.WriteAllText(looseConfig, "{}");
+        TestAssert.Throws<InvalidOperationException>(
+            () => ReleaseInstallLayout.ValidateSteadyState(install.Root),
+            "Install layout accepted a loose config artifact");
     }
 
     private static Dictionary<string, byte[]> Payloads() => new(StringComparer.Ordinal)

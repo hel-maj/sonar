@@ -83,6 +83,10 @@ internal static class ProductDiagnosticLogTests
         TestAssert.True(
             !unavailable.ClearDiagnosticsCommand.CanExecute(null),
             "Unavailable diagnostics clear command was enabled");
+        TestAssert.True(
+            !unavailable.Build.Contains('+', StringComparison.Ordinal) &&
+            unavailable.Build.Length <= 32,
+            "About page exposed full source metadata as the user-facing build");
     }
 
     private sealed class TempRoot : IDisposable

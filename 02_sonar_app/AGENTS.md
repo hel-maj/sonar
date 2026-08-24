@@ -92,9 +92,13 @@
 
 ## Live GTA capture
 
-- If a check requires user actions in GTA, a focused GTA window, or an
-  unminimized game, prepare the capture first and explain the complete action
-  sequence and sound legend.
+- A bounded product-owned read-only process or memory probe may run
+  autonomously when it needs no user state change, foreground window, screen
+  capture or recording, overlay, or input. Keep it one-shot, fail-closed and
+  report only its documented sanitized aggregate.
+- If a check requires user actions in GTA, a focused or unminimized GTA window,
+  screen capture or recording, or an interactive overlay, prepare it first and
+  explain the complete action sequence and sound legend.
 - Before starting a timer, recording, or live capture, explicitly ask the user
   to perform the required action and confirm it. Stop and wait for an
   unambiguous contextual reply such as `готов`, `открыл`, `закрыл`, or
@@ -105,6 +109,9 @@
   immediately visible. Treat it as a highlighted suggestion, not a password;
   accept another unambiguous contextual confirmation.
 - Never reuse readiness or an action confirmation from an earlier capture.
+- One unambiguous confirmation covers the one prepared attempt, including an
+  internal wrapper confirmation switch. Do not stop for a redundant second
+  confirmation between the countdown and that attempt.
 - After the required confirmation, allow 5 seconds for returning to the game
   unless another delay was stated in advance.
 - Short tonal or MIDI cues may combine a low dull tone, a high bright tone, and
@@ -116,5 +123,8 @@
 - Product Python memory/capture utilities were retired with the native cutover.
 - Use only the C++ observation adapters and frozen language-neutral fixtures
   documented by the owning native capability.
-- Live target attach, capture or input always requires a fresh readiness gate;
-  ordinary setup, test and build commands remain offline.
+- A read-only attach that satisfies the autonomous bounded-probe rule above
+  does not require a readiness prompt. Foreground-dependent observation,
+  capture or recording, interactive overlay activation and any synthetic or
+  physical input require a fresh gate for the exact prepared attempt; ordinary
+  setup, test and build commands remain offline.

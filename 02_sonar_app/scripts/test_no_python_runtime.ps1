@@ -2,7 +2,15 @@
 param(
     [string]$ProductRoot,
     [string]$BundleDirectory,
-    [ValidateSet("Package", "Installed")]
+    [ValidateSet(
+        "Package",
+        "FirstActivation",
+        "NormalExit",
+        "CrashRecovery",
+        "Updated",
+        "InterruptedUpdateRecovery",
+        "RemoteRollback",
+        "Installed")]
     [string]$BundleLifecycleStage = "Package",
     [switch]$RunSelfTest
 )

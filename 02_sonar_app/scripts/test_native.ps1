@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$CommonFeed = $env:SONAR_COMMON_FEED
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -11,5 +13,10 @@ foreach ($scriptName in @(
     "test_ipc.ps1"
 )) {
     $scriptPath = Join-Path $PSScriptRoot $scriptName
-    & $scriptPath
+    if ($scriptName -in @("setup_native.ps1", "test_dotnet.ps1", "test_ipc.ps1")) {
+        & $scriptPath -CommonFeed $CommonFeed
+    }
+    else {
+        & $scriptPath
+    }
 }

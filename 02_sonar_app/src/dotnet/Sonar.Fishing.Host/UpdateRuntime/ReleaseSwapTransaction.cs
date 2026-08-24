@@ -12,11 +12,27 @@ internal static class ReleaseSwapTransaction
     internal static void Apply(StagedProductRelease staged, Action<int>? afterMove)
     {
         ArgumentNullException.ThrowIfNull(staged);
-        var staging = ReleaseInstallLayout.ValidateTransactionDirectory(
+        ApplyVerifiedPayloadDirectory(
             staged.InstallRoot,
             staged.StagingDirectory,
+            afterMove);
+        staged.MarkActivated();
+    }
+
+    // Both the signed network stager and the explicit local maintenance mode
+    // arrive here only after independently verifying their payload boundary.
+    // Keeping the swap in one owner prevents the local after-exit workflow from
+    // reimplementing rollback and crash-recovery semantics in a script.
+    internal static void ApplyVerifiedPayloadDirectory(
+        string installRoot,
+        string stagingDirectory,
+        Action<int>? afterMove = null)
+    {
+        var staging = ReleaseInstallLayout.ValidateTransactionDirectory(
+            installRoot,
+            stagingDirectory,
             ".update-");
-        var root = ReleaseInstallLayout.ValidateSteadyState(staged.InstallRoot, staging);
+        var root = ReleaseInstallLayout.ValidateSteadyState(installRoot, staging);
         ReleaseInstallLayout.ValidatePayloadDirectory(staging);
 
         var transactionId = Path.GetFileName(staging)[".update-".Length..];
@@ -40,7 +56,6 @@ internal static class ReleaseSwapTransaction
             ReleaseInstallLayout.DeleteTransactionDirectory(root, rollback, ".rollback-");
             ReleaseInstallLayout.DeleteTransactionDirectory(root, staging, ".update-");
             ReleaseInstallLayout.ValidateSteadyState(root);
-            staged.MarkActivated();
         }
         catch (Exception exception)
         {

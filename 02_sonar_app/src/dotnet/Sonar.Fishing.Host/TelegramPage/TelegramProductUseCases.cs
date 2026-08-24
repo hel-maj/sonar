@@ -1,4 +1,6 @@
 using Sonar.Fishing.Host.FishingSessionState;
+using Sonar.Fishing.Host.EngineIntegration;
+using Sonar.Fishing.Host.SettingsPersistence;
 
 namespace Sonar.Fishing.Host.TelegramPage;
 
@@ -72,5 +74,84 @@ public sealed class UnavailableTelegramProductUseCases : ITelegramProductUseCase
         }
         return Task.FromResult(TelegramProductActionResult.Rejected(
             "⚠️ Команда недоступна в текущем режиме."));
+    }
+}
+
+internal sealed class FishingTelegramProductUseCases : ITelegramProductUseCases
+{
+    private readonly IFishingAutomationRuntime automationRuntime;
+    private readonly Func<FishingHostState> currentState;
+    private FishingSessionStateSnapshot session = FishingSessionStateSnapshot.Empty;
+
+    internal FishingTelegramProductUseCases(
+        IFishingAutomationRuntime automationRuntime,
+        Func<FishingHostState> currentState)
+    {
+        this.automationRuntime = automationRuntime ??
+            throw new ArgumentNullException(nameof(automationRuntime));
+        this.currentState = currentState ?? throw new ArgumentNullException(nameof(currentState));
+        if (automationRuntime is IFishingAutomationStateSource stateSource)
+        {
+            stateSource.SessionStateChanged += snapshot => Volatile.Write(ref session, snapshot);
+        }
+    }
+
+    public TelegramProductState Current
+    {
+        get
+        {
+            var state = currentState();
+            var snapshot = Volatile.Read(ref session);
+            var features = state.License.Features;
+            return new TelegramProductState(
+                new TelegramMenuCapabilities(
+                    Fishing: snapshot.Running || features.Contains("fishing_bot", StringComparer.Ordinal),
+                    Statistics: features.Contains("statistics", StringComparer.Ordinal),
+                    Tackle: features.Contains("fishing_tackle", StringComparer.Ordinal),
+                    Streaming: false),
+                snapshot,
+                PlayerStatus: null,
+                TacklePng: ReadOnlyMemory<byte>.Empty);
+        }
+    }
+
+    public async Task<TelegramProductActionResult> ExecuteAsync(
+        TelegramProductAction action,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Enum.IsDefined(action))
+        {
+            throw new ArgumentOutOfRangeException(nameof(action));
+        }
+        if (action != TelegramProductAction.ToggleFishing)
+        {
+            return TelegramProductActionResult.Rejected(
+                "⚠️ Команда недоступна в текущей версии.");
+        }
+
+        var before = Current;
+        if (!before.Capabilities.Fishing)
+        {
+            return TelegramProductActionResult.Rejected(
+                "🚤 Управление рыбалкой недоступно для этой подписки.");
+        }
+
+        try
+        {
+            var updated = before.Session.Running
+                ? await automationRuntime.StopAsync(cancellationToken).ConfigureAwait(false)
+                : await automationRuntime.StartAsync(cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref session, updated);
+            return TelegramProductActionResult.Message(
+                updated.Running
+                    ? "🚤 Рыбалка запущена."
+                    : "🛑 Рыбалка остановлена.");
+        }
+        catch (EngineCommandRejectedException)
+        {
+            return TelegramProductActionResult.Rejected(
+                "⚠️ Команда отклонена: проверьте лицензию и готовность игры.");
+        }
     }
 }

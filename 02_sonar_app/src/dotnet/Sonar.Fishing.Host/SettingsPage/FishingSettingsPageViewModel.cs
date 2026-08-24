@@ -331,7 +331,7 @@ public sealed class FishingSettingsPageViewModel : ObservableObject
             return;
         }
         AcceptSaved(settings);
-        SaveStatus = "Настройки обновлены";
+        SaveStatus = string.Empty;
     }
 
     public void DiscardChanges()
@@ -339,7 +339,7 @@ public sealed class FishingSettingsPageViewModel : ObservableObject
         if (pendingExternalSettings is { } external)
         {
             AcceptSaved(external);
-            SaveStatus = "Загружены актуальные настройки";
+            SaveStatus = string.Empty;
             return;
         }
         Draft = FishingSettingsDraft.FromSettings(
@@ -364,7 +364,7 @@ public sealed class FishingSettingsPageViewModel : ObservableObject
             return;
         }
         AcceptSaved(next);
-        SaveStatus = "Настройки сохранены";
+        SaveStatus = string.Empty;
     }
 
     private void UpdateBehavior(FishingBehaviorPolicy behavior)

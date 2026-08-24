@@ -1,7 +1,7 @@
 # Native Fishing stage detection
 
-Статус: offline parity accepted; production capture и action authority не
-подключены.
+Статус: production composition подключена; offline parity accepted, guarded
+live acceptance ещё не выполнен.
 
 ## Goal и граница
 
@@ -20,10 +20,10 @@ trigger ID, confidence и normalized bounds. Он не открывает про
 захватывает экран, не читает память, не вызывает input/clipboard/network и не
 имеет Host RPC.
 
-Non-goals этого slice: catch-screen OCR, tackle/item-info OCR, live capture,
-casting/hooking side effects и production admission. Они остаются отдельными
-целыми Engine-owned episodes, чтобы Host не разделял observation, decision,
-final gate и mutation.
+Сам detector по-прежнему не владеет capture, catch/tackle OCR, side effects или
+production admission. Normal Engine и отдельный non-shipping
+[live observation preflight](LIVE_OBSERVATION_PREFLIGHT.md) композируют его как
+pure часть цельной C++ operation; Host не получает frame/stage RPC.
 
 ## Build inputs и release representation
 
@@ -84,14 +84,14 @@ spectra. Дальнейшая algorithm change без нового corpus/perfor
 Текущий acceptance:
 
 - `SonarFishingStageDetectionTests`: `30/30`, invalid frame fail-closed;
-- native/IPC CTest: `21/21`;
-- managed IPC integration: `6/6`;
+- native/IPC CTest и managed IPC integration проходят текущий repository gate;
 - MSVC v143 Release `/W4 /WX`, managed warnings/errors `0/0`;
 - managed/native no-Python ownership scans green;
 - GTA/window/capture/input/network не запускались.
 
-До production authority остаются: versioned GTA target resolver, guarded
-capture composition, catch/tackle/item-info native OCR or embedded alternative,
-whole casting/hooking/reeling episodes, exact production entitlement trust root,
-final focus/settings/input revalidation и crash cleanup. Поэтому этот slice не
-меняет `production_cutover=false` и не разрешает package/smoke.
+Normal Engine уже использует exact target resolver, coherent capture и detector
+внутри whole fishing episode. До live acceptance остаются authentic
+multi-resolution/DPI runs, focus/target loss, supported-build confirmation и
+отдельный physical-input/crash-cleanup gate. Non-shipping preflight позволяет
+проверить observation path без создания input authority, но сам по себе не
+разрешает автоматизацию.

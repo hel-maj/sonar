@@ -97,10 +97,19 @@ try {
     Remove-Item -LiteralPath (Join-Path $bundle "debug.pdb") -Force
 
     Set-Content -LiteralPath (Join-Path $bundle "config\state.dat") -Value "fixture"
-    & (Join-Path $PSScriptRoot "test_no_python_runtime.ps1") `
-        -ProductRoot $productRoot `
-        -BundleDirectory $bundle `
-        -BundleLifecycleStage Installed
+    foreach ($lifecycleStage in @(
+            "Installed",
+            "FirstActivation",
+            "NormalExit",
+            "CrashRecovery",
+            "Updated",
+            "InterruptedUpdateRecovery",
+            "RemoteRollback")) {
+        & (Join-Path $PSScriptRoot "test_no_python_runtime.ps1") `
+            -ProductRoot $productRoot `
+            -BundleDirectory $bundle `
+            -BundleLifecycleStage $lifecycleStage
+    }
     Remove-Item -LiteralPath (Join-Path $bundle "config\state.dat") -Force
 
     Assert-Throws {
@@ -157,12 +166,37 @@ try {
         throw "release_smoke_authority_contract_invalid"
     }
 
+    $developmentRunnerText = Get-Content -Raw -LiteralPath `
+        (Join-Path $PSScriptRoot "run_dotnet.ps1")
+    if ($developmentRunnerText -match '(?m)^\s*--nologo\s*`?\s*$') {
+        throw "release_development_runner_forwards_nologo_to_host"
+    }
+    $productRunnerText = Get-Content -Raw -LiteralPath `
+        (Join-Path $PSScriptRoot "run_product.ps1")
+    if ($productRunnerText -notmatch 'Read-FishingBundleManifest' -or
+        $productRunnerText -notmatch 'Assert-FishingDesktopRuntime' -or
+        $productRunnerText -match '\.ArgumentList\.Add|\.Arguments\s*=') {
+        throw "release_normal_runner_contract_invalid"
+    }
+    $normalLifecycleText = Get-Content -Raw -LiteralPath `
+        (Join-Path $PSScriptRoot "test_product_lifecycle.ps1")
+    if ($normalLifecycleText -notmatch 'Intentionally no arguments' -or
+        $normalLifecycleText -match '\.ArgumentList\.Add|\.Arguments\s*=' -or
+        $normalLifecycleText -notmatch 'release_engine_exited_during_sustain' -or
+        $normalLifecycleText -notmatch 'release_engine_recovery_timeout' -or
+        $normalLifecycleText -notmatch 'release_persistent_state_lost_after_restart') {
+        throw "release_normal_lifecycle_contract_invalid"
+    }
+
     $releaseScripts = @(
         "release_common.ps1",
         "build_release_native.ps1",
         "package_native.ps1",
         "smoke_release_native.ps1",
         "smoke_native.ps1",
+        "run_dotnet.ps1",
+        "run_product.ps1",
+        "test_product_lifecycle.ps1",
         "test_no_python_runtime.ps1",
         "test_release_plumbing.ps1"
     )
