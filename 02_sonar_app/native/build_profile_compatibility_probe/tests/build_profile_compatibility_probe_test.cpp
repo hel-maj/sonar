@@ -107,18 +107,18 @@ void invalid_candidate_identity_skips_memory_validation() {
       "invalid_candidate_touched_memory_validation");
 }
 
-void ambiguous_pattern_is_not_promoted_to_compatibility() {
+void ambiguous_world_endpoint_is_not_promoted_to_compatibility() {
   fake_port port;
   port.validation = {
       .fish_identity_ready = true,
       .snapshot_ready = true,
-      .reason = probe::readiness_reason::pattern_ambiguous,
+      .reason = probe::readiness_reason::world_endpoint_ambiguous,
   };
   const auto result = probe::run(port);
   require(!result.ready && !result.patterns_unique &&
       !result.fish_identity_ready && !result.snapshot_ready &&
-      result.reason == probe::readiness_reason::pattern_ambiguous,
-      "ambiguous_pattern_not_fail_closed");
+      result.reason == probe::readiness_reason::world_endpoint_ambiguous,
+      "ambiguous_world_endpoint_not_fail_closed");
 }
 
 void active_fish_and_snapshot_are_separate_gates() {
@@ -149,7 +149,7 @@ int main() {
   ready_probe_is_one_shot_and_serializes_allowlist();
   target_failure_skips_hash_and_validation();
   invalid_candidate_identity_skips_memory_validation();
-  ambiguous_pattern_is_not_promoted_to_compatibility();
+    ambiguous_world_endpoint_is_not_promoted_to_compatibility();
   active_fish_and_snapshot_are_separate_gates();
   return 0;
 }

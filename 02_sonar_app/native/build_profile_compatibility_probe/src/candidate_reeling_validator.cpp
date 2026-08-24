@@ -1,4 +1,5 @@
 #include "candidate_reeling_validator.h"
+#include "executable_module_reader.h"
 
 #include <algorithm>
 #include <array>
@@ -21,9 +22,8 @@ namespace {
 
 namespace memory = sonar::fishing::memory_observation;
 
-constexpr std::size_t kScanChunkBytes = 64U * 1024U;
-constexpr std::size_t kMaximumScannedModuleBytes = 256U * 1024U * 1024U;
 constexpr std::size_t kMaximumPatternHits = 4096U;
+constexpr std::size_t kMaximumPatternBytes = 64U * 1024U;
 constexpr std::size_t kMaximumReplayEntities = 2048U;
 constexpr std::uintptr_t kMinimumUserPointer = 0x10000U;
 constexpr std::uintptr_t kMaximumUserPointer = 0x00007FFF'FFFF'FFFFULL;
@@ -175,44 +175,12 @@ template <typename Value>
   return selected;
 }
 
-struct module_image final {
-  std::uintptr_t base{};
-  std::vector<std::byte> bytes;
-};
-
-[[nodiscard]] std::optional<module_image> read_complete_module(
-    memory::readonly_memory_session& session,
-    const sonar::platform::windows::module_snapshot& module) {
-  if (!plausible_pointer(module.base_address) || module.size == 0U ||
-      module.size > kMaximumScannedModuleBytes ||
-      module.size > (std::numeric_limits<std::size_t>::max)() ||
-      module.size - 1U >
-          (std::numeric_limits<std::uintptr_t>::max)() - module.base_address) {
-    return std::nullopt;
-  }
-  module_image result{
-      .base = module.base_address,
-      .bytes = std::vector<std::byte>(static_cast<std::size_t>(module.size)),
-  };
-  std::size_t consumed = 0U;
-  while (consumed < result.bytes.size()) {
-    const auto count = (std::min)(
-        kScanChunkBytes, result.bytes.size() - consumed);
-    const auto address = checked_add(result.base, consumed);
-    if (!address.has_value() || !session.read_exact(
-            *address,
-            std::span(result.bytes).subspan(consumed, count))) {
-      return std::nullopt;
-    }
-    consumed += count;
-  }
-  return result;
-}
+using module_image = detail::executable_module_image;
 
 [[nodiscard]] bool valid_pattern(
     const memory::relative_pointer_pattern& pattern) noexcept {
   return !pattern.bytes.empty() &&
-      pattern.bytes.size() <= kScanChunkBytes &&
+      pattern.bytes.size() <= kMaximumPatternBytes &&
       pattern.displacement_offset <= pattern.bytes.size() &&
       sizeof(std::int32_t) <=
           pattern.bytes.size() - pattern.displacement_offset &&
@@ -241,7 +209,7 @@ struct module_image final {
 struct pattern_hits final {
   bool valid{};
   bool over_budget{};
-  std::vector<std::size_t> offsets;
+  std::vector<std::uintptr_t> addresses;
 };
 
 [[nodiscard]] pattern_hits enumerate_pattern_hits(
@@ -251,19 +219,43 @@ struct pattern_hits final {
     return {};
   }
   pattern_hits result{.valid = true};
-  for (std::size_t offset = 0U;
-       offset + pattern.bytes.size() <= module.bytes.size();
-       ++offset) {
-    if (!matches_at(module.bytes, offset, pattern)) {
-      continue;
-    }
-    if (result.offsets.size() < kMaximumPatternHits) {
-      result.offsets.push_back(offset);
-    } else {
-      result.over_budget = true;
+  for (const auto& section : module.executable_sections) {
+    for (std::size_t offset = 0U;
+         offset + pattern.bytes.size() <= section.bytes.size();
+         ++offset) {
+      if (!matches_at(section.bytes, offset, pattern)) {
+        continue;
+      }
+      const auto address = checked_add(section.address, offset);
+      if (!address.has_value()) {
+        return {};
+      }
+      if (result.addresses.size() < kMaximumPatternHits) {
+        result.addresses.push_back(*address);
+      } else {
+        result.over_budget = true;
+      }
     }
   }
   return result;
+}
+
+[[nodiscard]] std::optional<std::span<const std::byte>> module_bytes_at(
+    const module_image& module,
+    const std::uintptr_t address,
+    const std::size_t size) noexcept {
+  for (const auto& section : module.executable_sections) {
+    if (address < section.address) {
+      continue;
+    }
+    const auto offset = address - section.address;
+    if (offset <= section.bytes.size() &&
+        size <= section.bytes.size() - static_cast<std::size_t>(offset)) {
+      return std::span(section.bytes).subspan(
+          static_cast<std::size_t>(offset), size);
+    }
+  }
+  return std::nullopt;
 }
 
 enum class endpoint_status : std::uint8_t {
@@ -280,26 +272,25 @@ struct pointer_endpoint final {
 [[nodiscard]] pointer_endpoint resolve_pattern_endpoint(
     memory::readonly_memory_session& session,
     const module_image& module,
-    const std::size_t hit_offset,
+    const std::uintptr_t hit_address,
     const memory::relative_pointer_pattern& pattern) noexcept {
-  if (hit_offset > module.bytes.size() ||
-      pattern.bytes.size() > module.bytes.size() - hit_offset) {
+  const auto bytes = module_bytes_at(
+      module, hit_address, pattern.bytes.size());
+  if (!bytes.has_value()) {
     return {};
   }
   std::int32_t displacement{};
   std::memcpy(
       &displacement,
-      module.bytes.data() + hit_offset + pattern.displacement_offset,
+      bytes->data() + pattern.displacement_offset,
       sizeof(displacement));
-  const auto hit_address = checked_add(module.base, hit_offset);
-  if (!hit_address.has_value() || !module_contains(
-          module.base, module.bytes.size(), *hit_address,
+  if (!module_contains(
+          module.base, module.size, hit_address,
           pattern.instruction_length)) {
     return {};
   }
-  const auto instruction_end = hit_address.has_value()
-      ? checked_add(*hit_address, pattern.instruction_length)
-      : std::nullopt;
+  const auto instruction_end = checked_add(
+      hit_address, pattern.instruction_length);
   if (!instruction_end.has_value() ||
       *instruction_end >
           static_cast<std::uintptr_t>((std::numeric_limits<std::int64_t>::max)())) {
@@ -313,7 +304,7 @@ struct pointer_endpoint final {
   }
   const auto pointer_slot = static_cast<std::uintptr_t>(signed_target);
   if (!module_contains(
-          module.base, module.bytes.size(), pointer_slot,
+          module.base, module.size, pointer_slot,
           sizeof(std::uintptr_t))) {
     return {};
   }
@@ -380,7 +371,7 @@ struct player_endpoint final {
     return {.status = endpoint_status::incomplete};
   }
   if (vtable.status != read_status::ready ||
-      !module_contains(module.base, module.bytes.size(), vtable.value)) {
+      !module_contains(module.base, module.size, vtable.value)) {
     return {};
   }
   bool position_unavailable = false;
@@ -431,7 +422,7 @@ struct player_endpoint final {
 }
 
 struct player_resolution final {
-  readiness_reason reason{readiness_reason::pattern_unresolved};
+  readiness_reason reason{readiness_reason::world_endpoint_unresolved};
   std::uintptr_t address{};
   std::size_t right_offset{};
 };
@@ -447,13 +438,13 @@ struct player_resolution final {
   for (const auto& pattern : profile.world_patterns) {
     const auto hits = enumerate_pattern_hits(module, pattern);
     if (!hits.valid) {
-      return {.reason = readiness_reason::pattern_unresolved};
+      return {.reason = readiness_reason::world_endpoint_unresolved};
     }
     if (hits.over_budget) {
-      return {.reason = readiness_reason::pattern_ambiguous};
+      return {.reason = readiness_reason::world_endpoint_ambiguous};
     }
-    observed_hit = observed_hit || !hits.offsets.empty();
-    for (const auto hit : hits.offsets) {
+    observed_hit = observed_hit || !hits.addresses.empty();
+    for (const auto hit : hits.addresses) {
       const auto endpoint = resolve_pattern_endpoint(
           session, module, hit, pattern);
       if (endpoint.status == endpoint_status::incomplete) {
@@ -477,13 +468,13 @@ struct player_resolution final {
     }
   }
   if (incomplete) {
-    return {.reason = readiness_reason::pattern_scan_incomplete};
+    return {.reason = readiness_reason::world_endpoint_incomplete};
   }
   if (conflicting_projection || players.size() > 1U) {
-    return {.reason = readiness_reason::pattern_ambiguous};
+    return {.reason = readiness_reason::world_endpoint_ambiguous};
   }
   if (!observed_hit || players.empty()) {
-    return {.reason = readiness_reason::pattern_unresolved};
+    return {.reason = readiness_reason::world_endpoint_unresolved};
   }
   return {
       .reason = readiness_reason::ready,
@@ -493,7 +484,7 @@ struct player_resolution final {
 }
 
 struct replay_resolution final {
-  readiness_reason reason{readiness_reason::pattern_unresolved};
+  readiness_reason reason{readiness_reason::replay_endpoint_unresolved};
   std::uintptr_t address{};
 };
 
@@ -502,19 +493,19 @@ struct replay_resolution final {
     const module_image& module,
     const memory::embedded_memory_build_profile& profile) {
   const auto hits = enumerate_pattern_hits(module, profile.replay_pattern);
-  if (!hits.valid || hits.offsets.empty()) {
-    return {.reason = readiness_reason::pattern_unresolved};
+  if (!hits.valid || hits.addresses.empty()) {
+    return {.reason = readiness_reason::replay_endpoint_unresolved};
   }
-  if (hits.over_budget || hits.offsets.size() != 1U) {
-    return {.reason = readiness_reason::pattern_ambiguous};
+  if (hits.over_budget || hits.addresses.size() != 1U) {
+    return {.reason = readiness_reason::replay_endpoint_ambiguous};
   }
   const auto endpoint = resolve_pattern_endpoint(
-      session, module, hits.offsets.front(), profile.replay_pattern);
+      session, module, hits.addresses.front(), profile.replay_pattern);
   if (endpoint.status == endpoint_status::incomplete) {
-    return {.reason = readiness_reason::pattern_scan_incomplete};
+    return {.reason = readiness_reason::replay_endpoint_incomplete};
   }
   if (endpoint.status != endpoint_status::ready) {
-    return {.reason = readiness_reason::pattern_unresolved};
+    return {.reason = readiness_reason::replay_endpoint_unresolved};
   }
   return {.reason = readiness_reason::ready, .address = endpoint.value};
 }
@@ -837,20 +828,29 @@ struct fish_resolution final {
   }
   const auto* module = exact_game_module(session->identity());
   if (module == nullptr) {
-    return {.reason = readiness_reason::pattern_unresolved};
+    return {.reason = readiness_reason::module_layout_unavailable};
   }
-  const auto image = read_complete_module(*session, *module);
-  if (!image.has_value() || !session->generation_current()) {
-    return {.reason = readiness_reason::pattern_scan_incomplete};
+  auto image = detail::read_executable_module(*session, *module);
+  if (!image.image.has_value()) {
+    if (!session->generation_current()) {
+      return {.reason = readiness_reason::game_target_changed};
+    }
+    return {.reason = image.status ==
+            detail::executable_module_read_status::scan_incomplete
+        ? readiness_reason::module_executable_scan_incomplete
+        : readiness_reason::module_layout_unavailable};
+  }
+  if (!session->generation_current()) {
+    return {.reason = readiness_reason::game_target_changed};
   }
 
   const auto player = resolve_unique_player(
-      *session, *image, candidate_layout);
+      *session, *image.image, candidate_layout);
   if (player.reason != readiness_reason::ready) {
     return {.reason = player.reason};
   }
   const auto replay = resolve_unique_replay(
-      *session, *image, candidate_layout);
+      *session, *image.image, candidate_layout);
   if (replay.reason != readiness_reason::ready) {
     return {.reason = replay.reason};
   }

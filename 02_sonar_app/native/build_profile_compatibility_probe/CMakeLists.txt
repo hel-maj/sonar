@@ -78,6 +78,7 @@ add_test(
 add_executable(SonarFishingBuildProfileCompatibilityProbeTool
     src/main.cpp
     src/candidate_reeling_validator.cpp
+    src/executable_module_reader.cpp
     src/windows_compatibility_port.cpp
 )
 set_target_properties(
@@ -155,6 +156,7 @@ add_test(
 
 add_executable(SonarFishingBuildProfileCompatibilityValidatorTests
     src/candidate_reeling_validator.cpp
+    src/executable_module_reader.cpp
     tests/candidate_reeling_validator_test.cpp
 )
 target_compile_features(

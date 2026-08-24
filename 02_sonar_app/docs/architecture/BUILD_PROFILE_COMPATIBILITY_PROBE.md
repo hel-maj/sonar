@@ -41,9 +41,12 @@ Diagnostic:
    меняет только game hash. Уже admitted hash отклоняется.
 3. Использует отдельную candidate identity
    `nonshipping-build-profile-candidate-v1` и candidate schema `1`.
-4. Полностью читает module с hard bound 256 MiB. Все hits всех world-pattern
-   alternatives разрешаются в ровно один distinct validated player endpoint;
-   replay pattern обязан иметь ровно один hit.
+4. Bounded parser проверяет DOS/PE64 headers, `SizeOfImage`, section table и
+   executable ranges модуля с hard bound 256 MiB. Pattern scan читает только
+   полностью покрытые committed-readable executable sections, полученные через
+   Common `query_region`; unreadable non-executable `.data` не входит в scan.
+   Все hits всех world-pattern alternatives разрешаются в ровно один distinct
+   validated player endpoint; replay pattern обязан иметь ровно один hit.
 5. Replay entity list принимается только с реально прочитанным count `1..2048`.
    Fallback count отсутствует. Должна существовать ровно одна active entity с
    exact fish model hash `802685111` и конечной дистанцией `1..120` метров.
@@ -52,8 +55,17 @@ Diagnostic:
    `fish_model_confirmed=true`, finite/in-range geometry и повторно читает hash,
    active byte и process generation после snapshot.
 
-Любой incomplete read, arithmetic overflow, generation drift, отсутствующий или
-неоднозначный anchor/player/replay/fish даёт fail-closed result. Retry отсутствует.
+Executable reads идут chunks до 64 KiB. Failed exact read рекурсивно делится до
+4 KiB и на leaf получает только один полный retry; общий byte budget ограничен
+1 GiB. Любой постоянный executable hole, исчерпание budget, malformed PE,
+arithmetic overflow, generation drift, отсутствующий или неоднозначный
+anchor/player/replay/fish даёт fail-closed result. Частично прочитанный section
+никогда не используется.
+
+Причины scan/layout и endpoint resolution разделены и остаются
+санитизированными: `module_layout_unavailable`,
+`module_executable_scan_incomplete`, а для `world_endpoint` и
+`replay_endpoint` отдельно `incomplete`, `unresolved` и `ambiguous`.
 
 ## Sanitized result
 
@@ -124,6 +136,12 @@ baseline_profile_id=majestic-gta5-677e4e35-v1
 baseline_profile_revision=1
 reason=pattern_scan_incomplete
 ```
+
+`pattern_scan_incomplete` - исторический schema-1 receipt старой версии probe,
+в которой module read и endpoint stages были объединены в одну причину. Он не
+локализует текущий blocker. Новая версия не переинтерпретирует старый receipt и
+для следующей отдельно разрешённой попытки вернёт одну из stage-specific причин
+выше.
 
 Sanitized ignored receipt сохранён в
 `build/live-evidence/fishing-build-profile-compatibility-20260824.json`, его

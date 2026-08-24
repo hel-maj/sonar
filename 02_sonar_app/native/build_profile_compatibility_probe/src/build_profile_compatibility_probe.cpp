@@ -90,12 +90,22 @@ std::string_view reason_key(const readiness_reason reason) noexcept {
       return "baseline_profile_unavailable";
     case readiness_reason::candidate_identity_invalid:
       return "candidate_identity_invalid";
-    case readiness_reason::pattern_scan_incomplete:
-      return "pattern_scan_incomplete";
-    case readiness_reason::pattern_ambiguous:
-      return "pattern_ambiguous";
-    case readiness_reason::pattern_unresolved:
-      return "pattern_unresolved";
+    case readiness_reason::module_layout_unavailable:
+      return "module_layout_unavailable";
+    case readiness_reason::module_executable_scan_incomplete:
+      return "module_executable_scan_incomplete";
+    case readiness_reason::world_endpoint_incomplete:
+      return "world_endpoint_incomplete";
+    case readiness_reason::world_endpoint_ambiguous:
+      return "world_endpoint_ambiguous";
+    case readiness_reason::world_endpoint_unresolved:
+      return "world_endpoint_unresolved";
+    case readiness_reason::replay_endpoint_incomplete:
+      return "replay_endpoint_incomplete";
+    case readiness_reason::replay_endpoint_ambiguous:
+      return "replay_endpoint_ambiguous";
+    case readiness_reason::replay_endpoint_unresolved:
+      return "replay_endpoint_unresolved";
     case readiness_reason::active_fish_unavailable:
       return "active_fish_unavailable";
     case readiness_reason::active_fish_ambiguous:
