@@ -274,7 +274,7 @@ unsigned smoke не является доказательством signing ил
   исходное значение настройки сохранилось. Принудительное завершение Engine
   создало новое поколение, после чего вернулись coherent inventory snapshot с
   `45` позициями и весом `21,72 / 40 кг` и все catalog images;
-- current compile-isolated local-access bundle `1.0.3-local` собран после exact
+- historical compile-isolated local-access bundle `1.0.3-local` собран после exact
   repin на `SonarMajesticCefInventory 0.1.18` и `Sonar.UI.Wpf 0.2.21` без
   `SkipOfflineTests`: `216/216` WPF, `50/50` native CTest и `7/7` typed IPC
   tests зелёные, две независимые сборки детерминированы, exact two-EXE
@@ -285,6 +285,16 @@ unsigned smoke не является доказательством signing ил
   Фактический update установленной `1.0.2-local` принят как `1.0.3-local`, а
   отдельный 30-секундный lifecycle подтвердил Engine crash/replacement, два
   normal exit и повторный exact allowlist/no-Python gate;
+- current compile-isolated local-access bundle `1.0.4-local` собран из clean
+  commit `c4efc6892e43b467c0c2271214a54eae646afb2e` после exact repin на
+  `SonarMajesticCefInventory 0.1.19` и `Sonar.UI.Wpf 0.2.22`. Два независимых
+  build-root дали byte-identical EXE; exact allowlist, no-Python, dependency,
+  secret и package-integrity gates прошли. Bundle hashes:
+  `Sonar.exe=614F2950C76774A839875230C0552E2B88264426D147262B4A87C2B04AF2FB73`,
+  `Sonar.Engine.exe=53BE5BAB4174D2DAF2E29F1F259348FA40C68144A41F837C3F0FFEF3F926D10D`,
+  `bundle-manifest.json=7686643D0C673F525B67AE5F1DEC4C937F8ED0578CC4161A3DE7EB7A544E57B7`.
+  Build-only acceptance не запускал окно; fresh lifecycle/installation остаются
+  отдельными runtime gates;
 - last completed pre-0.2.22 Common UI visual artifact находится в
   `build/ui-gallery-0221-final/`: 204 PNG для всех product pages/variants,
   compact/medium/expanded layouts и 100/125/150/200% DPI. Manifest фиксирует
