@@ -37,7 +37,7 @@ authoritative статус capability находится в
 
 Дата аудита: 2026-07-23
 
-Дата последней implementation проверки: 2026-08-24
+Дата последней implementation проверки: 2026-08-26
 
 Managed migration builds pin .NET SDK 10.0.400 through root `global.json`;
 package/feed hashes remain enforced by the product-owned test entrypoints.
@@ -429,7 +429,7 @@ Dependency direction проверена по restore assets:
 
 ```text
 Sonar.Fishing.Host
-  -> exact PackageReference Sonar.UI.Wpf [0.2.19]
+  -> exact PackageReference Sonar.UI.Wpf [0.2.21]
   -> Phase 4 Platform IPC PackageReference, currently pinned [0.1.1]
   -> product Sonar.Fishing.Ipc.Contracts ProjectReference
   -> Microsoft Windows Desktop Runtime/SDK references
@@ -437,8 +437,8 @@ Sonar.Fishing.Host
 
 `ProjectReference` или source copy из Common отсутствуют. Product-local
 `ProjectReference` на Fishing contracts добавлен только в Phase 4. Текущий
-UI package 0.2.19 проверен из accepted feed с SHA-256
-`37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33`.
+UI package 0.2.21 проверен из accepted feed с SHA-256
+`BCF274F21A2BBBB0BC21799D489881AF086929AEA26547EEF4E816590D2D2675`.
 Phase 3 WPF tests ссылаются через `ProjectReference` только на product Host
 project.
 
@@ -602,8 +602,8 @@ Managed package hashes frozen workspace feed `.artifacts/sonar-feed` (его м�
   `0CF50FDAFFF00608F0B5742C39A15B3AB24CF79329DA8B07A01404E9F7A45214`;
 - `Sonar.Platform.Processes.0.1.0.nupkg` -
   `03DEE12DCB7F2C30A21921A9198CA5388D93A682B8CCE69658CAD0E1996AE5EB`;
-- `Sonar.UI.Wpf.0.2.19.nupkg` -
-  `37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33`.
+- `Sonar.UI.Wpf.0.2.21.nupkg` -
+  `BCF274F21A2BBBB0BC21799D489881AF086929AEA26547EEF4E816590D2D2675`.
 
 Phase 5 removed temporary Common duplicates:
 
@@ -1073,7 +1073,7 @@ operation was added and no measured hotspot exists.
 
 ### Phase 20-22 - Common UI, mutable statistics and Windows safety boundary
 
-The complete eight-page WPF composition consumes frozen `Sonar.UI.Wpf 0.2.19`
+The complete eight-page WPF composition consumes frozen `Sonar.UI.Wpf 0.2.20`
 without copied Common source. It uses the shared responsive AppShell/AppBrand,
 4/8/12 grid and page/settings/table/master-detail/state patterns, embeds the
 Fishing logo and 31 fish images, preserves plain-letter hotkeys through the
@@ -1081,7 +1081,7 @@ Common `HotkeyGesture` contract and renders 132 deterministic compact/medium/
 expanded and DPI variants. Statistics owns atomic custom-price revisions and a
 coarse session reset command.
 
-Native target preflight consumes frozen `SonarPlatformWindows 0.1.6` for
+Native target preflight consumes frozen `SonarPlatformWindows 0.1.9` for
 least-rights process identity/generation, coherent window validation and the
 pure packet budget. Product policy still owns entitlement/settings/lifecycle
 ordering. No GTA process/window, capture or input action has run. Native CTest
@@ -1101,8 +1101,9 @@ it is a real fail-closed state, not a second streaming implementation.
 The responsive Stream page maps the entire accepted product union to Common
 controls and its compact/expanded 100% renders were inspected. WPF acceptance
 is 81/81, the full render is 132/132, native remains 14/14 and managed IPC
-remains 3/3. Real contained FFmpeg/HLS/tunnel lifecycle, authenticated public
-surface and chat use-case bridge remain required before `H07` authority.
+remains 3/3. This records the Phase 23 state; Phase 49 later composes the real
+Local Access FFmpeg/HLS/tunnel path. Chat and live capture/network acceptance
+remain open.
 
 ### Phase 24 - long-lived Engine session and signed entitlement proof
 
@@ -1180,11 +1181,10 @@ Managed acceptance is 128/128 with zero warnings and no new Engine IPC. Full
 design and remaining activation gates are recorded in
 [H07_STREAMING_RUNTIME.md](H07_STREAMING_RUNTIME.md).
 
-Production composition intentionally remains on
-`UnavailableStreamingController`. Signed redistributable tool payloads and
-hashes, guarded capture, authenticated viewer/network implementation, chat
-bridge, stale transient-workspace recovery, privacy review and authorized real
-process/network plus two-EXE lifecycle acceptance are still required.
+This is the Phase 32 state. Phase 49 later supplies an exact hash-pinned
+compile-isolated Local Access composition. Ordinary licensed composition still
+uses `UnavailableStreamingController`; chat bridge, privacy review and
+authorized real process/network plus two-EXE lifecycle acceptance remain open.
 
 ### Phase 25 - bounded cancellable Engine event delivery
 
@@ -1475,33 +1475,33 @@ Legacy `memory_reeling.py`, `inventory_memory.py`, the memory half of
 `player_status.py`, `find_chat_memory.py`/`dump_chat_history.py`, their direct
 consumers and characterization tests were traced before the port.
 `SonarFishingMemoryObservation` now owns bounded pure decoders for confirmed
-reeling evidence, weighted inventory-open voting, typed player-status samples
+reeling evidence, forensic weighted inventory-open voting, typed player-status samples
 plus WebEngine indicator/weight windows, and serialized/DOM chat state.
 
 `memory_observer::capture` reads the four groups as one coarse aggregate. A
-capture carries one monotonic sequence/time, exact profile id/revision and exact
-Common `(pid, creation time)` generations for GTA and WebEngine. It validates
-executable name plus SHA-256, limits one region to 256 KiB, one cycle to 96
-regions/1 MiB, uses exact reads, and revalidates both generations after the
-last byte. Hash/profile drift, PID reuse, partial reads, ambiguous decodes and
-replayed sequences return no snapshot; no cached field is promoted to fresh
-evidence.
+capture carries one monotonic sequence/time, semantic layout id/revision and
+exact Common `(pid, creation time)` generation plus authority fingerprint. It
+limits one region to 256 KiB, one cycle to 96 regions/1 MiB, uses exact reads,
+and revalidates the trusted lease after the last byte. Module/file/generation
+drift, partial reads, ambiguous decodes and replayed sequences return no
+snapshot; exact SHA remains only an injected forensic/replay contract.
 
-The Windows adapter reuses frozen Common `readonly_process` for least-rights
-process access, region enumeration and exact memory reads. Fishing adds only
-product image-hash, bounded scan and decoder/profile policy; it contains no
-local `OpenProcess`, `ReadProcessMemory` or process-enumeration clone. Normal
-Engine instantiates this adapter for reeling only. Production coarse routing
-never calls inventory discovery on a positive same-frame reeling trigger. Other
-frames call the exact-pinned Common `SonarMajesticCefInventory 0.1.0` facade
-once; Common owns CEF/V8 discovery, exact client admission, coherent double-read
-and hot binding.
+The Windows adapter uses Common `trusted_module_lease` for least-rights process
+access, pinned file/module identity, region enumeration and exact memory reads.
+Fishing adds Rockstar publisher policy, bounded semantic scan and decoder/
+layout policy; it contains no local signer/file/process verifier. Normal
+Engine instantiates this adapter for reeling only. A separate cancellable Engine
+worker owns exact-pinned Common `SonarMajesticCefInventory 0.1.18` content
+provider, so cold discovery/content decode cannot block reeling, control IPC or
+heartbeat. Common owns CEF/V8 discovery, version-independent publisher/file/
+process admission, coherent read transaction, hot binding and product-neutral
+open/weight/grid/item snapshot semantics. The worker polls at 500 ms and sends
+only changed revisioned `InventoryStateSnapshot` events; unavailable evidence
+withdraws the prior state instead of replaying it.
 
-Fishing caches only `unknown` with monotonic exponential retry from 250 ms to a
-4 s cap. It never caches known open/closed, and GTA generation change resets
-facade/backoff before an immediate fresh call. Ordinary shipping keeps the
-non-shipping profile denied/inert; compile-isolated Local Access admits only
-`majestic-client-1.20.7-candidate-v1`. The old Fishing masked-signature resolver
+Ordinary shipping and compile-isolated Local Access use the same trusted-
+publisher authority with observation enabled. Exact client version/hash/size/
+profile metadata is forensic-only. The old Fishing masked-signature resolver
 remains development characterization and cannot become production authority.
 
 The six-row language-neutral fixture
@@ -1511,17 +1511,21 @@ MSVC v143 `/W4 /WX` focused CTest covers decoder plus inventory discovery,
 cached-plan reuse, automatic relocation recovery, absent-profile and ambiguous
 signature blockers. Aggregate regressions cover the historical confirmed-fish
 `1 -> 0` completion sample, commit only after a coherent successful capture,
-preservation across one failed-read retry, no cold inventory discovery on the
-reeling path and full rediscovery after process-generation change. Negative coverage includes
-image/profile drift, short/oversize reads, unknown fish hash, ambiguous
-inventory vote, invalid UTF-8 and sequence replay. Five equal Release decoder benchmark runs measured
+preservation across one failed-read retry and full rediscovery after
+process-generation change. Separate inventory worker/event regressions cover
+changed-only delivery, sanitized unavailable state, cancellation and complete
+product-neutral field mapping. Negative
+coverage includes authority-fingerprint/semantic-layout drift, short/oversize
+reads, unknown fish hash, ambiguous inventory vote, invalid UTF-8 and sequence
+replay. Five equal Release decoder benchmark runs measured
 a median `79.573 ms` for 250,000 aggregates (`318.290 ns` each), with no IPC.
 No hotspot was demonstrated, so no semantic optimization followed parity.
 
-E11 remains partial: Local Access Common candidate needs separate read-only/live
-acceptance, while ordinary shipping needs an independently evidenced Common
-profile promotion. The historical characterization tool never presses `TAB`,
-activates a window or captures a frame and does not modify runtime admission.
+E11 remains partial: both Common trusted-publisher paths need separate read-only
+live acceptance. Fishing reeling uses a product-owned semantic layout contract
+inside the admitted GTA process; player-status/chat still have no production
+reader. The historical characterization tool never presses `TAB`, activates a
+window or captures a frame and does not modify runtime admission.
 Player-status/chat and live target-loss remain separate gates. The full boundary is
 [MEMORY_OBSERVATION_NATIVE.md](MEMORY_OBSERVATION_NATIVE.md) and
 [inventory characterization](INVENTORY_STATE_CHARACTERIZATION.md). The
@@ -1529,14 +1533,14 @@ field-by-field historical source boundary is recorded in
 [RUNTIME_OBSERVATION_PARITY.md](RUNTIME_OBSERVATION_PARITY.md).
 
 The first guarded read-only pass on 2026-08-24 confirmed target, executable
-hash-read and capture, but the current GTA executable did not match the sole
-embedded profile, so reeling memory remained fail-closed. A separate
-OFF-by-default [build-profile compatibility probe](BUILD_PROFILE_COMPATIBILITY_PROBE.md)
-now evaluates that unknown hash only as a distinct in-memory candidate with
-complete unique anchor scans, bounded entity count, exact active-fish identity,
-coherent snapshot and post-capture revalidation. It is not linked into Engine,
-does not reuse registry admission identity/SHA semantics and cannot add a
-profile or authorize input.
+hash-read and capture, but the former exact-profile architecture rejected the
+observed GTA executable. This is retained only as historical provenance. A
+separate OFF-by-default
+[build-profile compatibility probe](BUILD_PROFILE_COMPATIBILITY_PROBE.md)
+evaluates a concrete hash as forensic evidence with complete unique anchor
+scans, bounded entity count, exact active-fish identity, coherent snapshot and
+post-capture revalidation. It is not linked into Engine, cannot alter shipping
+runtime admission and cannot authorize input.
 
 An additional zero-input read-only inventory scan found `0` exact legacy masked
 signature matches on current hash, including all `13490` readable regions up to
@@ -1656,15 +1660,20 @@ remain open. The detailed contract is
 - Inventory/menu/store-fish sequencing, E14 menu/item observation and the
   guarded shared production mutation lease are composed. Authentic target-loss,
   multi-resolution confirmation and hard-crash evidence remain open.
-- Reeling/inventory/player-status/chat memory decoding, exact embedded
-  generation/hash profile admission, concrete Windows connector, target
-  resolver, coherent capture/aggregation and guarded cast/hook/reel mutation
-  are production-composed. Only the exact supported build is admitted;
-  authorized live build/target-loss/hard-crash evidence remains open.
+- Reeling uses the Common trusted GTA lease plus Fishing-owned unique semantic
+  player/replay/fish binding; inventory content uses the Common trusted-publisher
+  CEF facade. Neither production path gates availability on client version,
+  SHA-256, file size, PE timestamp or a known loaded image size. Concrete
+  Windows connector, target resolver, coherent capture/aggregation and guarded
+  cast/hook/reel mutation are production-composed. Player-status/chat readers
+  and authorized live inventory/reeling target-loss/hard-crash evidence remain
+  open.
 - Streaming lifecycle/order/cancellation/restart/cleanup and Common process
-  containment are green under offline fakes, but signed embedded payloads,
-  guarded capture, authenticated viewer/network/chat adapters, production
-  composition and public-surface privacy/real-runtime acceptance remain.
+  containment are green. Compile-isolated Local Access embeds exact hash-pinned
+  FFmpeg/cloudflared and composes current-HWND capture plus authenticated
+  loopback HLS/viewer/public tunnel. Chat bridge, ordinary licensed payload
+  policy and public-surface privacy/live capture/network/recovery acceptance
+  remain open.
 - MSVC v143 dependency closure проверен для offline inert Engine. Standalone
   production Engine symbol policy, signing, containment и release allowlist еще
   не проверены.
@@ -1739,3 +1748,39 @@ Focused acceptance is native CTest 48/48, managed IPC 7/7 and WPF/managed
 dedupe, delivery failure isolation, inventory-low edge behavior, event-pump
 recovery and local-access UI. No GTA, capture, focus, input, credentials or
 network action ran. Architecture contract: [ADR-0003](ADR-0003-BOUNDED-ENGINE-NOTIFICATION-EVENTS.md).
+
+### Phase 49 - compile-isolated Local Access streaming composition
+
+Local Access now embeds exactly two manifest-owned resources in `Sonar.exe`:
+FFmpeg `8.1.1-essentials_build-www.gyan.dev` with SHA-256
+`228D7A8556258DE907FDB55F36850078EBC7680B84EC30D84EA02E99BEC1D1EB`
+and cloudflared `2026.5.2` with SHA-256
+`20B9638F685333D623798E733EFFBAD2487093F15BA592F6C7752360FF3B7AB7`.
+Build admission and every materialization verify these hashes; loose-tool
+fallback remains forbidden. Ordinary licensed compilation does not embed the
+resources and therefore retains `UnavailableStreamingController`.
+
+`Win32GtaStreamingCaptureSource` resolves exactly one current, non-minimized
+`GTA5` HWND, validates process ownership and non-zero client bounds and creates
+the FFmpeg `gdigrab` descriptor. `LoopbackHlsNetworkSession` binds only
+`127.0.0.1`, creates a random 256-bit path token, serves viewer/HLS files only
+under that prefix, bounds header/client pressure, tracks fresh viewers and
+owns exact session cleanup. FFmpeg and cloudflared run in Common
+kill-on-close Jobs; only a bounded HTTPS base without credentials, query or
+fragment is accepted from tunnel diagnostics. The controller publishes the
+public secret-path stream URL through the existing typed snapshot.
+
+The release secret scan has one narrow exception for third-party payload byte
+patterns: after exact manifest-hash verification it derives the sorted marker
+multiset from both source tools and requires `Sonar.exe` to contain exactly
+that same multiset. Any extra marker, a marker in another file, a changed tool
+hash or an unlisted payload fails closed.
+
+Thirteen H07 managed cases now include a real loopback secret-path/workspace
+test and embedded-resource composition test in addition to the eleven
+fake-adapter lifecycle cases. They do not launch the embedded tools or capture
+GTA. Real GTA capture across DPI/resize/alt-tab/target loss, FFmpeg/HLS/tunnel
+startup, public viewer access, failure recovery, performance, signing and
+installed/update/rollback allowlist remain unaccepted. Chat mode has no product
+bridge and stays hidden/fail-closed. Full status and boundaries are in
+[H07_STREAMING_RUNTIME.md](H07_STREAMING_RUNTIME.md).

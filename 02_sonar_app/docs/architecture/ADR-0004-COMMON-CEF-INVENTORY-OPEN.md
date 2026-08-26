@@ -1,11 +1,12 @@
-# ADR-0004: Common CEF inventory-open facade
+# ADR-0004: Common CEF inventory facade
 
-Статус: принято, 2026-08-24.
+Статус: принято, обновлено 2026-08-26.
 
 ## Контекст
 
 Исторический Fishing binding различал `open/closed` по product-owned byte
-candidates, но не имел доказанной module-rooted authority для текущей сборки.
+candidates, а visual detector находил только видимые slot candidates; единого
+memory snapshot открытости, веса, сетки и содержимого не было.
 Копирование CEF/V8 discovery из Hunting или Common создало бы второго владельца
 Win32 process/session/generation и снова допустило бы расхождение между
 продуктами. При этом cold discovery нельзя выполнять в latency-critical
@@ -13,43 +14,66 @@ reeling path или повторять на каждом UI frame после `un
 
 ## Решение
 
-Fishing exact-pins установленный `SonarMajesticCefInventory 0.1.0`, target
-`Sonar::MajesticCefInventory`; SHA-256 его `SHA256SUMS.txt` равен
-`B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8`.
+Fishing exact-pins установленный `SonarMajesticCefInventory 0.1.18`, targets
+`Sonar::MajesticCefInventory` и `Sonar::MajesticCefInventoryContent`; SHA-256 его `SHA256SUMS.txt` равен
+`EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D`.
+Continuous content factory включает closed-state bootstrap на собственной копии
+policy, поэтому содержимое не зависит от открытости inventory UI. Общий
+`acquisition_policy` остаётся strict-by-default; closed path по-прежнему требует
+unique root, double-read open state и stable process/file generation.
 Setup, offline gate и release builder проверяют как сам pin, так и каждый
 payload из manifest. Sibling checkout Common не используется.
 
-Production composition владеет одним долгоживущим facade instance. На кадре с
-positive reeling trigger вызывается только Fishing reeling capture. На прочем
-кадре Fishing вызывает `inventory_open_acquisition::observe()` ровно один раз и
-переносит только Common `unknown/closed/open` в тот же immutable aggregate.
-Renderer discovery, exact client verification, V8 layout, double-read и hot
-binding остаются внутри Common. Legacy Fishing inventory resolver сохраняется
-только для offline characterization и не участвует в production adapter.
+Production composition владеет отдельным cancellable inventory worker и создаёт
+Common provider через
+`content::create_win32_trusted_publisher_inventory_content_provider`.
+Observation включена одинаково в ordinary и Local Access builds. Медленный cold
+discovery не выполняется на control/heartbeat thread и не задерживает reeling;
+worker публикует только изменившийся coarse snapshot.
 
-После `unknown` Fishing кэширует только `unknown` и stable reason, применяя
-monotonic exponential retry `250 ms -> 500 ms -> 1 s -> 2 s -> 4 s` с cap
-`4 s`. `open/closed` не кэшируются: hot facade вызывается на каждом реально
-запрошенном non-reeling aggregate. Смена GTA process generation немедленно
-сбрасывает facade/backoff и требует свежую попытку; stale known state не
-возвращается.
+Identity admission не зависит от file/product version, SHA-256, file size,
+PE timestamp, заранее известного loaded image size или exact profile. Semantic
+inventory binding не использует compiled V8 instance-type ordinals. Неполный,
+неоднозначный или нестабильный proof возвращает unavailable. Common на одном
+pinned read handle доказывает accepted WinTrust publisher и timestamp,
+ненулевую dynamic PE identity, равенство disk PE `SizeOfImage` loaded module,
+unique module и стабильный file/process fingerprint между cold и hot authority
+brackets. Fishing не получает signer policy, handles, addresses или raw Win32
+errors.
 
-Обычная shipping composition передаёт `denied`, оставляет observation disabled
-и не разрешает closed bootstrap. Compile-isolated `Локальный доступ` явно
-разрешает только встроенный non-shipping profile
-`majestic-client-1.20.7-candidate-v1`, включает observation и closed bootstrap.
-Runtime flag не может изменить этот выбор. Exact process/generation,
-foreground, lease и final input gates не ослабляются. До отдельного promotion
-нового shipping profile обычный выпуск остаётся inert/unknown.
+Common snapshot содержит open, current/maximum weight, 17x6 grid, active
+position и bounded items: stable/runtime/catalog identity, placement/span,
+count/maximum, weights, condition/freshness/durability, description,
+image/icon references, typed stats/buffs и optional usable/rottable. Fishing
+переносит его через canonical `inventory/v1/sonar_inventory.proto` как один
+revisioned `InventoryStateSnapshot`; product владеет только mapping, columns,
+commands, feature policy и presentation composition. Renderer discovery,
+admission, V8 layout, coherent reads и hot binding остаются внутри Common.
+Screenshot/OCR может дать актуальную geometry для automation surface, но не
+заменяет memory snapshot. Legacy Fishing resolver и exact Common profile 1.20.7
+сохраняются только для offline forensic replay/characterization.
+
+Worker выполняет bounded sample с cadence 500 ms и публикует новую revision
+только при изменении видимого ready/unavailable state. Common provider сам
+отзывает binding при process/file/generation/read drift; исключение переводится
+в sanitized `inventory_source_failed`. Stale snapshot, address или unfinished
+read transaction не replay-ятся. Завершение Engine отменяет worker и ждёт его
+bounded stop до освобождения IPC/process resources.
+
+Local Access по-прежнему снимает только перечисленные в ADR-0002 внешние
+licensing/entitlement и startup availability gates. Он не меняет inventory
+publisher/file/process proof, current generation, foreground, lease или final
+input gates. Неизвестность либо drift остаются fail-closed.
 
 ## Последствия и rollback
 
-- Fishing зависит только от публичного `inventory_open.hpp`; локальные
-  `Windows.h`, verifier, renderer/V8 headers и copied layouts запрещены
-  ownership test.
-- Любой Common failure или inconsistent `known/reason` отображается в typed
-  `production_inventory_*` reason и `unknown`; last-known replay отсутствует.
+- Fishing зависит только от публичного Common content/provider surface;
+  локальные `Windows.h`, verifier, renderer/V8 headers и copied layouts запрещены
+  ownership test. Тот же test запрещает возврат exact-profile factory и
+  candidate identifiers в runtime adapter.
+- Любой Common failure отображается как typed unavailable reason; last-known
+  replay отсутствует.
 - Обновление package требует нового exact version/hash и повторного Release
-  link/test gate. Rollback возвращает предыдущий pin и оставляет shipping path
-  disabled, не восстанавливая legacy authority.
+  link/test gate. Rollback возвращает предыдущую проверенную Host/Engine pair;
+  legacy Fishing authority не восстанавливается.
 - Live GTA/input acceptance не выполнялась этим ADR и остаётся отдельным gate.

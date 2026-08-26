@@ -10,11 +10,12 @@
 изменяет runtime authority. Превращать его в неявный обход лицензии нельзя:
 такой bundle мог бы случайно попасть в install, update или production launch.
 
-При этом licensing gate является только одним из уровней допуска. Exact GTA
-build profile, coherent memory/capture snapshot, актуальные bounds окна,
-foreground, input lease, packet budget и final safety gate должны оставаться
-обязательными. Developer mode не должен подменять неподдерживаемый game build
-guess-профилем и не должен воспроизводить runtime/input authority после crash.
+При этом licensing gate является только одним из уровней допуска. Common
+trusted GTA module admission, Fishing semantic binding, coherent memory/capture
+snapshot, актуальные bounds окна, foreground, input lease, packet budget и
+final safety gate должны оставаться обязательными. Local Access не подменяет
+неразрешённую semantic layout догадкой и не воспроизводит runtime/input
+authority после crash.
 
 ## Решение
 
@@ -69,7 +70,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full
 Builder делает два clean deterministic build и по умолчанию кладет результат в
 `build/developer-full-access/bundle` с версией `1.0.0-local`. Verify проверяет exact manifest, hashes,
 обязательный `determinism.verified: true`, двухфайловый dependency closure,
-no-Python ownership и отсутствие секретов.
+no-Python ownership и strict secret scan. Для embedded streaming tools scan
+разрешает только exact marker multiset двух manifest-hash-verified payloads;
+любое дополнительное совпадение остаётся ошибкой.
 Run всегда сначала выполняет быстрый launch admission, затем передает
 единственный явный developer argument. Admission проверяет schema/channel,
 local-access marker, canonical manifest, hashes/build IDs пары EXE,
@@ -81,9 +84,11 @@ Windows PowerShell 5.1 и имеет `-VerifyOnly`, чтобы regression-про
 
 Product presentation не показывает этот internal mode. License page отображает
 активный `Локальный доступ`, скрывает key activation и заменяет raw feature IDs
-понятными названиями только реально скомпонованных функций. Capability без
-production owner, включая текущие Stream и stream chat, не попадает в local
-feature set. Технический channel, marker и compile provenance
+понятными названиями только реально скомпонованных функций. Stream входит в
+local feature set после появления exact embedded-tool/capture/HLS/tunnel
+composition; stream chat не входит, потому что product bridge отсутствует.
+Другой capability без реального owner также не выдаётся. Технический channel,
+marker и compile provenance
 остаются в manifest и diagnostic log.
 
 ## Crash и recovery invariant
@@ -119,7 +124,8 @@ activation/refresh operation без restart-loop.
 - обычная production сборка физически не умеет принимать developer state;
 - developer package нельзя случайно открыть ordinary launcher или провести
   через local release transaction;
-- runtime safety model и unsupported-build admission не ослабляются.
+- runtime safety model, Common trusted-module admission и Fishing semantic
+  anchor admission не ослабляются.
 
 Ограничения:
 

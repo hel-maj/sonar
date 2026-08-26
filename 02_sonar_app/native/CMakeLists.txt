@@ -44,10 +44,10 @@ enable_testing()
 if(NOT DEFINED SONAR_COMMON_NATIVE_WINDOWS_PACKAGE OR
    NOT IS_DIRECTORY "${SONAR_COMMON_NATIVE_WINDOWS_PACKAGE}")
     message(FATAL_ERROR
-        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE must point to installed Sonar Platform Windows 0.1.6")
+        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE must point to installed Sonar Platform Windows 0.1.9")
 endif()
 find_package(
-    SonarPlatformWindows 0.1.6 EXACT CONFIG REQUIRED
+    SonarPlatformWindows 0.1.9 EXACT CONFIG REQUIRED
     PATHS "${SONAR_COMMON_NATIVE_WINDOWS_PACKAGE}/lib/cmake/SonarPlatformWindows"
     NO_DEFAULT_PATH
 )
@@ -63,13 +63,24 @@ find_package(
     NO_DEFAULT_PATH
 )
 
+if(NOT DEFINED SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE OR
+   NOT IS_DIRECTORY "${SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE}")
+    message(FATAL_ERROR
+        "SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE must point to installed Sonar Majestic Catalog 1.0.0")
+endif()
+find_package(
+    SonarMajesticCatalog 1.0.0 EXACT CONFIG REQUIRED
+    PATHS "${SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE}/lib/cmake/SonarMajesticCatalog"
+    NO_DEFAULT_PATH
+)
+
 if(NOT DEFINED SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE OR
    NOT IS_DIRECTORY "${SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE}")
     message(FATAL_ERROR
-        "SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE must point to installed Sonar Majestic CEF Inventory 0.1.0")
+        "SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE must point to installed Sonar Majestic CEF Inventory 0.1.18")
 endif()
 find_package(
-    SonarMajesticCefInventory 0.1.0 EXACT CONFIG REQUIRED
+    SonarMajesticCefInventory 0.1.18 EXACT CONFIG REQUIRED
     PATHS "${SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE}/lib/cmake/SonarMajesticCefInventory"
     NO_DEFAULT_PATH
 )
@@ -107,6 +118,12 @@ if(SONAR_FISHING_BUILD_OFFLINE_IPC OR SONAR_FISHING_BUILD_PRODUCTION_ENGINE)
     if(NOT DEFINED SONAR_PROTOC_EXECUTABLE OR
        NOT EXISTS "${SONAR_PROTOC_EXECUTABLE}")
         message(FATAL_ERROR "SONAR_PROTOC_EXECUTABLE must point to protoc 35.1")
+    endif()
+    if(NOT DEFINED SONAR_COMMON_INVENTORY_CONTRACT_ROOT OR
+       NOT EXISTS
+          "${SONAR_COMMON_INVENTORY_CONTRACT_ROOT}/inventory/v1/sonar_inventory.proto")
+        message(FATAL_ERROR
+            "SONAR_COMMON_INVENTORY_CONTRACT_ROOT must expose the pinned Common inventory/v1 schema")
     endif()
 
     # The immutable prefix also owns Protobuf's exact Abseil/utf8_range

@@ -4,6 +4,7 @@ using Sonar.Fishing.Host.EngineIntegration.CatchDisposition;
 using Sonar.Fishing.Host.EngineIntegration.CatchQuality;
 using Sonar.Fishing.Host.EngineIntegration.RuntimeSettings;
 using Sonar.Fishing.Host.EngineIntegration.Notifications;
+using Sonar.Fishing.Host.EngineIntegration.Inventory;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.SettingsPersistence;
@@ -34,6 +35,7 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
     private Exception? eventPumpFailure;
     private ulong lastNotificationSequence;
     private ulong lastSnapshotSequence;
+    private ulong lastInventorySequence;
     private ulong sequence = 2;
     private bool shutdown;
     private bool disposed;
@@ -66,6 +68,8 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
     internal event Action<FishingSessionStateSnapshot>? SessionSnapshotReceived;
 
     internal event Action<FishingEngineNotificationFrame>? NotificationReceived;
+
+    internal event Action<FishingInventorySnapshotFrame>? InventorySnapshotReceived;
 
     internal int ProcessId => engineProcess.Id;
 
@@ -681,6 +685,7 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
                 var expectedKind = envelope.PayloadCase switch
                 {
                     Envelope.PayloadOneofCase.FishingSessionSnapshot => MessageKind.Snapshot,
+                    Envelope.PayloadOneofCase.InventoryStateSnapshot => MessageKind.Snapshot,
                     Envelope.PayloadOneofCase.FishingNotificationEvent => MessageKind.Event,
                     _ => throw new InvalidOperationException("engine_event_payload_invalid"),
                 };
@@ -711,6 +716,32 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
                     catch
                     {
                         // Host notification consumers are observational. Their
+                        // failure must not terminate the Engine event pump.
+                    }
+                    continue;
+                }
+                if (envelope.PayloadCase ==
+                    Envelope.PayloadOneofCase.InventoryStateSnapshot)
+                {
+                    if (envelope.Header.Sequence <= lastInventorySequence)
+                    {
+                        throw new InvalidOperationException(
+                            "engine_inventory_sequence_replayed");
+                    }
+                    var inventorySnapshot = FishingInventoryWireMapper.Map(
+                        envelope.InventoryStateSnapshot);
+                    lastInventorySequence = envelope.Header.Sequence;
+                    try
+                    {
+                        InventorySnapshotReceived?.Invoke(new FishingInventorySnapshotFrame(
+                            envelope.Header.SessionId,
+                            envelope.Header.Sequence,
+                            envelope.Header.CapturedAtUnixMs,
+                            inventorySnapshot));
+                    }
+                    catch
+                    {
+                        // Inventory UI consumers are observational. Their
                         // failure must not terminate the Engine event pump.
                     }
                     continue;

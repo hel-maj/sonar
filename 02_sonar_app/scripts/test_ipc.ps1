@@ -4,6 +4,8 @@ param(
     [string]$CommonNativePackage = $env:SONAR_COMMON_NATIVE_PACKAGE,
     [string]$CommonNativeWindowsPackage = $env:SONAR_COMMON_NATIVE_WINDOWS_PACKAGE,
     [string]$CommonNativeLicensingPackage = $env:SONAR_COMMON_NATIVE_LICENSING_PACKAGE,
+    [string]$CommonMajesticCatalogPackage =
+        $env:SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE,
     [string]$CommonMajesticCefInventoryPackage =
         $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
@@ -33,8 +35,9 @@ $testProject = Join-Path $productRoot "tests\dotnet\Sonar.Fishing.Ipc.Integratio
 $expectedProtocHash = "C77B7F5125113306ECDE9B328E72466E5CA805A3974DBF10B9DF91A35781E89C"
 $expectedCommunityToolkitHash = "8CB4B5BE8E95F9F1EC26CF341D84FBEE8244E88102EBC7C88242E960E0E35805"
 $expectedNativeManifestHash = "695B6BFAD82A3052A5021BA55F9F833D81672DA755BF98626CC66CFB3DACAE0C"
-$expectedNativeWindowsManifestHash = "EE61031CBC06550FD478892EFECD250FD4786790C5687F260B2D40B85B5C9446"
+$expectedNativeWindowsManifestHash = "504C26A0B084EDA6EE0C71FD6CCA6B773F85FC0FFC8A2460EE3FA19B55C00C86"
 $expectedNativeLicensingManifestHash = "E777E623A2974E07CF4338670C3A41DF13BCDB8990F447987BB1BC0FF21834AC"
+$expectedMajesticCatalogManifestHash = "EAF7FAD575747B773C0E5DB82D8E923343C35642FF24A8E4640B2D7B4040EBDB"
 $requiredNativeTargets = @(
     "SonarFishingCatchQualityTests",
     "SonarFishingCatchDispositionTests",
@@ -77,6 +80,8 @@ $requiredNativeTargets = @(
     "SonarFishingCommonInventoryOpenTests",
     "SonarFishingIpcContractsTests",
     "SonarFishingEventDeliveryTests",
+    "SonarFishingInventoryEventsTests",
+    "SonarFishingInventoryObservationTests",
     "SonarFishingSessionControlTests",
     "SonarFishingProductionCompositionTests",
     "SonarFishingEngine",
@@ -126,6 +131,8 @@ $expectedCTestNames = @(
     "sonar_fishing.common_inventory_open_package_ownership",
     "sonar_fishing.ipc.contract_golden",
     "sonar_fishing.ipc.event_delivery",
+    "sonar_fishing.ipc.inventory_events",
+    "sonar_fishing.ipc.inventory_observation",
     "sonar_fishing.ipc.session_control",
     "sonar_fishing.ipc.production_composition",
     "sonar_fishing.ipc.offline_authority_gate",
@@ -452,6 +459,8 @@ $resolvedFeed = Resolve-Directory `
     $CommonFeed `
     (Join-Path $productRoot "..\..\.artifacts\sonar-feed") `
     "Sonar Common feed"
+$resolvedInventoryContractRoot = Resolve-FishingCommonInventoryContractRoot `
+    $resolvedFeed $productRoot
 $resolvedNativePackage = Resolve-Directory `
     $CommonNativePackage `
     (Join-Path $productRoot "..\..\.artifacts\sonar-native\0.1.1") `
@@ -466,7 +475,7 @@ if ($actualNativeManifestHash -ne $expectedNativeManifestHash) {
 }
 $resolvedNativeWindowsPackage = Resolve-Directory `
     $CommonNativeWindowsPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.6") `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.9") `
     "Installed Sonar Platform Windows native package"
 $nativeWindowsManifest = Join-Path $resolvedNativeWindowsPackage "SHA256SUMS.txt"
 if (-not (Test-Path -LiteralPath $nativeWindowsManifest -PathType Leaf)) {
@@ -488,9 +497,22 @@ $actualNativeLicensingManifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPat
 if ($actualNativeLicensingManifestHash -ne $expectedNativeLicensingManifestHash) {
     throw "Pinned native Licensing Common manifest hash mismatch: $actualNativeLicensingManifestHash"
 }
+$resolvedMajesticCatalogPackage = Resolve-Directory `
+    $CommonMajesticCatalogPackage `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-catalog\1.0.0") `
+    "Installed Sonar Majestic Catalog package"
+$majesticCatalogManifest = Join-Path $resolvedMajesticCatalogPackage "SHA256SUMS.txt"
+if (-not (Test-Path -LiteralPath $majesticCatalogManifest -PathType Leaf)) {
+    throw "Pinned Majestic catalog manifest is missing: $majesticCatalogManifest"
+}
+$actualMajesticCatalogManifestHash =
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $majesticCatalogManifest).Hash
+if ($actualMajesticCatalogManifestHash -ne $expectedMajesticCatalogManifestHash) {
+    throw "Pinned Majestic catalog manifest hash mismatch: $actualMajesticCatalogManifestHash"
+}
 $resolvedMajesticCefInventoryPackage = Resolve-Directory `
     $CommonMajesticCefInventoryPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.0") `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.18") `
     "Installed Sonar Majestic CEF Inventory package"
 $resolvedMajesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
     $resolvedMajesticCefInventoryPackage
@@ -527,11 +549,12 @@ if (-not (Test-Path -LiteralPath $ctestExecutable -PathType Leaf)) {
 }
 
 $expectedPackages = @{
+    "Sonar.Inventory.Ipc.Contracts.0.1.0.nupkg" = "C5A771A49D5E9B67E366E3A82AD0066E528B65536BA6B1293EBC0854DE9E3172"
     "Sonar.Platform.Ipc.Contracts.0.1.1.nupkg" = "33137FEBA79D2C7DD980E44189B73CB108231BCC443A2674853A2820466CFBD2"
     "Sonar.Platform.Ipc.NamedPipes.0.1.1.nupkg" = "0CF50FDAFFF00608F0B5742C39A15B3AB24CF79329DA8B07A01404E9F7A45214"
     "Sonar.Platform.Processes.0.1.0.nupkg" = "03DEE12DCB7F2C30A21921A9198CA5388D93A682B8CCE69658CAD0E1996AE5EB"
     "Sonar.Licensing.Verification.0.1.3.nupkg" = "CA1DAC5C5220872F15130C863AB5D12E85709AC19D4972AFC7193C8223FA7518"
-    "Sonar.UI.Wpf.0.2.19.nupkg" = "37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33"
+    "Sonar.UI.Wpf.0.2.21.nupkg" = "BCF274F21A2BBBB0BC21799D489881AF086929AEA26547EEF4E816590D2D2675"
     "emoji.wpf.0.3.4.nupkg" = "A9C0570F97961E3DC2B2BA9E41EB7B28808733D194742D837653478EECE7D191"
     "stfu.0.1.1.nupkg" = "BDD1BAEEEC5FF16B74D0354B88393D002A6E8ECBB19793AB900B9151CE686B3A"
     "jeremyansel.hlsl.targets.1.0.13.nupkg" = "4F4CC76E9EFD35F605042FB6D8BD64EF1203F2174DED65217779BB049CFB22E8"
@@ -730,7 +753,9 @@ Invoke-Checked $resolvedCMake @(
     "-DSONAR_COMMON_NATIVE_PACKAGE=$resolvedNativePackage",
     "-DSONAR_COMMON_NATIVE_WINDOWS_PACKAGE=$resolvedNativeWindowsPackage",
     "-DSONAR_COMMON_NATIVE_LICENSING_PACKAGE=$resolvedNativeLicensingPackage",
+    "-DSONAR_COMMON_MAJESTIC_CATALOG_PACKAGE=$resolvedMajesticCatalogPackage",
     "-DSONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE=$resolvedMajesticCefInventoryPackage",
+    "-DSONAR_COMMON_INVENTORY_CONTRACT_ROOT=$resolvedInventoryContractRoot",
     "-DSONAR_PROTOC_EXECUTABLE=$resolvedProtoc"
 )
 Assert-GeneratedSolutionTargets $nativeBuild $requiredNativeTargets

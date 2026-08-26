@@ -20,7 +20,9 @@ struct event_delivery_limits final {
   sonar::platform::ipc::priority_queue_limits safety{8, 512U * 1024U};
   sonar::platform::ipc::priority_queue_limits lifecycle{32, 2U * 1024U * 1024U};
   sonar::platform::ipc::priority_queue_limits normal{128, 4U * 1024U * 1024U};
-  std::size_t latest_snapshot_bytes =
+  std::size_t latest_session_snapshot_bytes =
+      sonar::platform::ipc::event_frame_maximum;
+  std::size_t latest_inventory_snapshot_bytes =
       sonar::platform::ipc::event_frame_maximum;
 };
 
@@ -28,8 +30,10 @@ struct event_delivery_usage final {
   sonar::platform::ipc::priority_queue_usage safety;
   sonar::platform::ipc::priority_queue_usage lifecycle;
   sonar::platform::ipc::priority_queue_usage normal;
-  std::size_t latest_snapshot_bytes = 0;
-  std::uint64_t coalesced_snapshot_count = 0;
+  std::size_t latest_session_snapshot_bytes = 0;
+  std::size_t latest_inventory_snapshot_bytes = 0;
+  std::uint64_t coalesced_session_snapshot_count = 0;
+  std::uint64_t coalesced_inventory_snapshot_count = 0;
 };
 
 class event_delivery_error final : public std::runtime_error {
@@ -49,7 +53,8 @@ class event_outbox final {
   void enqueue_priority(
       std::span<const std::byte> payload,
       sonar::platform::ipc::frame_priority priority);
-  void publish_latest_snapshot(std::span<const std::byte> payload);
+  void publish_latest_session_snapshot(std::span<const std::byte> payload);
+  void publish_latest_inventory_snapshot(std::span<const std::byte> payload);
 
   [[nodiscard]] std::optional<std::vector<std::byte>> take_next();
   [[nodiscard]] bool has_pending() const;
@@ -57,7 +62,9 @@ class event_outbox final {
 
  private:
   sonar::platform::ipc::priority_frame_queue priority_;
-  sonar::platform::ipc::latest_frame_buffer latest_snapshot_;
+  sonar::platform::ipc::latest_frame_buffer latest_session_snapshot_;
+  sonar::platform::ipc::latest_frame_buffer latest_inventory_snapshot_;
+  bool take_inventory_next_ = false;
 };
 
 using event_frame_sink = std::function<void(
@@ -79,7 +86,8 @@ class event_writer final {
   void enqueue_priority(
       std::span<const std::byte> payload,
       sonar::platform::ipc::frame_priority priority);
-  void publish_latest_snapshot(std::span<const std::byte> payload);
+  void publish_latest_session_snapshot(std::span<const std::byte> payload);
+  void publish_latest_inventory_snapshot(std::span<const std::byte> payload);
 
   // Stops accepting frames, drains every accepted priority frame and the
   // newest coalesced snapshot, then surfaces a writer failure to the session.

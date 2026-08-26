@@ -10,10 +10,13 @@ using Sonar.Fishing.Host.SettingsPersistence;
 using Sonar.Fishing.Host.Shell;
 using Sonar.Fishing.Host.StatisticsPage;
 using Sonar.Fishing.Host.StreamingPage;
+using Sonar.Fishing.Host.StreamingRuntime;
 using Sonar.Fishing.Host.TelegramPage;
 using Sonar.Fishing.Host.AboutPage;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.HostHotkeys;
+using Sonar.Fishing.Host.InventoryPage;
+using Sonar.Fishing.Host.EngineIntegration.Inventory;
 
 namespace Sonar.Fishing.Host.HostRuntime;
 
@@ -54,6 +57,7 @@ public sealed record HostApplicationComposition(
         IEngineHealthUseCase engineHealthUseCase,
         IFishingAutomationRuntime automationRuntime,
         IFishingEngineNotificationSource engineNotifications,
+        IFishingInventorySnapshotSource inventorySnapshots,
         ILicenseRuntimeLifecycle licenseRuntime,
         IHostHotkeyRuntimeLifecycle hotkeyRuntime,
         Func<string, CancellationToken, Task<FishingLicenseActivationResult>>? activateLicense,
@@ -65,6 +69,7 @@ public sealed record HostApplicationComposition(
         ArgumentNullException.ThrowIfNull(engineHealthUseCase);
         ArgumentNullException.ThrowIfNull(automationRuntime);
         ArgumentNullException.ThrowIfNull(engineNotifications);
+        ArgumentNullException.ThrowIfNull(inventorySnapshots);
         ArgumentNullException.ThrowIfNull(licenseRuntime);
         ArgumentNullException.ThrowIfNull(hotkeyRuntime);
         if (runMode is not (HostRunMode.Production or
@@ -83,7 +88,8 @@ public sealed record HostApplicationComposition(
             automationRuntime,
             hotkeyRuntime,
             licenseOverride,
-            engineNotifications);
+            engineNotifications,
+            inventorySnapshots);
     }
 
     private static HostApplicationComposition CreateCore(
@@ -97,7 +103,8 @@ public sealed record HostApplicationComposition(
         IFishingAutomationRuntime? automationRuntime = null,
         IHostHotkeyRuntimeLifecycle? hotkeyRuntime = null,
         LicenseHostSettings? licenseOverride = null,
-        IFishingEngineNotificationSource? engineNotifications = null)
+        IFishingEngineNotificationSource? engineNotifications = null,
+        IFishingInventorySnapshotSource? inventorySnapshots = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(state);
@@ -113,8 +120,36 @@ public sealed record HostApplicationComposition(
             HostRunMode.OfflineEngine => FishingPageViewModel.CreateOfflineEngine(),
             _ => throw new ArgumentOutOfRangeException(nameof(options)),
         };
-        var streamingController = new UnavailableStreamingController(
-            state.Fishing.Behavior.StreamSnapshotMode);
+        var inventoryPage = options.Mode is HostRunMode.Production or
+            HostRunMode.DeveloperFullAccess
+            ? InventoryPageViewModel.CreateProduction()
+            : new InventoryPageViewModel(InventoryProductState.Unknown);
+        IDisposable inventoryLifetime = inventoryPage;
+        if (inventorySnapshots is not null)
+        {
+            inventoryLifetime = new InventoryPageRuntimeBinding(
+                inventorySnapshots,
+                inventoryPage);
+        }
+        IAsyncDisposable? streamingLifetime = null;
+        var localStreaming = options.Mode is HostRunMode.Production or
+            HostRunMode.DeveloperFullAccess
+                ? LocalAccessStreamingComposition.TryCreate(
+                    state.Fishing.Behavior.StreamSnapshotMode)
+                : null;
+        IStreamingController streamingController;
+        var streamingChatAvailable = false;
+        if (localStreaming is null)
+        {
+            streamingController = new UnavailableStreamingController(
+                state.Fishing.Behavior.StreamSnapshotMode);
+        }
+        else
+        {
+            streamingController = localStreaming.Controller;
+            streamingLifetime = localStreaming.Controller;
+            streamingChatAvailable = localStreaming.ChatAvailable;
+        }
         var overviewPage = new OverviewPageViewModel(state.Telegram);
         overviewPage.ApplyStreamingSnapshot(streamingController.Current);
         streamingController.SnapshotChanged += overviewPage.ApplyStreamingSnapshot;
@@ -234,12 +269,16 @@ public sealed record HostApplicationComposition(
             overviewPage,
             licensePage,
             fishingPage,
+            inventoryPage,
             settingsPage,
             statisticsPage,
             new StreamingPageViewModel(
                 streamingController,
-                featureAllowed: allowedFeatures.Contains("stream"),
-                chatFeatureAllowed: allowedFeatures.Contains("stream_chat"),
+                featureAllowed: allowedFeatures.Contains("stream") &&
+                    streamingController.Current.Status !=
+                        StreamingRuntimeStatus.Unavailable,
+                chatFeatureAllowed: allowedFeatures.Contains("stream_chat") &&
+                    streamingChatAvailable,
                 persistSnapshotMode: coordinator is null
                     ? null
                     : enabled => coordinator.UpdateStreamSnapshotMode(enabled)),
@@ -274,7 +313,9 @@ public sealed record HostApplicationComposition(
                 engineHealth,
                 telegramRuntime,
                 licenseRuntime,
-                hotkeyRuntime),
+                hotkeyRuntime,
+                inventoryLifetime,
+                streamingLifetime),
             state);
     }
 

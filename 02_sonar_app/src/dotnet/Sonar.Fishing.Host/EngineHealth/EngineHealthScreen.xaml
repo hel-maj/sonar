@@ -12,14 +12,13 @@
         Padding="24"
         VerticalScrollBarVisibility="Auto">
         <StackPanel>
-            <common:SectionHeader
+            <common:PageHeader
                 x:Name="EngineHealthPageHeader"
                 AutomationProperties.HeadingLevel="Level1"
                 Subtitle="Убедитесь, что приложение готово к работе"
                 Title="Проверка приложения" />
             <common:Card
                 x:Name="EngineHealthCard"
-                Margin="0,24,0,0"
                 AutomationProperties.Name="Готовность приложения"
                 HorizontalContentAlignment="Stretch"
                 Variant="Soft">

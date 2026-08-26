@@ -25,10 +25,10 @@ Release configuration и одинаковом corpus.
 - Native: MSVC v143 x64 Release, `/W4 /WX`.
 - Common native: immutable 0.1.1 manifest SHA-256
   `695B6BFAD82A3052A5021BA55F9F833D81672DA755BF98626CC66CFB3DACAE0C`.
-- Common native Windows: immutable 0.1.1 manifest SHA-256
+- Common native Windows: historical immutable 0.1.6 manifest SHA-256
   `EE61031CBC06550FD478892EFECD250FD4786790C5687F260B2D40B85B5C9446`.
-- Common WPF: immutable `Sonar.UI.Wpf 0.2.19` package SHA-256
-  `37BE4E2FB5C38B400640D3EB5CF91DC54BB8052C09D9C50BD67DBFE40F3AEB33`.
+- Common WPF: immutable `Sonar.UI.Wpf 0.2.20` package SHA-256
+  `F9636EA45090783D0442827E023E35AB5A62135BB01BB26B09A19C8E19AA4649`.
 - Common managed licensing: immutable `Sonar.Licensing.Verification 0.1.3`
   package SHA-256
   `CA1DAC5C5220872F15130C863AB5D12E85709AC19D4972AFC7193C8223FA7518`.
@@ -36,6 +36,8 @@ Release configuration и одинаковом corpus.
   `E777E623A2974E07CF4338670C3A41DF13BCDB8990F447987BB1BC0FF21834AC`.
 
 Measurements are local development evidence, not universal release budgets.
+The package versions in this section describe the 2026-08-22 historical
+samples; current acceptance pins belong to `docs/migration/runtime-authority.json`.
 Power state, scheduler and security software can change timings. A release
 candidate repeats the measurement on its signed bundle and records the sample
 set, p50/p95/max and admission budgets before optimization.
@@ -191,7 +193,7 @@ startup/CPU/memory/IPC hotspot was demonstrated and no optimization was made.
 
 ## Phase 20-22 Common UI, statistics mutation and Windows safety baseline
 
-These slices add the complete eight-page Common 0.2.19 composition, 180-image
+These slices add the complete eight-page Common 0.2.20 composition, 180-image
 offscreen render matrix, atomic custom-price revisions, semantic hotkey
 conflict checks and the exact Common Windows process/window/input-budget
 dependency. The runtime-safety test uses only the current test process and an
@@ -422,9 +424,10 @@ in-flight cancellation, serialized restart, bounded retry and chat/cleanup
 deadlines. One cleanup test intentionally consumes a 40 ms timeout; this is
 contract evidence rather than a throughput hotspot. Results remain within the
 existing managed test-host/scheduler range, so no caching, pooling, batching or
-timing shortcut was introduced. Real tool/network startup, steady-state CPU,
-media memory and end-to-end latency must be measured only after the remaining
-guarded H07 adapters and production admission exist.
+timing shortcut was introduced. Compile-isolated Local Access now has the real
+hash-pinned tool/capture/HLS/tunnel composition, but no live run is part of this
+historical baseline. Real tool/network startup, steady-state CPU, media memory,
+end-to-end latency and recovery must be measured in the separate live H07 gate.
 
 ## Phase 33 native fishing-stage detector parity and optimization
 
@@ -520,10 +523,9 @@ sequence gate.
 ## Phase 36 native coherent-memory observation baseline
 
 The Release benchmark runs the pure confirmed-reeling, eight-vote inventory and
-serialized-chat decoders as one aggregate-shaped loop. It excludes process
-open/hash, Common exact reads and WebEngine window scanning because the signed
-production build/address profile and target resolver remain deliberately
-uncomposed. The capability adds no Host/Engine message or IPC byte.
+serialized-chat decoders as one aggregate-shaped loop. It excludes Common
+trusted-module admission, executable-section semantic scanning, exact reads and
+WebEngine discovery. The capability adds no Host/Engine message or IPC byte.
 
 | Measurement | Result |
 | --- | ---: |
@@ -538,17 +540,17 @@ uncomposed. The capability adds no Host/Engine message or IPC byte.
 
 The pure decoder baseline is stable and far below capture/process costs. No
 hotspot was demonstrated, so no speculative SIMD, pooled mutable buffer,
-weakened validation or cross-snapshot cache was added after parity. The initial
-lifecycle contract retains an admitted read-only session and verified image
-hash only while the exact Common process generation remains unchanged;
-generation drift discards both sessions and the whole snapshot. This is part of
+weakened validation or cross-snapshot cache was added after parity. The shipping
+lifecycle retains one admitted Common trusted-module lease and its authority
+fingerprint only while process/module/file identity and generation remain
+coherent; drift discards both sessions and the whole snapshot. This is part of
 admission correctness, not a post-parity timing optimization.
 
-Production measurement remains pending. After an approved profile and guarded
-composition exist, record image-hash admission cost, p50/p95/max complete
+Production measurement remains pending. With the guarded composition, record
+trusted-module cold admission and semantic-scan cost, p50/p95/max complete
 capture latency, read bytes, CPU, peak working set and recovery after either
-process disappears. Those measurements cannot weaken the 96-region, 256-KiB
-per-region, 1-MiB aggregate, exact-read or generation-revalidation gates.
+process disappears. Those measurements cannot weaken the executable-scan/read
+budgets, aggregate exact-read limits or hot authority revalidation.
 
 ## Phase 39 native whole-fishing-episode baseline
 

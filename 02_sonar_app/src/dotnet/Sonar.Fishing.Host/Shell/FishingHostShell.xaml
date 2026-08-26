@@ -7,6 +7,7 @@
     xmlns:common="clr-namespace:Sonar.UI.Wpf.Controls;assembly=Sonar.UI.Wpf"
     xmlns:engineHealth="clr-namespace:Sonar.Fishing.Host.EngineHealth"
     xmlns:fishing="clr-namespace:Sonar.Fishing.Host.FishingPage"
+    xmlns:inventory="clr-namespace:Sonar.Fishing.Host.InventoryPage"
     xmlns:license="clr-namespace:Sonar.Fishing.Host.LicensePage"
     xmlns:overview="clr-namespace:Sonar.Fishing.Host.Overview"
     xmlns:settings="clr-namespace:Sonar.Fishing.Host.SettingsPage"
@@ -65,6 +66,18 @@
                             AutomationLabel="Рыбалка"
                             Glyph="🎣"
                             UseColorEmoji="True" />
+                    </common:NavigationButton.Icon>
+                </common:NavigationButton>
+                <common:NavigationButton
+                    x:Name="InventoryNavigationButton"
+                    Margin="0,4,0,0"
+                    AutomationProperties.Name="Открыть инвентарь"
+                    Command="{Binding ViewModel.ShowInventoryCommand, ElementName=Root}"
+                    CompactContent="▦"
+                    Content="_Инвентарь"
+                    IsSelected="{Binding ViewModel.IsInventorySelected, ElementName=Root}">
+                    <common:NavigationButton.Icon>
+                        <common:IconPresenter AutomationLabel="Инвентарь" Glyph="▦" />
                     </common:NavigationButton.Icon>
                 </common:NavigationButton>
                 <common:NavigationButton
@@ -185,6 +198,9 @@
                 </DataTemplate>
                 <DataTemplate DataType="{x:Type fishing:FishingPageViewModel}">
                     <fishing:FishingPage ViewModel="{Binding}" />
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type inventory:InventoryPageViewModel}">
+                    <inventory:InventoryScreen ViewModel="{Binding}" />
                 </DataTemplate>
                 <DataTemplate DataType="{x:Type settings:FishingSettingsPageViewModel}">
                     <settings:SettingsScreen ViewModel="{Binding}" />

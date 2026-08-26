@@ -6,11 +6,15 @@ internal static class DeveloperFullAccessPolicy
 {
     internal static IReadOnlyList<string> Features { get; } =
     [
+        "overview",
+        "overview_session_stats",
         "fishing",
         "fishing_bot",
         "fishing_tackle",
+        "settings",
         "statistics",
         "telegram",
+        "stream",
     ];
 
     internal static LicenseHostSettings VisibleLicense { get; } = new(

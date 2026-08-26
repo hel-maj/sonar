@@ -16,7 +16,7 @@
             <common:PageHeader
                 x:Name="FishingPageHeader"
                 Title="Рыбалка" />
-            <layout:ResponsiveGrid Margin="0,24,0,0">
+            <layout:ResponsiveGrid>
                 <engineStatus:EngineStatusScreen
                     x:Name="EngineStatusScreen"
                     layout:ResponsiveGrid.CompactSpan="4"

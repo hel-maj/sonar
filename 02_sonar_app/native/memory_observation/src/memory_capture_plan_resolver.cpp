@@ -1,5 +1,7 @@
 #include "sonar/fishing/memory_observation/memory_observation.h"
 
+#include "trusted_reeling_binding.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -433,6 +435,7 @@ void memory_capture_plan_resolver::reset() noexcept {
   generation_ = {};
   module_base_ = 0U;
   module_size_ = 0U;
+  trusted_runtime_ = false;
   player_address_ = 0U;
   replay_address_ = 0U;
   fish_address_ = 0U;
@@ -495,17 +498,26 @@ std::string memory_capture_plan_resolver::prepare_session(
       reset();
       return "memory_process_generation_mismatch";
     }
-    const auto selection = select_memory_build_profile(
-        profiles_,
-        session_->identity().image_name,
-        session_->identity().image_sha256);
-    if (!selection.ready()) {
-      reset();
-      return selection.reason.empty()
-          ? "memory_game_build_unsupported"
-          : selection.reason;
+    trusted_runtime_ = session_->identity().admission ==
+        process_admission::trusted_publisher_runtime;
+    if (trusted_runtime_) {
+      if (session_->identity().authority_fingerprint == 0U) {
+        reset();
+        return "memory_trusted_authority_invalid";
+      }
+    } else {
+      const auto selection = select_memory_build_profile(
+          profiles_,
+          session_->identity().image_name,
+          session_->identity().image_sha256);
+      if (!selection.ready()) {
+        reset();
+        return selection.reason.empty()
+            ? "memory_game_build_unsupported"
+            : selection.reason;
+      }
+      build_profile_ = selection.profile;
     }
-    build_profile_ = selection.profile;
     generation_ = game_generation;
     const auto* module = game_module(session_->identity());
     if (module == nullptr || module->base_address == 0U ||
@@ -538,18 +550,40 @@ resolved_memory_capture memory_capture_plan_resolver::resolve_reeling(
     if (auto reason = prepare_session(game_generation); !reason.empty()) {
       return fail(std::move(reason));
     }
-    if (player_address_ == 0U || replay_address_ == 0U) {
-      std::size_t right_offset{};
-      const auto player = resolve_player(
-          *session_, module_base_, module_size_, *build_profile_, right_offset);
-      const auto replay = resolve_replay(
-          *session_, module_base_, module_size_, *build_profile_);
-      if (!player.has_value() || !replay.has_value()) {
-        return fail("memory_profile_anchor_unresolved");
+    if (player_address_ == 0U || replay_address_ == 0U ||
+        build_profile_ == nullptr) {
+      if (trusted_runtime_) {
+        const auto* module = game_module(session_->identity());
+        if (module == nullptr) {
+          return fail("memory_game_module_unavailable");
+        }
+        auto binding = detail::resolve_trusted_reeling_binding(
+            *session_, *module, profiles_, session_->identity().image_name);
+        if (!binding.ready()) {
+          return fail(binding.reason.empty()
+              ? "memory_semantic_layout_unresolved"
+              : std::move(binding.reason));
+        }
+        build_profile_ = binding.profile;
+        player_address_ = binding.player;
+        replay_address_ = binding.replay;
+        fish_address_ = binding.fish.entity;
+        fish_hash_address_ = binding.fish.hash_address;
+        player_right_offset_ = binding.player_right_offset;
+      } else {
+        std::size_t right_offset{};
+        const auto player = resolve_player(
+            *session_, module_base_, module_size_, *build_profile_,
+            right_offset);
+        const auto replay = resolve_replay(
+            *session_, module_base_, module_size_, *build_profile_);
+        if (!player.has_value() || !replay.has_value()) {
+          return fail("memory_profile_anchor_unresolved");
+        }
+        player_address_ = *player;
+        replay_address_ = *replay;
+        player_right_offset_ = right_offset;
       }
-      player_address_ = *player;
-      replay_address_ = *replay;
-      player_right_offset_ = right_offset;
     }
     bool observed_inactive_cached_fish = false;
     const fish_identity current{fish_address_, fish_hash_address_};
@@ -566,13 +600,25 @@ resolved_memory_capture memory_capture_plan_resolver::resolve_reeling(
       terminal_transition_pending_ = false;
       terminal_transition_sequence_ = 0U;
       terminal_transition_captured_at_steady_ns_ = 0U;
-      const auto fish = resolve_fish(
-          *session_, replay_address_, player_address_, *build_profile_);
-      if (!fish.has_value()) {
-        return fail("memory_active_fish_unavailable");
+      if (trusted_runtime_) {
+        auto fish = detail::resolve_trusted_active_fish(
+            *session_, replay_address_, player_address_, *build_profile_);
+        if (!fish.ready()) {
+          return fail(fish.reason.empty()
+              ? "memory_active_fish_unavailable"
+              : std::move(fish.reason));
+        }
+        fish_address_ = fish.entity;
+        fish_hash_address_ = fish.hash_address;
+      } else {
+        const auto fish = resolve_fish(
+            *session_, replay_address_, player_address_, *build_profile_);
+        if (!fish.has_value()) {
+          return fail("memory_active_fish_unavailable");
+        }
+        fish_address_ = fish->entity;
+        fish_hash_address_ = fish->hash_address;
       }
-      fish_address_ = fish->entity;
-      fish_hash_address_ = fish->hash_address;
     } else {
       // This is the exact legacy fish_caught transition: a previously
       // confirmed fish whose byte at +0x189 changed from 1 to 0. Publish that
@@ -598,10 +644,17 @@ resolved_memory_capture memory_capture_plan_resolver::resolve_reeling(
         build_profile_->fish_active_offset + sizeof(std::uint8_t),
         kFishIdentityProjectionOffset + sizeof(std::uint32_t),
     });
+    auto expected_game = build_profile_->game;
+    if (trusted_runtime_) {
+      expected_game.image_sha256.clear();
+      expected_game.admission = process_admission::trusted_publisher_runtime;
+      expected_game.authority_fingerprint =
+          session_->identity().authority_fingerprint;
+    }
     memory_observation_profile profile{
         .profile_id = build_profile_->profile_id,
         .profile_revision = build_profile_->profile_revision,
-        .game = build_profile_->game,
+        .game = std::move(expected_game),
         .webengine = {.required = false},
         .reeling = {
             .player_position_offset = kPlayerPositionOffset,

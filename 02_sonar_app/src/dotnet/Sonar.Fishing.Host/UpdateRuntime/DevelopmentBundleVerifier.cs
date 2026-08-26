@@ -9,20 +9,29 @@ internal sealed record VerifiedDevelopmentBundle(
     string Root,
     string Version,
     string HostSha256,
-    string EngineSha256);
+    string EngineSha256,
+    LocalReleaseChannel Channel);
 
 internal static partial class DevelopmentBundleVerifier
 {
     private const int MaximumManifestBytes = 64 * 1024;
-    private static readonly string[] RootProperties =
+    private static readonly string[] DevelopmentRootProperties =
     [
         "schemaVersion", "product", "releaseMode", "version", "source", "ipc",
         "host", "engine", "requiredRuntime", "determinism", "authenticode",
     ];
+    private static readonly string[] DeveloperFullAccessRootProperties =
+    [
+        "schemaVersion", "product", "releaseMode", "developerFullAccess",
+        "version", "source", "ipc", "host", "engine", "requiredRuntime",
+        "determinism", "authenticode",
+    ];
     private static readonly string[] ProductProperties =
         ["path", "sha256", "unsignedSha256", "buildId"];
 
-    internal static VerifiedDevelopmentBundle Verify(string bundleDirectory)
+    internal static VerifiedDevelopmentBundle Verify(
+        string bundleDirectory,
+        LocalReleaseChannel channel = LocalReleaseChannel.DevelopmentUnsigned)
     {
         var root = ReleaseInstallLayout.ValidateSteadyState(bundleDirectory);
         var manifestPath = Path.Combine(root, "bundle-manifest.json");
@@ -41,11 +50,29 @@ internal static partial class DevelopmentBundleVerifier
                 MaxDepth = 16,
             });
             var rootElement = document.RootElement;
-            RequireExactProperties(rootElement, RootProperties, "root");
-            if (rootElement.GetProperty("schemaVersion").GetInt32() != 1 ||
+            var (rootProperties, expectedSchemaVersion, expectedReleaseMode,
+                developerFullAccess) = channel switch
+            {
+                LocalReleaseChannel.DevelopmentUnsigned =>
+                    (DevelopmentRootProperties, 1, "development-unsigned", false),
+                LocalReleaseChannel.DeveloperFullAccessUnsigned =>
+                    (DeveloperFullAccessRootProperties, 2,
+                        "developer-full-access-unsigned", true),
+                _ => throw new InvalidOperationException(
+                    "development_bundle_channel_invalid"),
+            };
+            RequireExactProperties(
+                rootElement,
+                rootProperties,
+                "root");
+            if (rootElement.GetProperty("schemaVersion").GetInt32() !=
+                    expectedSchemaVersion ||
                 rootElement.GetProperty("product").GetString() != "fishing" ||
                 rootElement.GetProperty("releaseMode").GetString() !=
-                    "development-unsigned")
+                    expectedReleaseMode ||
+                (developerFullAccess &&
+                 rootElement.GetProperty("developerFullAccess").ValueKind !=
+                    JsonValueKind.True))
             {
                 throw new InvalidOperationException("development_bundle_identity_invalid");
             }
@@ -116,7 +143,12 @@ internal static partial class DevelopmentBundleVerifier
                     "development_bundle_signature_policy_invalid");
             }
 
-            return new VerifiedDevelopmentBundle(root, version, host, engine);
+            return new VerifiedDevelopmentBundle(
+                root,
+                version,
+                host,
+                engine,
+                channel);
         }
         catch (JsonException exception)
         {

@@ -86,10 +86,21 @@ namespace {
 [[nodiscard]] bool valid_expected_process(
     const expected_process& process) noexcept {
   if (!process.required) {
-    return process.image_name.empty() && process.image_sha256.empty();
+    return process.image_name.empty() && process.image_sha256.empty() &&
+        process.authority_fingerprint == 0U;
   }
-  return !process.image_name.empty() && process.image_name.size() <= 260U &&
-      sha256_text(process.image_sha256);
+  if (process.image_name.empty() || process.image_name.size() > 260U) {
+    return false;
+  }
+  switch (process.admission) {
+    case process_admission::exact_image_sha256:
+      return sha256_text(process.image_sha256) &&
+          process.authority_fingerprint == 0U;
+    case process_admission::trusted_publisher_runtime:
+      return process.image_sha256.empty() &&
+          process.authority_fingerprint != 0U;
+  }
+  return false;
 }
 
 [[nodiscard]] bool valid_profile(
@@ -257,7 +268,10 @@ struct plan_inventory final {
         expected_generation) noexcept {
   return observed.role == role &&
       observed.generation == expected_generation &&
-      equal_image_name(observed.image_name, expected.image_name);
+      equal_image_name(observed.image_name, expected.image_name) &&
+      observed.admission == expected.admission &&
+      (expected.admission != process_admission::trusted_publisher_runtime ||
+       observed.authority_fingerprint == expected.authority_fingerprint);
 }
 
 }  // namespace
@@ -329,7 +343,8 @@ capture_result memory_observer::capture(
           capture_failure::process_identity_mismatch,
           "game_process_identity_mismatch");
     }
-    if (!equal_sha256(
+    if (profile.game.admission == process_admission::exact_image_sha256 &&
+        !equal_sha256(
             game_session_->identity().image_sha256,
             profile.game.image_sha256)) {
       game_session_.reset();
@@ -368,7 +383,9 @@ capture_result memory_observer::capture(
             capture_failure::process_identity_mismatch,
             "webengine_process_identity_mismatch");
       }
-      if (!equal_sha256(
+      if (profile.webengine.admission ==
+              process_admission::exact_image_sha256 &&
+          !equal_sha256(
               webengine_session_->identity().image_sha256,
               profile.webengine.image_sha256)) {
         webengine_session_.reset();

@@ -11,11 +11,14 @@ read-only observation. Она не нажимает клавиши, не упр�
 Текущий slice построен как Ports and Adapters плюс Aggregate Snapshot:
 
 ```text
-exact product target resolver + same-frame visual stage
+trusted GTA module lease + same-frame visual stage
   -> reeling: Fishing capture_plan + bounded exact reads
-  -> non-reeling: one Common inventory-open facade observation
   -> one coherent_memory_snapshot
   -> whole Engine episode policy
+
+Common trusted Majestic content provider
+  -> cancellable 500 ms inventory worker
+  -> changed revisioned InventoryStateSnapshot event
 ```
 
 `memory_observer::capture` является одной coarse operation. Все четыре группы
@@ -23,26 +26,36 @@ evidence получают один sequence, monotonic capture time, profile id/
 точные process generations. Host не участвует между observation, decision и
 будущим final side-effect gate.
 
+Inventory content намеренно не входит в latency-critical reeling capture. Его
+отдельный Engine worker владеет полным Common sample, cancellation и latest-only
+publication; через IPC проходит один immutable product-neutral snapshot, а не
+серия V8/property RPC.
+
 ## Ownership и зависимости
 
-- Sonar Common `SonarPlatformWindows 0.1.6` владеет least-rights
+- Sonar Common `SonarPlatformWindows 0.1.9` владеет least-rights
   `readonly_process`, process generation, bounded exact `ReadProcessMemory` и
   bounded `unique_top_level_client_observer` для exact process generation.
-- Fishing владеет допустимыми executable names/hashes, адресным profile,
+- Fishing владеет допустимыми executable names/publishers, semantic layout,
   decoder policy, cross-process ambiguity и смыслом evidence. Product policy
   требует visible non-minimized client, но сохраняет прежнюю eligibility для
   owned/tool windows; обязательный Common cap 64 fail-closed при exhaustion.
-- Fishing adapter добавляет SHA-256 проверку image file, но не дублирует
-  `OpenProcess`, `ReadProcessMemory`, `EnumWindows` или generation logic Common.
-  Offline ownership scan запрещает возвращение локальной window enumeration.
-- Common target `Sonar::PlatformInventoryState` нормализует только общую
-  трёхзначную семантику `unknown/closed/open`; Fishing по-прежнему владеет
-  profile candidates, vote/confidence admission и surface geometry.
-- Exact-pinned Common `SonarMajesticCefInventory 0.1.0` владеет production CEF
-  renderer discovery, exact client admission, V8 decoding, coherent double-read
-  и hot binding. Fishing вызывает только `inventory_open.hpp`, владеет coarse
-  routing, product reason mapping, retry cadence и surface geometry. Manifest
-  pin: `B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8`.
+- Common `Sonar::PlatformWindowsTrustedModule` проверяет unique module,
+  nonzero bounds, disk PE/loaded-size coherence, WinTrust signer/timestamp и
+  cold/hot fingerprint на pinned handle. Shipping adapter не вычисляет SHA-256;
+  Rockstar publisher policy остаётся product-owned. Offline ownership scan
+  запрещает возвращение локального signer verifier или window enumeration.
+- Common target `Sonar::PlatformInventoryState` сохраняет общую трёхзначную
+  семантику `unknown/closed/open` для legacy/coarse consumers.
+- Exact-pinned Common `SonarMajesticCefInventory 0.1.18` владеет production CEF
+  renderer discovery, version-independent trusted-publisher identity admission,
+  V8/content decoding, coherent read transaction, hot binding/provider и stable
+  inventory snapshot semantics. Continuous provider отдельно включает proven
+  closed-state bootstrap, поэтому закрытый inventory UI не блокирует content
+  snapshot; general acquisition default остаётся strict. Fishing вызывает только public content factory
+  и владеет worker cadence, product reason mapping, columns, commands, feature
+  policy, IPC projection и surface composition. Manifest pin:
+  `EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D`.
 - Historical decoder semantics сохранены в language-neutral fixture; executable
   legacy oracle и runtime fallback удалены.
 - Полная разбивка historical memory/visual owners и полей находится в
@@ -52,11 +65,12 @@ Windows connector использует Common `memory_regions` access profile. �
 добавляет только least-rights region enumeration к exact read; Fishing
 по-прежнему владеет scan bounds, binding и admission.
 
-Конкретный Windows connector создается без side effect. Process handle появляется
-только внутри явно запущенной production fishing session, отдельного
-non-shipping [live observation preflight](LIVE_OBSERVATION_PREFLIGHT.md) либо
-явно подтверждённого inventory characterization tool.
-Preflight использует тот же embedded build selection, resolver и observer, но
+Конкретный Windows connector создается без side effect. Inventory process handle
+может появиться только внутри production Engine после verified Host/Engine
+handshake, отдельного non-shipping
+[live observation preflight](LIVE_OBSERVATION_PREFLIGHT.md) либо forensic
+characterization tool; construction и offline Engine остаются inert.
+Preflight использует тот же trusted lease, semantic resolver и observer, но
 не создаёт input/mutation capability и наружу отдаёт только coarse readiness.
 
 ## Profile и coherent capture
@@ -64,9 +78,11 @@ Preflight использует тот же embedded build selection, resolver и
 `memory_observation_profile` фиксирует:
 
 - ASCII `profile_id` и ненулевую revision;
-- exact executable name и 64-hex SHA-256 для GTA и WebEngine;
+- executable name, admission kind и Common authority fingerprint для runtime;
+  64-hex SHA-256 разрешён только exact forensic/replay profile;
 - reeling layout и подтвержденный fish model hash;
-- inventory vote candidates, минимум 6 matches и confidence 0.85;
+- historical inventory vote candidates, минимум 6 matches и confidence 0.85,
+  только для characterization/forensic replay;
 - typed/scaled player-status candidates;
 - required/optional domain policy.
 
@@ -75,10 +91,11 @@ binding. У текущего shipping profile поле равно `-`: decoder/v
 существует, но production address authority не выдумывается из legacy bytes.
 
 `capture_plan` содержит resolved addresses только для одной уже проверенной
-process generation. Resolver обязан передать exact `(pid, creation time)` для
-GTA и WebEngine. Observer сравнивает generation до чтения, делает только exact
-reads и повторно проверяет обе generation после последнего read. PID reuse,
-image/hash drift, short read, partial domain decode и replayed sequence
+process generation. Resolver обязан передать exact `(pid, creation time)` и
+Common authority fingerprint для GTA/WebEngine runtime. Observer сравнивает
+generation/authority до чтения, делает только exact reads и повторно
+revalidate-ит lease после последнего read. PID reuse, module/file drift, short
+read, partial domain decode и replayed sequence
 инвалидируют весь aggregate. Предыдущее значение не возвращается как свежее.
 
 Один цикл ограничен следующими hard bounds:
@@ -107,9 +124,10 @@ semantics:
   weight;
 - serialized и DOM chat evidence с active input, visibility и active tab.
 
-Fixture читает current CTest. Negative CTest покрывает hash/profile drift,
-short/oversize read, process-generation drift, invalid UTF-8, unknown fish
-hash, ambiguous inventory vote и replayed sequence.
+Fixture читает current CTest. Negative CTest покрывает exact forensic
+hash/profile drift, trusted fingerprint mismatch, short/oversize read,
+process-generation drift, invalid UTF-8, unknown fish hash, ambiguous semantic
+anchors/inventory vote и replayed sequence.
 
 ## Production admission и оставшиеся gaps
 
@@ -134,41 +152,45 @@ Confirmed inactive fish остаётся pending до успешного coheren
 первый read/decode failure не теряет terminal transition. После commit anchor
 удаляется; после исчерпания bounded retry он сбрасывается без replay.
 
-Обычная shipping composition запрещает встроенный Common non-shipping profile и
-остаётся `unknown/source_disabled` до promotion. Compile-isolated `Локальный
-доступ` явно разрешает только exact candidate
-`majestic-client-1.20.7-candidate-v1`, включая closed bootstrap; Common всё равно
-проверяет immutable client identity и generation. Старый Fishing binding и его
-`memory_inventory_binding_unavailable` остаются только characterization path и
-не являются production authority. Ни один путь не публикует выдуманный
-`open/closed`. Полная
+Обычная shipping и compile-isolated `Локальный доступ` композиции создают один
+Common trusted-publisher runtime с observation enabled. Common доказывает
+accepted signer/timestamp, pinned file identity, dynamic PE/loaded-size
+coherence и stable process generation; client version/hash/size/profile не
+являются availability gates. Старый Fishing binding, exact 1.20.7 profile и его
+`memory_inventory_binding_unavailable` остаются только forensic/
+characterization path и не являются production authority. Ни один путь не
+публикует выдуманный `open/closed`. Полная
 граница и подготовленный manual evidence entrypoint описаны в
 [inventory-state characterization](INVENTORY_STATE_CHARACTERIZATION.md).
 Player/status/chat поля также публикуются только при наличии admitted layout;
 visual evidence не выдаётся за memory evidence. E11 остаётся partial live
 acceptance. Оставшиеся gates:
 
-1. Первый guarded read-only preflight 2026-08-24 подтвердил process/window,
-   executable hash-read и capture, но exact profile selection fail-closed
-   вернул `game_build_unsupported`; reeling memory не читалась.
-2. Реальные profile-drift, target-loss и reeling captures.
-3. Один controlled manual `CLOSED/OPEN` characterization current build,
-   автономный signature/root review и immutable inventory binding promotion;
-   authentic player status/chat captures остаются отдельными gaps.
-4. Любой новый GTA build получает новый immutable profile/revision и regression
-   evidence; silent wildcard profile запрещён.
+1. Исторический preflight 2026-08-24 зафиксировал прежний SHA-gated blocker;
+   после ADR-0005 этот receipt остаётся provenance и не описывает текущий
+   production admission.
+2. Нужен свежий read-only live capture текущего trusted/semantic path:
+   executable-section coverage, unique player/replay, exact active fish и
+   coherent snapshot, плюс реальные target-loss captures.
+3. Один отдельный read-only live acceptance trusted-publisher inventory path;
+   authentic player status/chat captures остаются отдельными gaps. Manual
+   `CLOSED/OPEN` legacy characterization больше не является runtime admission.
+4. Изменившийся GTA build получает свежий Common lease и проходит те же
+   semantic anchors. Новый exact profile/revision создаётся только для forensic
+   provenance либо при реальном изменении layout data, не для разблокировки SHA.
 
-Для сбора evidence по unsupported hash существует отдельный non-shipping
+Для сбора forensic evidence по конкретному hash существует отдельный non-shipping
 [compatibility probe](BUILD_PROFILE_COMPATIBILITY_PROBE.md). Он deep-clone-ит
 frozen baseline только в памяти, использует distinct candidate identity,
 требует полную уникальность anchors, bounded entity count, ровно одну active
 fish identity, coherent snapshot и post-capture revalidation. Даже успешный
 candidate result не изменяет registry и не является production admission.
 
-Единственный live pass этого diagnostic 2026-08-24 подтвердил process/window,
-hash и pinned baseline, но вернул `pattern_scan_incomplete`; identity и coherent
-snapshot остались false. Production memory authority поэтому всё ещё не
-принимает текущую build, а screenshot не подменяет open-state evidence.
+Единственный исторический live pass этого diagnostic 2026-08-24 подтвердил
+process/window/hash и pinned baseline, но вернул `pattern_scan_incomplete`.
+Он не является текущим production gate: shipping resolver теперь сам требует
+полное executable-section покрытие и unique semantic anchors после Common
+trusted admission. Screenshot по-прежнему не подменяет memory evidence.
 
 Дополнительный zero-input scan legacy inventory signature на exact current hash
 также вернул `0` matches даже по всем `13490` readable regions до 16 MiB.

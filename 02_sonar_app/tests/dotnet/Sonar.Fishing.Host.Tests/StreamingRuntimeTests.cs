@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using Sonar.Fishing.Host.StreamingPage;
 using Sonar.Fishing.Host.StreamingRuntime;
 
@@ -12,6 +13,8 @@ internal static class StreamingRuntimeTests
     [
         new("streaming_process_plans_preserve_exact_quality_and_fps_matrix", ProcessPlansPreservePolicy),
         new("streaming_tunnel_endpoint_parser_accepts_only_safe_https_base", TunnelEndpointParserIsFailClosed),
+        new("streaming_loopback_hls_requires_secret_path_and_cleans_workspace", LoopbackHlsIsAuthenticatedAndClean),
+        new("streaming_local_access_composition_matches_embedded_tool_resources", LocalAccessCompositionMatchesResources),
         new("streaming_backend_starts_and_cleans_fake_components_in_order", BackendLifecycleIsOrdered),
         new("streaming_backend_rejects_loose_tools_and_unauthenticated_viewer", BackendBoundariesFailClosed),
         new("streaming_backend_rolls_back_partial_fake_start", BackendRollsBackPartialStart),
@@ -90,6 +93,135 @@ internal static class StreamingRuntimeTests
                 "https://unit.trycloudflare.test/?token=secret",
                 out _),
             "Query-bearing tunnel endpoint was accepted");
+    }
+
+    private static void LoopbackHlsIsAuthenticatedAndClean()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"sonar-fishing-streaming-{Guid.NewGuid():N}");
+        IStreamingNetworkSession? session = null;
+        try
+        {
+            session = new LoopbackHlsNetworkSessionFactory(root)
+                .StartAsync(CancellationToken.None)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult();
+            File.WriteAllBytes(
+                Path.Combine(
+                    Path.GetDirectoryName(session.Descriptor.MediaPlaylistPath)!,
+                    "live0.ts"),
+                [0x47, 0x40, 0x00, 0x10]);
+            File.WriteAllText(
+                session.Descriptor.MediaPlaylistPath,
+                "#EXTM3U\n#EXTINF:2.0,\nlive0.ts\n");
+            session.WaitForMediaAsync(CancellationToken.None)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult();
+
+            using var client = new HttpClient();
+            var unauthorized = client.GetAsync(session.Descriptor.LocalBaseUri)
+                .GetAwaiter()
+                .GetResult();
+            TestAssert.Equal(
+                System.Net.HttpStatusCode.NotFound,
+                unauthorized.StatusCode,
+                "Streaming origin disclosed content without the secret path");
+            var viewer = client.GetAsync(session.Descriptor.LocalStreamUri)
+                .GetAwaiter()
+                .GetResult();
+            TestAssert.Equal(
+                System.Net.HttpStatusCode.OK,
+                viewer.StatusCode,
+                "Authenticated streaming viewer page was unavailable");
+            var viewerHtml = viewer.Content.ReadAsStringAsync()
+                .GetAwaiter()
+                .GetResult();
+            TestAssert.True(
+                viewerHtml.Contains(
+                    "hls.js@1.6.16/dist/hls.min.js",
+                    StringComparison.Ordinal) &&
+                viewerHtml.Contains(
+                    "sha384-5E8B0pTlZZJMabWpC0fyYf6OUpe15jJij34BqBAh4NXoHAlLNOjCPRrwtOXOQFAn",
+                    StringComparison.Ordinal) &&
+                !viewerHtml.Contains("hls.js@1/dist", StringComparison.Ordinal),
+                "Streaming viewer did not pin its HLS player dependency");
+            var playlist = client.GetAsync(new Uri(
+                    session.Descriptor.LocalStreamUri,
+                    "live.m3u8"))
+                .GetAwaiter()
+                .GetResult();
+            TestAssert.Equal(
+                System.Net.HttpStatusCode.OK,
+                playlist.StatusCode,
+                "Authenticated HLS playlist was unavailable");
+            TestAssert.Equal(
+                1,
+                session.GetViewerCountAsync(CancellationToken.None)
+                    .AsTask()
+                    .GetAwaiter()
+                    .GetResult(),
+                "Authenticated playlist access was not counted as a viewer");
+
+            session.StopAsync(TimeSpan.FromSeconds(2), CancellationToken.None)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult();
+            TestAssert.True(
+                !Directory.EnumerateDirectories(root).Any(),
+                "Streaming session workspace survived a normal stop");
+        }
+        finally
+        {
+            if (session is not null)
+            {
+                session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    private static void LocalAccessCompositionMatchesResources()
+    {
+        var assembly = typeof(LocalAccessStreamingComposition).Assembly;
+        var resources = assembly.GetManifestResourceNames();
+        var toolsEmbedded = resources.Contains(
+                "Sonar.Fishing.Host.Streaming.ffmpeg.exe",
+                StringComparer.Ordinal) &&
+            resources.Contains(
+                "Sonar.Fishing.Host.Streaming.cloudflared.exe",
+                StringComparer.Ordinal) &&
+            resources.Contains(
+                "Sonar.Fishing.Host.Streaming.tool-manifest.json",
+                StringComparer.Ordinal);
+        var runtime = LocalAccessStreamingComposition.TryCreate(
+            snapshotModeEnabled: false);
+        try
+        {
+            TestAssert.Equal(
+                toolsEmbedded,
+                runtime is not null,
+                "Local Access streaming availability diverged from embedded resources");
+            if (runtime is not null)
+            {
+                TestAssert.Equal(
+                    StreamingRuntimeStatus.Offline,
+                    runtime.Controller.Current.Status,
+                    "Embedded Local Access streaming did not start from an offline state");
+                TestAssert.True(
+                    !runtime.ChatAvailable,
+                    "Unimplemented chat bridge was advertised as available");
+            }
+        }
+        finally
+        {
+            runtime?.Controller.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 
     private static void BackendLifecycleIsOrdered()

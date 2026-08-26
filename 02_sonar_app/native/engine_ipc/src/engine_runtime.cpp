@@ -14,9 +14,11 @@
 #include "engine_bootstrap.h"
 #include "engine_protocol.h"
 #include "entitlement_commands.h"
+#include "inventory_events.h"
 #include "session_commands.h"
 #include "settings_commands.h"
 #include "sonar/fishing/engine_ipc/event_delivery.h"
+#include "sonar/fishing/engine_ipc/inventory_observation_worker.h"
 #include "sonar/fishing/engine_ipc/production_composition.h"
 #include "sonar/fishing/engine_ipc/session_lifecycle.h"
 #include "sonar/fishing/runtime_settings/runtime_settings.h"
@@ -28,6 +30,8 @@ namespace sonar::fishing::engine_ipc::runtime {
 namespace {
 
 constexpr std::string_view kProductId = "fishing";
+constexpr bool kLiveInventoryObservationEnabled =
+    SONAR_FISHING_ENABLE_OFFLINE_DIAGNOSTICS == 0;
 
 }  // namespace
 
@@ -80,6 +84,9 @@ int run_engine_runtime() {
             kIoTimeoutMilliseconds,
             cancellation);
       });
+  sonar::fishing::engine_ipc::inventory_observation_worker inventory_observation(
+      sonar::fishing::engine_ipc::create_win32_inventory_sampler(
+          kLiveInventoryObservationEnabled));
   std::uint64_t snapshot_revision = 0;
   sonar::fishing::engine_ipc::accepted_entitlement accepted_entitlement;
 #if defined(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
@@ -97,6 +104,16 @@ int run_engine_runtime() {
   bool shutdown_requested = false;
   while (!shutdown_requested) {
     auto request = read_envelope(pipes.control_pipe());
+    if (const auto inventory = inventory_observation.poll();
+        inventory.has_value()) {
+      publish_inventory_state(
+          event_writer,
+          inventory->state,
+          bootstrap.session_id,
+          headers,
+          inventory->revision,
+          inventory->observed_at_ms);
+    }
     publish_pending_production_progress(
         event_writer,
         active_start_request,
@@ -241,6 +258,7 @@ int run_engine_runtime() {
   }
   production_capabilities.stop();
   static_cast<void>(session_lifecycle.stop());
+  inventory_observation.stop();
   event_writer.close_and_drain();
   liveness.stop();
   std::cout << "PASS offline Fishing diagnostics; production authority unchanged\n";

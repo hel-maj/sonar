@@ -7,7 +7,7 @@
 
 #include "sonar/fishing/memory_observation/memory_observation.h"
 
-namespace sonar::fishing::build_profile_compatibility_probe::detail {
+namespace sonar::fishing::memory_observation::detail {
 
 struct executable_section_image final {
   std::uintptr_t address{};
@@ -36,7 +36,7 @@ struct executable_module_read final {
 // readable executable sections. A permanent hole leaves the entire module
 // image unavailable; no partial executable image is returned.
 [[nodiscard]] executable_module_read read_executable_module(
-    memory_observation::readonly_memory_session& session,
+    readonly_memory_session& session,
     const sonar::platform::windows::module_snapshot& module);
 
-}  // namespace sonar::fishing::build_profile_compatibility_probe::detail
+}  // namespace sonar::fishing::memory_observation::detail

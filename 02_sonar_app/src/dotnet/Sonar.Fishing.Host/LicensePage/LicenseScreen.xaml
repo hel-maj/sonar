@@ -27,7 +27,7 @@
 
                 <common:NotificationBanner
                     x:Name="ActivationBanner"
-                    Margin="0,24,0,0"
+                    Margin="0,0,0,24"
                     Header="Проверка лицензии"
                     Visibility="{Binding ViewModel.ShowActivationControls, ElementName=Root, Converter={StaticResource BooleanToVisibilityConverter}}"
                     Tone="{Binding ViewModel.ActivationTone, ElementName=Root}">
@@ -38,7 +38,7 @@
 
                 <common:SettingsSection
                     x:Name="ActivationSettingsSection"
-                    Margin="0,24,0,0"
+                    Margin="0,0,0,24"
                     Header="Ключ лицензии"
                     Visibility="{Binding ViewModel.ShowActivationControls, ElementName=Root, Converter={StaticResource BooleanToVisibilityConverter}}"
                     Description="Введите ключ с активной подпиской.">
@@ -60,7 +60,7 @@
                     </StackPanel>
                 </common:SettingsSection>
 
-                <layout:ResponsiveGrid Margin="0,24,0,0">
+                <layout:ResponsiveGrid>
                     <common:MetricCard
                         layout:ResponsiveGrid.CompactSpan="4"
                         layout:ResponsiveGrid.MediumSpan="4"

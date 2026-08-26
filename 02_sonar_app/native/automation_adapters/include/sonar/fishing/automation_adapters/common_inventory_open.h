@@ -10,42 +10,9 @@
 
 namespace sonar::fishing::automation_adapters {
 
-inline constexpr std::string_view common_inventory_open_package_version{
-    "0.1.0"};
-inline constexpr std::string_view common_inventory_open_candidate_profile_id{
-    "majestic-client-1.20.7-candidate-v1"};
-
-struct common_inventory_open_composition_policy final {
-  bool observation_enabled{};
-  bool candidate_profile_approved{};
-  bool closed_state_bootstrap_approved{};
-  std::string_view profile_id;
-};
-
-template <bool LocalAccess>
-[[nodiscard]] constexpr common_inventory_open_composition_policy
-common_inventory_open_policy_for_build() noexcept {
-  if constexpr (LocalAccess) {
-    return {
-        .observation_enabled = true,
-        .candidate_profile_approved = true,
-        .closed_state_bootstrap_approved = true,
-        .profile_id = common_inventory_open_candidate_profile_id,
-    };
-  } else {
-    return {
-        .observation_enabled = false,
-        .candidate_profile_approved = false,
-        .closed_state_bootstrap_approved = false,
-        .profile_id = common_inventory_open_candidate_profile_id,
-    };
-  }
-}
-
-// This is intentionally compiled into the product adapter. A normal shipping
-// composition cannot approve the candidate through runtime state.
-[[nodiscard]] common_inventory_open_composition_policy
-selected_common_inventory_open_policy() noexcept;
+inline constexpr std::string_view common_inventory_open_authority_id{
+    "common-trusted-publisher-runtime-v1"};
+inline constexpr std::uint32_t common_inventory_open_authority_revision{1U};
 
 struct inventory_open_source_result final {
   sonar::platform::inventory::observed_state state{

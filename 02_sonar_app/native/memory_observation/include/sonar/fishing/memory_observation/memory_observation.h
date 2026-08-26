@@ -26,6 +26,14 @@ enum class process_role {
   webengine,
 };
 
+// Runtime availability is admitted by Common's pinned trusted-module lease.
+// Exact SHA-256 identities remain an explicit offline/forensic seam and are
+// never selected by the shipping Windows connector.
+enum class process_admission {
+  exact_image_sha256,
+  trusted_publisher_runtime,
+};
+
 enum class evidence_region_kind {
   reeling_player,
   reeling_fish,
@@ -77,6 +85,8 @@ enum class capture_failure {
 struct expected_process final {
   std::wstring image_name;
   std::string image_sha256;
+  process_admission admission{process_admission::exact_image_sha256};
+  std::uint64_t authority_fingerprint{};
   bool required{true};
 };
 
@@ -145,6 +155,8 @@ struct process_identity final {
   sonar::platform::windows::process_generation generation;
   std::wstring image_name;
   std::string image_sha256;
+  process_admission admission{process_admission::exact_image_sha256};
+  std::uint64_t authority_fingerprint{};
   std::vector<sonar::platform::windows::module_snapshot> modules;
 };
 
@@ -245,9 +257,10 @@ class disabled_memory_connector final : public memory_connector {
       std::string& reason) noexcept override;
 };
 
-// This factory is the only shipping platform seam. It uses the frozen Common
-// least-rights readonly_process implementation and adds Fishing's executable
-// hash/profile policy. Creating the connector performs no process access.
+// This factory is the only shipping platform seam. It opens Common's pinned
+// trusted-module lease using Fishing-owned accepted publishers; no known
+// version/hash/file-size/PE-timestamp/image-size value controls availability.
+// Creating the connector performs no process access.
 [[nodiscard]] std::unique_ptr<memory_connector>
 make_windows_memory_connector();
 
@@ -296,7 +309,9 @@ inline constexpr std::uint32_t embedded_build_profile_schema_version = 2U;
 inline constexpr std::string_view embedded_build_profile_registry_sha256 =
     "A49D7CE5FE04EB3E5B24DCC717A5AF160E315D0C9449DA725B1578A643F9EB8C";
 
-// Product-owned, immutable pattern data for one exact game image. The
+// Product-owned, immutable semantic layout data. Shipping availability is
+// established by trusted publisher admission plus unique live anchors. The
+// exact SHA-256 remains provenance for forensic/replay selection only. The
 // registry is embedded into Sonar.Engine.exe; no loose profile or mutable
 // address file is consumed at runtime.
 struct relative_pointer_pattern final {
@@ -399,9 +414,11 @@ struct resolved_inventory_capture final {
   [[nodiscard]] bool ready() const noexcept;
 };
 
-// Resolves the legacy-characterized player/replay/fish chains only after the
-// exact image hash selects an embedded profile. Resolution is bounded, cached
-// by process generation, and revalidates the fish identity before every plan.
+// Resolves the legacy-characterized player/replay/fish chains after Common
+// admits the current signed module. Production chooses only through unique
+// semantic anchors; exact image selection remains available to injected
+// forensic fixtures. Resolution is bounded, cached by process generation, and
+// revalidates the fish identity before every plan.
 class memory_capture_plan_resolver final {
  public:
   explicit memory_capture_plan_resolver(memory_connector& connector) noexcept;
@@ -452,6 +469,7 @@ class memory_capture_plan_resolver final {
   sonar::platform::windows::process_generation generation_;
   std::uintptr_t module_base_{};
   std::size_t module_size_{};
+  bool trusted_runtime_{};
   std::uintptr_t player_address_{};
   std::uintptr_t replay_address_{};
   std::uintptr_t fish_address_{};

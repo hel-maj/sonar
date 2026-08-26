@@ -29,9 +29,10 @@ logs/
 protobuf code, logo, fish catalog и изображения встроены в два EXE.
 
 Native configure exact-pins installed
-`SonarMajesticCefInventory 0.1.0` / `Sonar::MajesticCefInventory`. Setup, full
+`SonarMajesticCefInventory 0.1.18` / `Sonar::MajesticCefInventory` /
+`Sonar::MajesticCefInventoryContent`. Setup, full
 offline gate и оба clean release build проверяют SHA-256 manifest
-`B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8` и каждый
+`EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D` и каждый
 listed payload. Sibling Common checkout и loose runtime dependency запрещены.
 
 ## Entrypoints
@@ -88,11 +89,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full
 
 Эта пара снимает только внешние licensing/entitlement и signed startup
 availability/update-block admission gates и сохраняет production window,
-process/generation, foreground, capture, input и final safety gates. Она также
-compile-time разрешает только встроенный Common inventory candidate 1.20.7;
-ordinary shipping оставляет его denied/inert до promotion. Builder по умолчанию маркирует версию как `1.0.0-local`; product UI
+process/generation, foreground, capture, input и final safety gates.
+Inventory-open использует тот же Common trusted-publisher runtime, что и
+ordinary shipping; exact client profiles остаются forensic-only. Builder по
+умолчанию маркирует версию как `1.0.0-local`; product UI
 показывает `Локальный доступ` без key activation, raw feature IDs или internal
-channel. Ordinary `run_product.ps1` и local maintenance намеренно отвергают ее.
+channel. Ordinary `run_product.ps1` и ordinary maintenance channel намеренно
+отвергают её; отдельный maintenance channel требует оба явных switch
+`-DevelopmentUnsigned -DeveloperFullAccess`.
 Local-access run выполняет только быстрый manifest/hash/allowlist/runtime
 admission; offline suites, source ownership, dependency closure и secret scan
 остаются в build и отдельной verify-команде.
@@ -107,6 +111,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\invoke_local_relea
   -Action Install -SourceBundle .\build\release\bundle `
   -InstallDirectory .\build\sonar-fishing-local -DevelopmentUnsigned
 ```
+
+Product-owned local maintenance для compile-isolated local-access пары:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\invoke_local_release_maintenance.ps1 `
+  -Action Install -SourceBundle .\build\developer-full-access\bundle `
+  -InstallDirectory .\build\sonar-fishing-local-access `
+  -DevelopmentUnsigned -DeveloperFullAccess
+```
+
+Manifest schema/channel проверяются повторно внутри самого `Sonar.exe`;
+cross-channel source/target/backup отклоняются до swap.
 
 `Update`/`Rollback` требуют новый внешний backup, `Recover` принимает только
 одну точную interrupted generation, а `-DryRun` не меняет состояние. Wrapper
@@ -134,6 +150,14 @@ Sustained normal-lifecycle acceptance готового unsigned bundle:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_product_lifecycle.ps1 `
   -DevelopmentUnsigned -BundleDirectory .\build\release\bundle -DurationSeconds 30
+```
+
+Compile-isolated local-access bundle проходит тот же crash/recovery и повторный
+запуск с явным launch contract:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_product_lifecycle.ps1 `
+  -DeveloperFullAccess -BundleDirectory .\build\developer-full-access\bundle -DurationSeconds 30
 ```
 
 Проверка использует чистый copied state, дожидается дочернего production Engine,
@@ -220,7 +244,7 @@ unsigned smoke не является доказательством signing ил
 - native CTest: `48/48`; typed IPC integration: `7/7`;
 - deterministic offscreen UI matrix: 180 PNG для compact/medium/expanded
   layouts и 100/125/150/200% DPI в `build/ui-gallery-0219-final/`; manifest
-  фиксирует Common UI `0.2.19` и имеет SHA-256
+  фиксирует Common UI `0.2.20` и имеет SHA-256
   `FD257489E58A3F69A154A54AD176447775981A51FCE0D1744EF6A8369305AD49`;
 - network-inert demo Host прошёл три start/normal-exit цикла, а packaged
   manifest-bound Engine — три crash/replacement/cleanup цикла;
@@ -228,8 +252,9 @@ unsigned smoke не является доказательством signing ил
   first activation, normal exit, crash recovery, update, interrupted-update
   recovery и remote rollback fixtures;
 - product navigation/focus и hotkey suppression regressions покрывают
-  Alt-Tab/focus-loss policy offline; фактическое foreground switching не
-  выполнялось;
+  Alt-Tab/focus-loss policy offline; установленная local-access сборка также
+  прошла фактический foreground round-trip, шесть размеров окна и два
+  minimize/restore без смены Engine generation;
 - product-visible XAML/view-model copy и regression
   `all_product_pages_hide_implementation_copy` не содержат migration,
   language, Host/Engine/IPC или architecture status;
@@ -239,16 +264,37 @@ unsigned smoke не является доказательством signing ил
   `Sonar.exe=36D1B588BFFE4B30E125D126F2B22C8AC641526968510D71B87BD2E28D5866C1`,
   `Sonar.Engine.exe=D162D5A403296085D18D4F18B5E60F178B5FDBB2F603BA11FD84FA96E1B2B6D5`,
   `bundle-manifest.json=E941F958DF0FC455DBA5F8181D0F8223D9C2435687CBA0425FC6A8F75032766B`.
-- current compile-isolated local-access bundle `1.0.0-local` собран без
+- historical compile-isolated local-access bundle `1.0.2-local` собран без
   `SkipOfflineTests`, verified как deterministic exact two-EXE/no-Python pair:
-  `Sonar.exe=C3E1E0E8B4739342317CAC58846DB3EE45FD96EB2E84C7A08EA65980A59F230F`,
-  `Sonar.Engine.exe=25BA64F21B877D969C204F76C56215E4DD81794937A7D1A591E085F4A8008953`,
-  `bundle-manifest.json=E6296C3FAE9CAB09971B2540AAFE73A6F8B98DFF5618C220FC9CC096C15F8510`.
+  `Sonar.exe=C8AD5AEE5EFB793BAB7E780D5C84C90FF6409761F316893B99CBDDD39A56450E`,
+  `Sonar.Engine.exe=6706F65B7E5518A658A55F873C148EDA4288F07A2AFF3B0A82FC72BA44602D74`,
+  `bundle-manifest.json=A7F4CEC3AC6C13CE772A534BF2256806E2715073A97A24D47007CC211E9B4942`.
+  На установленной копии выполнены 100 последовательных navigation actions и
+  100 toggle actions: Host оставался responsive, save-toast не появлялся,
+  исходное значение настройки сохранилось. Принудительное завершение Engine
+  создало новое поколение, после чего вернулись coherent inventory snapshot с
+  `45` позициями и весом `21,72 / 40 кг` и все catalog images;
+- current compile-isolated local-access bundle `1.0.3-local` собран после exact
+  repin на `SonarMajesticCefInventory 0.1.18` и `Sonar.UI.Wpf 0.2.21` без
+  `SkipOfflineTests`: `216/216` WPF, `50/50` native CTest и `7/7` typed IPC
+  tests зелёные, две независимые сборки детерминированы, exact two-EXE
+  allowlist/no-Python gate пройден. Bundle hashes:
+  `Sonar.exe=566DEEE058F0AAB5BD7CAE6701120AB09BE6FC7657C2F32561E4234CD58BEE9E`,
+  `Sonar.Engine.exe=1219052544A02A6F98AB8FD37F014E2B48DC4602CFC606FAD84F87A0BF32B4AD`,
+  `bundle-manifest.json=248076B764D7986EA9526E246A18ABAE839965B69D6983B483C513EDF0658E7F`.
+  Фактический update установленной `1.0.2-local` принят как `1.0.3-local`, а
+  отдельный 30-секундный lifecycle подтвердил Engine crash/replacement, два
+  normal exit и повторный exact allowlist/no-Python gate;
+- current Common UI 0.2.21 visual artifact находится в
+  `build/ui-gallery-0221-final/`: 204 PNG для всех product pages/variants,
+  compact/medium/expanded layouts и 100/125/150/200% DPI. Manifest фиксирует
+  `CommonUiVersion=0.2.21` и имеет SHA-256
+  `43A2D07AEACEC9ACFE493DBF8D204EBA23333467B9C3DE3C7C7F9FE1F58DA00C`;
 
 - local development-unsigned wrapper исторически прошёл atomic install,
   update с Common UI `0.2.17` на `0.2.18`, rollback и synthetic interrupted
-  recovery; текущий exact repin `0.2.19` отдельно прошёл package-hash,
-  build, `209/209` WPF tests и 180-image UI gate. Каждый выполненный transaction
+  recovery; этот historical exact repin `0.2.20` отдельно прошёл package-hash,
+  build, `215/215` WPF tests и 180-image UI gate. Каждый выполненный transaction
   stage повторял exact allowlist/no-Python gate и не оставил residue;
 - новых Fishing Application Error 1000 или .NET Runtime 1026 после финальных
   package/lifecycle gates не зарегистрировано.
@@ -259,6 +305,8 @@ Production signing сейчас заблокирован отсутствием
 composition и принятого подписанного after-exit activator/uninstaller; локальный
 development-unsigned executor не является этим production доказательством.
 Поэтому signed install/update/interrupted-update/remote-rollback не помечаются
-как выполненные. Единственный read-only build-compatibility pass вернул
-`pattern_scan_incomplete`, поэтому текущий GTA profile не admitted и
-active-reeling/inventory physical-input acceptance не выполнялась.
+как выполненные. Исторический forensic pass вернул
+`pattern_scan_incomplete`, но после ADR-0005 exact GTA profile не управляет
+shipping availability. Свежая trusted/semantic active-reeling и inventory
+read-only acceptance, а затем отдельная physical-input acceptance, ещё не
+выполнялись.

@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using Sonar.Fishing.Host.EngineHealth;
 using Sonar.Fishing.Host.FishingPage;
 using Sonar.Fishing.Host.LicensePage;
+using Sonar.Fishing.Host.InventoryPage;
 using Sonar.Fishing.Host.StatisticsPage;
 using Sonar.Fishing.Host.Shell;
 using Sonar.UI.Wpf.Controls;
@@ -34,6 +35,9 @@ internal static class FishingHostNavigationTests
         var fishingButton = TestAssert.IsType<NavigationButton>(
             shell.FindName("FishingNavigationButton"),
             "Common Fishing NavigationButton is missing");
+        var inventoryButton = TestAssert.IsType<NavigationButton>(
+            shell.FindName("InventoryNavigationButton"),
+            "Inventory navigation is missing");
         TestAssert.IsType<NavigationButton>(shell.FindName("OverviewNavigationButton"), "Overview navigation is missing");
         TestAssert.IsType<NavigationButton>(shell.FindName("SettingsNavigationButton"), "Settings navigation is missing");
         var statisticsButton = TestAssert.IsType<NavigationButton>(
@@ -52,6 +56,11 @@ internal static class FishingHostNavigationTests
         TestAssert.True(!licenseButton.IsSelected, "License selection was not cleared");
         TestAssert.True(fishingButton.IsSelected, "Fishing selection was not applied");
         WpfTestVisualTree.FindDescendant<FishingPageControl>(shell, "Fishing page was not composed");
+
+        shell.ViewModel.ShowInventoryCommand.Execute(null);
+        Arrange(shell, new Size(980, 700));
+        TestAssert.True(inventoryButton.IsSelected, "Inventory selection was not applied");
+        WpfTestVisualTree.FindDescendant<InventoryScreen>(shell, "Inventory page was not composed");
 
         shell.ViewModel.ShowStatisticsCommand.Execute(null);
         Arrange(shell, new Size(980, 700));

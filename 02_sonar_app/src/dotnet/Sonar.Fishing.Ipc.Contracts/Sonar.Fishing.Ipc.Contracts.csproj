@@ -13,12 +13,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Sonar.Inventory.Ipc.Contracts" Version="[0.1.0]" />
     <PackageReference Include="Sonar.Platform.Ipc.Contracts" Version="[0.1.1]" />
     <Compile Include="$(GeneratedContractRoot)\SonarFishing.cs" />
     <Compile Include="$(GeneratedContractRoot)\FishingSchemaIdentity.g.cs" />
   </ItemGroup>
 
   <Target Name="GenerateFishingManagedContracts" BeforeTargets="BeforeCompile">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProductRoot)\scripts\generate_ipc_contracts.ps1&quot; -CommonContractRoot &quot;$(SonarPlatformIpcContractRoot)&quot; -OutputDirectory &quot;$(GeneratedContractRoot)&quot; -ProtocExecutable &quot;$(SonarProtocExecutable)&quot;" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProductRoot)\scripts\generate_ipc_contracts.ps1&quot; -CommonContractRoot &quot;$(SonarPlatformIpcContractRoot)&quot; -InventoryContractRoot &quot;$(SonarInventoryIpcContractRoot)&quot; -OutputDirectory &quot;$(GeneratedContractRoot)&quot; -ProtocExecutable &quot;$(SonarProtocExecutable)&quot;" />
   </Target>
 </Project>

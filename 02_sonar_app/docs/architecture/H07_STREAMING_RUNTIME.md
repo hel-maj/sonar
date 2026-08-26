@@ -1,6 +1,7 @@
 # H07 streaming runtime
 
-Статус: lifecycle core **done offline**, production activation **partial**.
+Статус: lifecycle core и compile-isolated Local Access composition **done
+offline**, live capture/network acceptance **pending**.
 
 ## Goal and non-goals
 
@@ -12,11 +13,12 @@ tunnel. UI, Telegram и Overview продолжают потреблять то�
 `IStreamingController`; fine-grained process/network операции наружу не
 выносятся.
 
-Normal production composition пока намеренно подключает
-`UnavailableStreamingController`: UI показывает недоступное состояние, а
-mutation-команды выключены. Репозиторий не содержит и не запускает реальные
-encoder/tunnel binaries, не открывает streaming socket и не объявляет готовой
-аутентифицированную viewer implementation или chat use-case bridge.
+Compile-isolated Local Access composition подключает этот controller к
+hash-pinned embedded FFmpeg, Win32 HWND capture, authenticated loopback
+HLS/viewer и contained cloudflared tunnel. Ordinary licensed composition не
+встраивает эти payloads и поэтому сохраняет `UnavailableStreamingController`.
+Chat use-case bridge пока отсутствует в обеих compositions: chat-mode action
+не рекламируется и fail-closed возвращает `streaming_chat_bridge_unavailable`.
 
 ## Lifecycle and ownership
 
@@ -56,9 +58,12 @@ snapshot переходит в Error. Stop и Host disposal не расходу�
 
 FFmpeg plan uses argument-list tokens rather than a shell command, preserves
 aspect ratio through scale + letterbox padding, uses a two-second keyframe/HLS
-cadence and never infers a physical display resolution. Actual game/chat
-capture bounds remain the responsibility of the future guarded capture-source
-adapter.
+cadence and never infers a physical display resolution. The Local Access
+`Win32GtaStreamingCaptureSource` requires exactly one non-minimized `GTA5`
+window, validates HWND ownership and non-zero current client bounds, then gives
+FFmpeg a `gdigrab` `hwnd=...` descriptor. Chat zoom is derived from the current
+client width/height instead of fixed screen coordinates. This source has not
+yet passed live target-loss, DPI, resize or restart acceptance.
 
 Default lifecycle budgets are 20 seconds startup, 5 seconds total cleanup,
 1-second health observation, 500 ms retry delay, two retries, 5-minute
@@ -71,25 +76,49 @@ the runtime is constructed.
 generation into an exact random session directory with `CreateNew`, verifies
 the declared SHA-256 after materialization and deletes only that validated
 directory when the contained processes have stopped. The backend rejects any
-provider that reports a loose-file origin. Therefore source/runtime composition
-has no supported loose dependency fallback and a future release must embed the
-two signed tools in `Sonar.exe`.
+provider that reports a loose-file origin. Therefore runtime composition has no
+supported loose dependency fallback.
 
-No executable payload is added by this slice. Before release, the product must
-freeze redistributable versions/licenses/hashes, add them as embedded resources,
-choose the product-owned transient root and prove normal-exit plus crash-recovery
-cleanup against the strict two-EXE bundle allowlist. Until that happens the
-production composition must continue using `UnavailableStreamingController`.
+The compile-isolated Local Access bundle embeds these exact resources in
+`Sonar.exe`:
+
+| Tool | Manifest version | SHA-256 |
+| --- | --- | --- |
+| FFmpeg | `8.1.1-essentials_build-www.gyan.dev` | `228D7A8556258DE907FDB55F36850078EBC7680B84EC30D84EA02E99BEC1D1EB` |
+| cloudflared | `2026.5.2` | `20B9638F685333D623798E733EFFBAD2487093F15BA592F6C7752360FF3B7AB7` |
+
+The build verifies the source files against this manifest before embedding;
+each runtime extraction verifies the same hash. Encoder and tunnel are assigned
+to Common kill-on-close Jobs. The loopback owner binds only `127.0.0.1`, creates
+a cryptographically random 256-bit path token, serves the viewer/playlist/
+segments only under that path, bounds request headers and concurrent clients,
+tracks recent viewers and deletes only its exact session workspace. The public
+HTTPS URL is accepted only from bounded cloudflared diagnostics without
+userinfo/query/fragment; the secret media path remains part of the published
+stream URL.
+
+Third-party binaries may contain byte sequences that resemble high-confidence
+secret markers. The Local Access release scan grants no filename-wide or
+directory-wide exception: it first verifies the exact manifest hashes, derives
+the sorted marker **multiset** from those two exact files and requires the
+embedded `Sonar.exe` multiset to be byte-for-byte equal. Any additional marker
+in `Sonar.exe`, any marker in `Sonar.Engine.exe`/other files, a hash mismatch or
+an unlisted payload fails the bundle.
+
+This is not permission to publish the third-party payloads as an ordinary
+licensed release. Redistribution notices/source-offer obligations, product
+signing, installed/update/rollback allowlist and real process/network recovery
+must be accepted separately. Until then ordinary licensed composition remains
+on `UnavailableStreamingController`.
 
 ## Проверка допустимого Windows encoder path
 
 Историческая Python-версия не содержала собственного encoder: она скачивала и
 запускала внешний FFmpeg для HLS, а публичный URL давала через cloudflared или
-tunnelmole. Найденный локальный FFmpeg — Gyan static GPLv3 build примерно
-101 MiB с x264/x265. Его нельзя молча встроить в проприетарный strict two-EXE
-bundle без отдельного решения по лицензии, source offer/notices и provenance.
-Найденный cloudflared также является внешним payload примерно 54 MiB; для него
-нужны frozen version, origin, license/notices и exact hash.
+tunnelmole. Local Access теперь использует frozen manifest выше: Gyan static
+GPLv3 FFmpeg примерно 101 MiB с x264 и cloudflared примерно 54 MiB. Exact hash
+и origin закрывают воспроизводимость локальной сборки, но не заменяют отдельное
+решение по redistribution license/notices/source offer для обычного релиза.
 
 Встроенный Windows path исследован по Microsoft documentation:
 
@@ -109,30 +138,31 @@ viewer/session server, viewer accounting, public HTTPS tunnel and cleanup.
 
 ## Offline acceptance
 
-Eleven new managed tests use only fake executable, process, capture and network
-adapters. They cover the exact six quality/FPS combinations, safe tunnel URL
-parsing, startup order, reverse cleanup, partial-start rollback, loose-tool and
-unauthenticated-viewer rejection, total cleanup timeout, in-flight startup
-cancellation, serialized restart without overlap, bounded retry and bounded
-chat command. No real process or socket is created by these tests.
+Thirteen managed H07 cases cover the exact six quality/FPS combinations, safe
+tunnel URL parsing, startup order, reverse cleanup, partial-start rollback,
+loose-tool and unauthenticated-viewer rejection, total cleanup timeout,
+in-flight startup cancellation, serialized restart without overlap, bounded
+retry and bounded chat command. Eleven cases remain fake-adapter lifecycle
+tests. One additional test uses a real loopback socket and temporary media
+workspace to prove the secret-path viewer boundary and cleanup; one verifies
+that Local Access composition can exist only when all three exact embedded
+resources are present. They do not start FFmpeg/cloudflared or capture GTA.
 
-Current Release acceptance is 209/209 WPF tests with zero warnings. Five equal
-offline process samples had median wall time 2219.172 ms, median CPU time
-1437.5 ms and maximum peak working set 16,564,224 bytes. H07 adds no Engine IPC
-operation or bytes. The sample demonstrates no isolated hotspot, so no
-semantics-changing optimization was made.
+The final compile-isolated bundle gate must additionally prove exact resource
+embedding, deterministic output, strict two-EXE layout, dependency closure,
+no-Python and the exact secret-marker multiset rule. These are offline release
+receipts; they do not claim live capture, public-network throughput or recovery.
 
 ## Remaining production gates
 
-- choose and approve either (a) a redistributable external encoder/tunnel set
-  with frozen provenance, license/notices and exact hashes or (b) the in-process
-  Windows capture/H.264 path plus a new product-owned HLS mux/segment sink;
-- implement the guarded product capture-source adapter for current game/chat
-  client bounds without fixed display geometry;
-- implement the authenticated loopback HLS/viewer server, bounded viewer count,
-  media workspace lifecycle and stale-workspace crash recovery;
-- provide an approved public HTTPS tunnel and its authentication/URL policy;
-- connect one coarse chat-mode use case and the licensed production composition;
+- accept the current Win32 HWND capture under live target loss, DPI, resize,
+  alt-tab and GTA restart without fixed display geometry;
+- accept the real FFmpeg/HLS/cloudflared start, public HTTPS reachability,
+  authenticated secret-path viewer, viewer accounting and stale-workspace/
+  process crash recovery;
+- connect one coarse chat-mode use case; it remains unavailable today;
+- decide whether the exact third-party payloads and their redistribution
+  obligations are acceptable for the ordinary licensed composition;
 - complete privacy/security review of the public tunnel and authenticated viewer
   surface;
 - run separately authorized real process/network acceptance, start/exit/crash

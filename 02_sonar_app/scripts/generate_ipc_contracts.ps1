@@ -4,6 +4,9 @@ param(
     [string]$CommonContractRoot,
 
     [Parameter(Mandatory = $true)]
+    [string]$InventoryContractRoot,
+
+    [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
 
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE
@@ -69,11 +72,26 @@ if (-not (Test-Path -LiteralPath $commonSchema -PathType Leaf)) {
     throw "Common package does not expose canonical ipc/v1/sonar_platform.proto: $commonSchema"
 }
 
+$resolvedInventoryContractRoot = $InventoryContractRoot
+if (-not [IO.Path]::IsPathRooted($resolvedInventoryContractRoot)) {
+    $resolvedInventoryContractRoot = Join-Path $productRoot $resolvedInventoryContractRoot
+}
+if (-not (Test-Path -LiteralPath $resolvedInventoryContractRoot -PathType Container)) {
+    throw "Canonical Common inventory contract root does not exist: $resolvedInventoryContractRoot"
+}
+$resolvedInventoryContractRoot =
+    (Resolve-Path -LiteralPath $resolvedInventoryContractRoot).Path
+$inventorySchema = Join-Path $resolvedInventoryContractRoot "inventory\v1\sonar_inventory.proto"
+if (-not (Test-Path -LiteralPath $inventorySchema -PathType Leaf)) {
+    throw "Common package does not expose canonical inventory/v1/sonar_inventory.proto: $inventorySchema"
+}
+
 [IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 
 & $resolvedProtoc `
     "--proto_path=$productContractRoot" `
     "--proto_path=$resolvedCommonContractRoot" `
+    "--proto_path=$resolvedInventoryContractRoot" `
     "--csharp_out=$OutputDirectory" `
     $productSchema
 if ($LASTEXITCODE -ne 0) {

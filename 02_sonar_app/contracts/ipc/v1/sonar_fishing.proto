@@ -6,6 +6,7 @@ option csharp_namespace = "Sonar.Fishing.Ipc.Contracts.V1";
 option optimize_for = LITE_RUNTIME;
 
 import "ipc/v1/sonar_platform.proto";
+import "inventory/v1/sonar_inventory.proto";
 
 // Fishing owns only its typed product payloads. Transport/session metadata and
 // product-neutral lifecycle messages remain owned by Sonar Platform IPC.
@@ -27,6 +28,7 @@ message Envelope {
     RevokeSignedEntitlementRequest revoke_signed_entitlement_request = 20;
     RevokeSignedEntitlementResult revoke_signed_entitlement_result = 21;
     FishingNotificationEvent fishing_notification_event = 22;
+    sonar.inventory.ipc.v1.InventoryStateSnapshot inventory_state_snapshot = 23;
   }
 }
 

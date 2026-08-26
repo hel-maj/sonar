@@ -1,5 +1,6 @@
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.EngineIntegration.Notifications;
+using Sonar.Fishing.Host.EngineIntegration.Inventory;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.SettingsPersistence;
 
@@ -91,6 +92,7 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
           IEngineAutomationSession,
           IEngineSessionStateSource,
           IEngineNotificationFrameSource,
+          IEngineInventorySnapshotFrameSource,
           IEngineBootstrapAuthoritySession
     {
         private readonly OfflineEngineSession session;
@@ -110,11 +112,14 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
             HasBootstrapRuntimeAuthority = hasBootstrapRuntimeAuthority;
             session.SessionSnapshotReceived += OnSessionSnapshotReceived;
             session.NotificationReceived += OnNotificationReceived;
+            session.InventorySnapshotReceived += OnInventorySnapshotReceived;
         }
 
         public event Action<FishingSessionStateSnapshot>? SessionStateChanged;
 
         public event Action<FishingEngineNotificationFrame>? NotificationReceived;
+
+        public event Action<FishingInventorySnapshotFrame>? InventorySnapshotReceived;
 
         public int ProcessId => session.ProcessId;
 
@@ -174,6 +179,7 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
         {
             session.SessionSnapshotReceived -= OnSessionSnapshotReceived;
             session.NotificationReceived -= OnNotificationReceived;
+            session.InventorySnapshotReceived -= OnInventorySnapshotReceived;
             return session.DisposeAsync();
         }
 
@@ -185,5 +191,8 @@ internal sealed class ProductionEngineManagedSessionFactory : IEngineManagedSess
 
         private void OnNotificationReceived(FishingEngineNotificationFrame notification) =>
             NotificationReceived?.Invoke(notification);
+
+        private void OnInventorySnapshotReceived(FishingInventorySnapshotFrame snapshot) =>
+            InventorySnapshotReceived?.Invoke(snapshot);
     }
 }

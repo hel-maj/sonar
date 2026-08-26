@@ -59,6 +59,7 @@ internal static class Program
         var tests = EngineStatusScreenTests.Create(theme)
             .Concat(FishingSessionSummaryScreenTests.Create())
             .Concat(FishingHostNavigationTests.Create())
+            .Concat(InventoryPageTests.Create())
             .Concat(HostRuntimeTests.Create())
             .Concat(EngineSupervisorTests.Create())
             .Concat(EngineSessionIdentityTests.Create())

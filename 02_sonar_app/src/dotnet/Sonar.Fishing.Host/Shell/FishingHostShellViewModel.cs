@@ -5,6 +5,7 @@ using Sonar.Fishing.Host.EngineHealth;
 using Sonar.Fishing.Host.FishingPage;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.LicensePage;
+using Sonar.Fishing.Host.InventoryPage;
 using Sonar.Fishing.Host.Overview;
 using Sonar.Fishing.Host.ProductNavigation;
 using Sonar.Fishing.Host.SettingsPage;
@@ -21,6 +22,7 @@ public enum FishingHostPage
     Overview,
     License,
     Fishing,
+    Inventory,
     Settings,
     Statistics,
     Streaming,
@@ -40,6 +42,7 @@ public sealed class FishingHostShellViewModel : ObservableObject
         OverviewPageViewModel overviewPage,
         LicensePageViewModel licensePage,
         FishingPageViewModel fishingPage,
+        InventoryPageViewModel inventoryPage,
         FishingSettingsPageViewModel settingsPage,
         StatisticsPageViewModel statisticsPage,
         StreamingPageViewModel streamingPage,
@@ -52,6 +55,7 @@ public sealed class FishingHostShellViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(overviewPage);
         ArgumentNullException.ThrowIfNull(licensePage);
         ArgumentNullException.ThrowIfNull(fishingPage);
+        ArgumentNullException.ThrowIfNull(inventoryPage);
         ArgumentNullException.ThrowIfNull(settingsPage);
         ArgumentNullException.ThrowIfNull(statisticsPage);
         ArgumentNullException.ThrowIfNull(streamingPage);
@@ -66,6 +70,7 @@ public sealed class FishingHostShellViewModel : ObservableObject
             [FishingHostPage.Overview] = overviewPage,
             [FishingHostPage.License] = licensePage,
             [FishingHostPage.Fishing] = fishingPage,
+            [FishingHostPage.Inventory] = inventoryPage,
             [FishingHostPage.Settings] = settingsPage,
             [FishingHostPage.Statistics] = statisticsPage,
             [FishingHostPage.Streaming] = streamingPage,
@@ -79,6 +84,7 @@ public sealed class FishingHostShellViewModel : ObservableObject
         ShowOverviewCommand = CreateNavigationCommand(FishingHostPage.Overview);
         ShowLicenseCommand = CreateNavigationCommand(FishingHostPage.License);
         ShowFishingCommand = CreateNavigationCommand(FishingHostPage.Fishing);
+        ShowInventoryCommand = CreateNavigationCommand(FishingHostPage.Inventory);
         ShowSettingsCommand = CreateNavigationCommand(FishingHostPage.Settings);
         ShowStatisticsCommand = CreateNavigationCommand(FishingHostPage.Statistics);
         ShowStreamingCommand = CreateNavigationCommand(FishingHostPage.Streaming);
@@ -97,6 +103,7 @@ public sealed class FishingHostShellViewModel : ObservableObject
             overview,
             new LicensePageViewModel(state.License),
             FishingPageViewModel.MigrationPreview,
+            new InventoryPageViewModel(InventoryProductState.Unknown),
             new FishingSettingsPageViewModel(state.Fishing),
             new StatisticsPageViewModel(FishingSessionStateSnapshot.Empty),
             new StreamingPageViewModel(),
@@ -144,6 +151,8 @@ public sealed class FishingHostShellViewModel : ObservableObject
 
     public bool IsFishingSelected => SelectedPage == FishingHostPage.Fishing;
 
+    public bool IsInventorySelected => SelectedPage == FishingHostPage.Inventory;
+
     public bool IsSettingsSelected => SelectedPage == FishingHostPage.Settings;
 
     public bool IsStatisticsSelected => SelectedPage == FishingHostPage.Statistics;
@@ -161,6 +170,8 @@ public sealed class FishingHostShellViewModel : ObservableObject
     public IRelayCommand ShowLicenseCommand { get; }
 
     public IRelayCommand ShowFishingCommand { get; }
+
+    public IRelayCommand ShowInventoryCommand { get; }
 
     public IRelayCommand ShowSettingsCommand { get; }
 
@@ -224,6 +235,7 @@ public sealed class FishingHostShellViewModel : ObservableObject
         OnPropertyChanged(nameof(IsOverviewSelected));
         OnPropertyChanged(nameof(IsLicenseSelected));
         OnPropertyChanged(nameof(IsFishingSelected));
+        OnPropertyChanged(nameof(IsInventorySelected));
         OnPropertyChanged(nameof(IsSettingsSelected));
         OnPropertyChanged(nameof(IsStatisticsSelected));
         OnPropertyChanged(nameof(IsStreamingSelected));
@@ -237,6 +249,7 @@ public sealed class FishingHostShellViewModel : ObservableObject
         FishingHostPage.Overview => FishingProductPageId.Overview,
         FishingHostPage.License => FishingProductPageId.License,
         FishingHostPage.Fishing => FishingProductPageId.Fishing,
+        FishingHostPage.Inventory => FishingProductPageId.Inventory,
         FishingHostPage.Settings => FishingProductPageId.Settings,
         FishingHostPage.Statistics => FishingProductPageId.Statistics,
         FishingHostPage.Streaming => FishingProductPageId.Streaming,
@@ -250,6 +263,7 @@ public sealed class FishingHostShellViewModel : ObservableObject
         FishingProductPageId.Overview => FishingHostPage.Overview,
         FishingProductPageId.License => FishingHostPage.License,
         FishingProductPageId.Fishing => FishingHostPage.Fishing,
+        FishingProductPageId.Inventory => FishingHostPage.Inventory,
         FishingProductPageId.Settings => FishingHostPage.Settings,
         FishingProductPageId.Statistics => FishingHostPage.Statistics,
         FishingProductPageId.Streaming => FishingHostPage.Streaming,

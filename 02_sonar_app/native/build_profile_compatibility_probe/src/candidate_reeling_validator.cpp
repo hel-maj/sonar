@@ -21,6 +21,7 @@ namespace sonar::fishing::build_profile_compatibility_probe {
 namespace {
 
 namespace memory = sonar::fishing::memory_observation;
+namespace memory_detail = sonar::fishing::memory_observation::detail;
 
 constexpr std::size_t kMaximumPatternHits = 4096U;
 constexpr std::size_t kMaximumPatternBytes = 64U * 1024U;
@@ -175,7 +176,7 @@ template <typename Value>
   return selected;
 }
 
-using module_image = detail::executable_module_image;
+using module_image = memory_detail::executable_module_image;
 
 [[nodiscard]] bool valid_pattern(
     const memory::relative_pointer_pattern& pattern) noexcept {
@@ -823,6 +824,8 @@ struct fish_resolution final {
       !same_sha256(
           session->identity().image_sha256,
           candidate_layout.game.image_sha256) ||
+      session->identity().admission !=
+          memory::process_admission::exact_image_sha256 ||
       !session->generation_current()) {
     return {.reason = readiness_reason::game_target_changed};
   }
@@ -830,13 +833,13 @@ struct fish_resolution final {
   if (module == nullptr) {
     return {.reason = readiness_reason::module_layout_unavailable};
   }
-  auto image = detail::read_executable_module(*session, *module);
+  auto image = memory_detail::read_executable_module(*session, *module);
   if (!image.image.has_value()) {
     if (!session->generation_current()) {
       return {.reason = readiness_reason::game_target_changed};
     }
     return {.reason = image.status ==
-            detail::executable_module_read_status::scan_incomplete
+            memory_detail::executable_module_read_status::scan_incomplete
         ? readiness_reason::module_executable_scan_incomplete
         : readiness_reason::module_layout_unavailable};
   }

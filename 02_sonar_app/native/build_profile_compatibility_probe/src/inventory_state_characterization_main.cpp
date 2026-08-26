@@ -20,6 +20,7 @@
 
 #include "sonar/fishing/memory_observation/memory_observation.h"
 #include "sonar/platform/windows/process.hpp"
+#include "windows_forensic_memory_connector.h"
 
 namespace probe = sonar::fishing::build_profile_compatibility_probe;
 namespace memory = sonar::fishing::memory_observation;
@@ -253,7 +254,7 @@ int main(const int argc, const char* const argv[]) {
       std::cerr << "Exactly one GTA5.exe process is required.\n";
       return 2;
     }
-    auto connector = memory::make_windows_memory_connector();
+    auto connector = probe::make_windows_forensic_memory_connector();
     std::string reason;
     auto session = connector->connect(
         memory::process_role::game, process_ids.front(), reason);

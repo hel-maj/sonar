@@ -29,11 +29,6 @@ target_link_libraries(SonarFishingAutomationAdapters
         advapi32
         windowsapp
 )
-if(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
-    target_compile_definitions(SonarFishingAutomationAdapters
-        PUBLIC SONAR_FISHING_DEVELOPER_FULL_ACCESS=1
-    )
-endif()
 target_compile_options(SonarFishingAutomationAdapters
     PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
 )
@@ -110,6 +105,7 @@ add_test(
     NAME sonar_fishing.common_inventory_open_package_ownership
     COMMAND "${CMAKE_COMMAND}"
         "-DPACKAGE_ROOT=${SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE}"
+        "-DCATALOG_PACKAGE_ROOT=${SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE}"
         "-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_common_inventory_package_ownership.cmake"
 )

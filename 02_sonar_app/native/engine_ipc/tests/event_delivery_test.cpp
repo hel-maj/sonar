@@ -34,25 +34,35 @@ void outbox_preserves_priority_and_coalesces_only_snapshots() {
   const auto normal = frame(0x30);
   const auto lifecycle = frame(0x20);
   const auto safety = frame(0x10);
-  const auto old_snapshot = frame(0x41);
-  const auto latest_snapshot = frame(0x42);
+  const auto old_session_snapshot = frame(0x41);
+  const auto latest_session_snapshot = frame(0x42);
+  const auto old_inventory_snapshot = frame(0x51);
+  const auto latest_inventory_snapshot = frame(0x52);
   outbox.enqueue_priority(normal, frame_priority::normal);
   outbox.enqueue_priority(lifecycle, frame_priority::lifecycle);
   outbox.enqueue_priority(safety, frame_priority::safety);
-  outbox.publish_latest_snapshot(old_snapshot);
-  outbox.publish_latest_snapshot(latest_snapshot);
+  outbox.publish_latest_session_snapshot(old_session_snapshot);
+  outbox.publish_latest_session_snapshot(latest_session_snapshot);
+  outbox.publish_latest_inventory_snapshot(old_inventory_snapshot);
+  outbox.publish_latest_inventory_snapshot(latest_inventory_snapshot);
 
   require(outbox.take_next() == safety, "safety_event_was_not_first");
   require(outbox.take_next() == lifecycle, "lifecycle_event_was_not_second");
   require(outbox.take_next() == normal, "normal_event_was_not_third");
   require(
-      outbox.take_next() == latest_snapshot,
-      "latest_snapshot_was_not_coalesced");
+      outbox.take_next() == latest_session_snapshot,
+      "latest_session_snapshot_was_not_coalesced");
+  require(
+      outbox.take_next() == latest_inventory_snapshot,
+      "latest_inventory_snapshot_was_not_coalesced");
   require(!outbox.take_next().has_value(), "outbox_did_not_drain");
   const auto usage = outbox.usage();
   require(
-      usage.coalesced_snapshot_count == 1,
-      "snapshot_coalescing_count_changed");
+      usage.coalesced_session_snapshot_count == 1,
+      "session_snapshot_coalescing_count_changed");
+  require(
+      usage.coalesced_inventory_snapshot_count == 1,
+      "inventory_snapshot_coalescing_count_changed");
 }
 
 void saturated_priority_is_explicit_and_never_dropped() {
@@ -61,7 +71,8 @@ void saturated_priority_is_explicit_and_never_dropped() {
       .safety = one_frame,
       .lifecycle = one_frame,
       .normal = one_frame,
-      .latest_snapshot_bytes = 8,
+      .latest_session_snapshot_bytes = 8,
+      .latest_inventory_snapshot_bytes = 8,
   });
   const auto safety = frame(0x10);
   outbox.enqueue_priority(safety, frame_priority::safety);
@@ -90,7 +101,7 @@ void writer_drains_accepted_frames_and_closes_admission() {
   const auto lifecycle = frame(0x20);
   const auto snapshot = frame(0x40);
   writer.enqueue_priority(lifecycle, frame_priority::lifecycle);
-  writer.publish_latest_snapshot(snapshot);
+  writer.publish_latest_session_snapshot(snapshot);
   writer.close_and_drain();
 
   {
@@ -100,7 +111,7 @@ void writer_drains_accepted_frames_and_closes_admission() {
     require(delivered.back() == snapshot, "snapshot_order_changed");
   }
   try {
-    writer.publish_latest_snapshot(snapshot);
+    writer.publish_latest_session_snapshot(snapshot);
   } catch (const event_delivery_error& error) {
     require(error.reason() == "event_writer_closed", "closed_reason_changed");
     return;

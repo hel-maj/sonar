@@ -5,6 +5,7 @@ namespace Sonar.Fishing.Host.StreamingRuntime;
 internal sealed class StreamingRuntimeController : IStreamingController, IAsyncDisposable
 {
     private readonly object sync = new();
+    private readonly object dispatchSync = new();
     private readonly IStreamingSessionBackend backend;
     private readonly IStreamingChatModeBridge chatModeBridge;
     private readonly StreamingRuntimePolicy policy;
@@ -14,6 +15,7 @@ internal sealed class StreamingRuntimeController : IStreamingController, IAsyncD
     private CancellationTokenSource? generationCancellation;
     private Task activeGeneration = Task.CompletedTask;
     private long generationId;
+    private ulong lastDispatchedRevision;
     private bool disposed;
 
     internal StreamingRuntimeController(
@@ -593,7 +595,18 @@ internal sealed class StreamingRuntimeController : IStreamingController, IAsyncD
         new(true, "accepted", snapshot);
 
     private void Publish(StreamingRuntimeSnapshot snapshot) =>
-        eventDispatcher(() => SnapshotChanged?.Invoke(snapshot));
+        eventDispatcher(() =>
+        {
+            lock (dispatchSync)
+            {
+                if (snapshot.Revision <= lastDispatchedRevision)
+                {
+                    return;
+                }
+                lastDispatchedRevision = snapshot.Revision;
+                SnapshotChanged?.Invoke(snapshot);
+            }
+        });
 
     private static Action<Action> CreateEventDispatcher()
     {

@@ -2,6 +2,7 @@
 param(
     [string]$BundleDirectory = "",
     [switch]$DevelopmentUnsigned,
+    [switch]$DeveloperFullAccess,
     [ValidateSet(30, 60, 120)]
     [int]$DurationSeconds = 30
 )
@@ -12,8 +13,16 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "release_common.ps1")
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+if ($DevelopmentUnsigned -and $DeveloperFullAccess) {
+    throw "release_lifecycle_mode_ambiguous"
+}
 if ([string]::IsNullOrWhiteSpace($BundleDirectory)) {
-    $BundleDirectory = Join-Path $productRoot "build\release\bundle"
+    $BundleDirectory = if ($DeveloperFullAccess) {
+        Join-Path $productRoot "build\developer-full-access\bundle"
+    }
+    else {
+        Join-Path $productRoot "build\release\bundle"
+    }
 }
 elseif (-not [IO.Path]::IsPathRooted($BundleDirectory)) {
     $BundleDirectory = Join-Path $productRoot $BundleDirectory
@@ -22,14 +31,25 @@ if (-not (Test-Path -LiteralPath $BundleDirectory -PathType Container)) {
     throw "release_bundle_missing: $BundleDirectory"
 }
 $BundleDirectory = (Resolve-Path -LiteralPath $BundleDirectory).Path
-$expectedMode = if ($DevelopmentUnsigned) {
+$expectedMode = if ($DeveloperFullAccess) {
+    "developer-full-access-unsigned"
+}
+elseif ($DevelopmentUnsigned) {
     "development-unsigned"
 }
 else {
     "production-signed"
 }
 
-[void](Read-FishingBundleManifest $productRoot $BundleDirectory $expectedMode)
+$manifestArguments = @{
+    ProductRoot = $productRoot
+    BundleDirectory = $BundleDirectory
+    ExpectedReleaseMode = $expectedMode
+}
+if ($DeveloperFullAccess) {
+    $manifestArguments["AllowDeveloperFullAccess"] = $true
+}
+[void](Read-FishingBundleManifest @manifestArguments)
 Assert-FishingDesktopRuntime
 $sourceHasState = Test-Path `
     -LiteralPath (Join-Path $BundleDirectory "config\state.dat") `
@@ -74,7 +94,10 @@ try {
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-    # Intentionally no arguments: this is the real product composition.
+    if ($DeveloperFullAccess) {
+        $startInfo.Arguments = "--developer-full-access"
+    }
+    # No argument in the ordinary path: this is the real product composition.
     $hostProcess = [Diagnostics.Process]::Start($startInfo)
     if ($null -eq $hostProcess) {
         throw "release_host_start_failed"
@@ -184,7 +207,10 @@ try {
     $restartInfo.UseShellExecute = $false
     $restartInfo.CreateNoWindow = $true
     $restartInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-    # Intentionally no arguments: persistent production restart.
+    if ($DeveloperFullAccess) {
+        $restartInfo.Arguments = "--developer-full-access"
+    }
+    # No argument in the ordinary path: persistent production restart.
     $hostProcess = [Diagnostics.Process]::Start($restartInfo)
     if ($null -eq $hostProcess) {
         throw "release_host_restart_failed"
@@ -247,5 +273,14 @@ finally {
     -ProductRoot $productRoot `
     -BundleDirectory $smokeRoot `
     -BundleLifecycleStage NormalExit
-[void](Read-FishingBundleManifest $productRoot $smokeRoot $expectedMode)
-Write-Output "PASS Fishing no-argument product lifecycle sustained for $DurationSeconds seconds"
+$finalManifestArguments = @{
+    ProductRoot = $productRoot
+    BundleDirectory = $smokeRoot
+    ExpectedReleaseMode = $expectedMode
+}
+if ($DeveloperFullAccess) {
+    $finalManifestArguments["AllowDeveloperFullAccess"] = $true
+}
+[void](Read-FishingBundleManifest @finalManifestArguments)
+$composition = if ($DeveloperFullAccess) { "local-access" } else { "no-argument" }
+Write-Output "PASS Fishing $composition product lifecycle sustained for $DurationSeconds seconds"

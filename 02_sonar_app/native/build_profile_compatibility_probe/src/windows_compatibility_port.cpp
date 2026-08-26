@@ -11,6 +11,7 @@
 #include "sonar/fishing/memory_observation/memory_observation.h"
 #include "sonar/fishing/runtime_platform/target_resolver.h"
 #include "sonar/platform/windows/window.hpp"
+#include "windows_forensic_memory_connector.h"
 
 namespace sonar::fishing::build_profile_compatibility_probe {
 namespace {
@@ -38,7 +39,7 @@ namespace windows = sonar::platform::windows;
 class windows_compatibility_port final : public compatibility_port {
  public:
   windows_compatibility_port()
-      : memory_connector_(memory::make_windows_memory_connector()) {}
+      : memory_connector_(make_windows_forensic_memory_connector()) {}
 
   [[nodiscard]] identity_probe inspect_identity() noexcept override {
     target_.reset();

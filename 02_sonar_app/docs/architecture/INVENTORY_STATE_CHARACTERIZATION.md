@@ -1,6 +1,7 @@
 # Fishing inventory open-state: admission и characterization
 
-Статус: production runtime переведён на exact-pinned Common CEF facade;
+Статус: production runtime переведён на exact-pinned Common trusted-publisher
+CEF facade;
 исторический Fishing binding и manual tool сохранены только как development
 characterization, но больше не являются production authority.
 
@@ -17,21 +18,25 @@ Production путь состояния:
 
 ```text
 same-frame exact GTA process generation
-  -> one SonarMajesticCefInventory 0.1.0 observe()
-  -> Common exact client admission + bounded CEF/V8 discovery
+  -> one SonarMajesticCefInventory 0.1.18 observe()
+  -> Common trusted publisher + pinned file/process admission
+  -> bounded CEF/V8 discovery + three-frame semantic type proof
   -> Common coherent double-read + generation-pinned hot binding
   -> Fishing unknown-only exponential retry (250 ms .. 4 s cap)
   -> aggregate unknown / closed / open
 ```
 
 Screenshot и OCR владеют только геометрией item/context. Они не могут заменить
-memory state. Обычная shipping composition передаёт Common `denied`, оставляет
-observation disabled и получает typed `production_inventory_source_disabled`.
-Compile-isolated Local Access явно разрешает только
-`majestic-client-1.20.7-candidate-v1` и closed bootstrap. Любая причина Common,
-inconsistent state либо GTA generation drift даёт `unknown`, а не `closed`.
-Known state не кэшируется; после unknown следующий cold attempt throttled, а
-смена generation reset-ит facade и retry немедленно.
+memory state. Обычная shipping и compile-isolated Local Access композиции
+используют один Common trusted-publisher runtime с observation enabled и
+explicit closed bootstrap после authority proof. File/product version, SHA-256,
+file size, PE timestamp, заранее известный loaded size и exact profile не
+являются identity-admission gates. Semantic type proof не использует historical
+instance-type ordinals и возвращает `unknown` при incomplete, ambiguous или
+unstable evidence. Любая причина Common, inconsistent state либо GTA
+generation drift даёт `unknown`, а не `closed`. Known state не кэшируется;
+после unknown следующий cold attempt throttled, а смена generation reset-ит
+facade и retry немедленно.
 
 Ниже зафиксирован только historical/development characterization contract; он
 не подключён к production adapter. Такой binding обязан фиксировать exact image
@@ -70,12 +75,13 @@ SHA-256
 `6795F62F25D5F17D56DD25D95DE2BFB77DD0EFEFD35271CC2001BD3C27EDBC2D`.
 Проверка не использовала input, screen capture, focus/activation или network.
 
-## Один оставшийся user-gated сбор
+## Optional forensic user-gated сбор
 
-Non-shipping C++ tool собирает controlled closed/open evidence текущего exact
-process generation. Он сам не нажимает `TAB`, не активирует окно и не делает
-кадр. Пользователь вручную устанавливает запрошенное состояние и подтверждает
-готовность в консоли:
+Non-shipping C++ tool может собрать controlled closed/open evidence текущего
+exact process generation для forensic replay старого Fishing binding. Этот
+receipt не нужен для trusted-publisher runtime availability. Tool сам не
+нажимает `TAB`, не активирует окно и не делает кадр. Пользователь вручную
+устанавливает запрошенное состояние и подтверждает готовность в консоли:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
@@ -92,19 +98,16 @@ process.
 
 Receipt сохраняется только в ignored `build/live-evidence/` и содержит exact
 hash/generation, bounded scan policy и validated byte candidates. Он не меняет
-registry и не разрешает input. После одного такого user-gated run signature/root
-review, immutable profile fixture/hash pin, synthetic discovery/recovery tests
-и read-only current-build acceptance выполняются автономно; второй ручной
-toggle-run нужен только если первый receipt fail-closed или build изменился.
+registry, Common publisher policy или runtime availability и не разрешает
+input. Повторный run имеет смысл только для отдельной forensic задачи.
 
 ## Build/release isolation
 
-Shipping Engine линкует тот же immutable static package, но его compile-time
-composition остаётся disabled/denied до promotion shipping profile. Local
-Access включает только exact candidate; runtime setting не может изменить
+Shipping Engine и Local Access линкуют тот же immutable static package и
+создают один trusted-publisher facade. Runtime setting не может заменить его
 admission. `scripts/setup_native.ps1`, `scripts/test_ipc.ps1` и release builder
-проверяют exact version, manifest hash
-`B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8` и каждый
+проверяют exact 0.1.18, manifest hash
+`EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D` и каждый
 manifest payload. Подробнее: [ADR-0004](ADR-0004-COMMON-CEF-INVENTORY-OPEN.md).
 
 Tool собирается только при OFF-by-default

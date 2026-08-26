@@ -13,6 +13,7 @@ using Sonar.Fishing.Host.FishingPage;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.LicensePage;
 using Sonar.Fishing.Host.Licensing;
+using Sonar.Fishing.Host.InventoryPage;
 using Sonar.Fishing.Host.Overview;
 using Sonar.Fishing.Host.ProductNavigation;
 using Sonar.Fishing.Host.SettingsPage;
@@ -51,8 +52,10 @@ internal static class UiGalleryRenderer
     private static readonly (string Id, Action<FishingHostShellViewModel> Navigate)[] Pages =
     [
         ("overview", viewModel => viewModel.ShowOverviewCommand.Execute(null)),
+        ("engine-health", viewModel => viewModel.ShowEngineHealthCommand.Execute(null)),
         ("license", viewModel => viewModel.ShowLicenseCommand.Execute(null)),
         ("fishing", viewModel => viewModel.ShowFishingCommand.Execute(null)),
+        ("inventory", viewModel => viewModel.ShowInventoryCommand.Execute(null)),
         ("settings", viewModel => viewModel.ShowSettingsCommand.Execute(null)),
         ("statistics", viewModel =>
         {
@@ -333,6 +336,7 @@ internal static class UiGalleryRenderer
                 (_, _) => Task.FromResult(FishingLicenseActivationResult.Reject(
                     "Не удалось подтвердить лицензию. Проверьте ключ и повторите."))),
             fishing,
+            new InventoryPageViewModel(CreateInventoryPreview()),
             settings,
             new StatisticsPageViewModel(
                 session,
@@ -348,6 +352,59 @@ internal static class UiGalleryRenderer
                 .ToHashSet(StringComparer.Ordinal),
             FishingHostPage.Overview);
     }
+
+    private static InventoryProductState CreateInventoryPreview() => new(
+        Ready: true,
+        Reason: "ready",
+        Revision: 4,
+        ObservedAtMilliseconds: 1,
+        OpenKnown: true,
+        Open: true,
+        CurrentWeight: 1.24,
+        MaximumWeight: 40,
+        Items:
+        [
+            new InventoryItemState(
+                RuntimeId: "gallery-meat",
+                CatalogItemId: 240,
+                Name: "Мясо оленя",
+                Category: "Еда",
+                Column: 0,
+                Row: 0,
+                ColumnSpan: 2,
+                RowSpan: 2,
+                Count: 2,
+                MaximumCount: 10000,
+                UnitWeight: 0.5,
+                TotalWeight: 1,
+                ConditionPercent: null,
+                FreshnessPercent: 88,
+                ConditionKind: InventoryConditionKind.Food,
+                Durability: string.Empty,
+                Description: "Мясо после охоты.",
+                ImageReference: string.Empty,
+                DetailLines: Array.Empty<string>()),
+            new InventoryItemState(
+                RuntimeId: "gallery-knife",
+                CatalogItemId: 246,
+                Name: "Нож",
+                Category: "Инструменты",
+                Column: 2,
+                Row: 0,
+                ColumnSpan: 1,
+                RowSpan: 3,
+                Count: 1,
+                MaximumCount: 1,
+                UnitWeight: 0.18,
+                TotalWeight: 0.18,
+                ConditionPercent: 75,
+                FreshnessPercent: null,
+                ConditionKind: InventoryConditionKind.Wear,
+                Durability: "Хорошая",
+                Description: "Охотничий нож.",
+                ImageReference: string.Empty,
+                DetailLines: Array.Empty<string>()),
+        ]);
 
     private static FishingSessionStateSnapshot CreateFishingPreview() => new(
         revision: 18,

@@ -7,10 +7,8 @@
 #include <span>
 #include <utility>
 
-namespace sonar::fishing::build_profile_compatibility_probe::detail {
+namespace sonar::fishing::memory_observation::detail {
 namespace {
-
-namespace memory = sonar::fishing::memory_observation;
 
 constexpr std::size_t kScanChunkBytes = 64U * 1024U;
 constexpr std::size_t kMinimumRetrySliceBytes = 4U * 1024U;
@@ -58,7 +56,7 @@ struct scan_read_budget final {
 }
 
 [[nodiscard]] bool read_with_exact_coverage(
-    memory::readonly_memory_session& session,
+    readonly_memory_session& session,
     const std::uintptr_t address,
     const std::span<std::byte> destination,
     scan_read_budget& budget) noexcept {
@@ -121,7 +119,7 @@ struct executable_section_layout final {
 }
 
 [[nodiscard]] bool read_module_bytes(
-    memory::readonly_memory_session& session,
+    readonly_memory_session& session,
     const sonar::platform::windows::module_snapshot& module,
     const std::size_t offset,
     const std::span<std::byte> destination,
@@ -133,7 +131,7 @@ struct executable_section_layout final {
 
 [[nodiscard]] std::optional<std::vector<executable_section_layout>>
 parse_executable_sections(
-    memory::readonly_memory_session& session,
+    readonly_memory_session& session,
     const sonar::platform::windows::module_snapshot& module,
     scan_read_budget& budget) {
   std::array<std::byte, 64U> dos{};
@@ -243,7 +241,7 @@ parse_executable_sections(
 }
 
 [[nodiscard]] bool read_fully_covered_section(
-    memory::readonly_memory_session& session,
+    readonly_memory_session& session,
     const std::uintptr_t section_address,
     const std::span<std::byte> destination,
     scan_read_budget& budget) {
@@ -290,7 +288,7 @@ parse_executable_sections(
 }  // namespace
 
 executable_module_read read_executable_module(
-    memory::readonly_memory_session& session,
+    readonly_memory_session& session,
     const sonar::platform::windows::module_snapshot& module) {
   scan_read_budget budget;
   const auto layouts = parse_executable_sections(session, module, budget);
@@ -324,4 +322,4 @@ executable_module_read read_executable_module(
   };
 }
 
-}  // namespace sonar::fishing::build_profile_compatibility_probe::detail
+}  // namespace sonar::fishing::memory_observation::detail

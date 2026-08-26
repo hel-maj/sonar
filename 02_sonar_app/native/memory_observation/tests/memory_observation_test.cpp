@@ -676,6 +676,35 @@ struct aggregate_resolver_fixture final {
   std::uintptr_t fish{};
 };
 
+void materialize_aggregate_pe_layout(std::vector<std::byte>& module) {
+  constexpr std::size_t nt_offset = 0x80U;
+  constexpr std::uint16_t dos_magic = 0x5A4DU;
+  constexpr std::uint32_t pe_signature = 0x00004550U;
+  constexpr std::uint16_t amd64_machine = 0x8664U;
+  constexpr std::uint16_t optional_size = 0xF0U;
+  constexpr std::uint16_t pe32_plus_magic = 0x020BU;
+  constexpr std::uint32_t size_of_image = 0x2000U;
+  constexpr std::uint32_t size_of_headers = 0x200U;
+  constexpr std::uint32_t text_rva = 0x400U;
+  constexpr std::uint32_t text_size = 0x1000U;
+  constexpr std::uint32_t execute = 0x20000000U;
+  write_value(module, 0U, dos_magic);
+  write_value(module, 0x3CU, static_cast<std::uint32_t>(nt_offset));
+  write_value(module, nt_offset, pe_signature);
+  write_value(module, nt_offset + 4U, amd64_machine);
+  write_value(module, nt_offset + 6U, std::uint16_t{1U});
+  write_value(module, nt_offset + 20U, optional_size);
+  const auto optional = nt_offset + 24U;
+  write_value(module, optional, pe32_plus_magic);
+  write_value(module, optional + 56U, size_of_image);
+  write_value(module, optional + 60U, size_of_headers);
+  const auto section = optional + optional_size;
+  write_value(module, section + 8U, text_size);
+  write_value(module, section + 12U, text_rva);
+  write_value(module, section + 16U, text_size);
+  write_value(module, section + 36U, execute);
+}
+
 [[nodiscard]] aggregate_resolver_fixture make_aggregate_resolver_fixture() {
   constexpr std::uintptr_t module_base = 0x140000000ULL;
   constexpr std::uintptr_t world = 0x200000000ULL;
@@ -684,10 +713,11 @@ struct aggregate_resolver_fixture final {
   constexpr std::uintptr_t interface_value = 0x200003000ULL;
   constexpr std::uintptr_t list = 0x200004000ULL;
   constexpr std::uintptr_t fish = 0x200005000ULL;
-  constexpr std::size_t world_hit_offset = 0x100U;
-  constexpr std::size_t replay_hit_offset = 0x200U;
-  constexpr std::size_t world_slot_offset = 0x300U;
-  constexpr std::size_t replay_slot_offset = 0x308U;
+  constexpr std::uintptr_t archetype = 0x200006000ULL;
+  constexpr std::size_t world_hit_offset = 0x500U;
+  constexpr std::size_t replay_hit_offset = 0x600U;
+  constexpr std::size_t world_slot_offset = 0x700U;
+  constexpr std::size_t replay_slot_offset = 0x708U;
 
   auto profile = observation::embedded_memory_build_profiles().front();
   profile.profile_id = "aggregate-resolver-fixture-v1";
@@ -714,11 +744,12 @@ struct aggregate_resolver_fixture final {
       .image_name = L"GTA5.exe",
       .image_sha256 = profile.game.image_sha256,
       .modules = {{
-          L"GTA5.exe", L"C:\\fixture\\GTA5.exe", module_base, 0x1000U}},
+          L"GTA5.exe", L"C:\\fixture\\GTA5.exe", module_base, 0x2000U}},
   };
 
   auto& module = game->memory[module_base];
-  module.assign(0x1000U, std::byte{0U});
+  module.assign(0x2000U, std::byte{0U});
+  materialize_aggregate_pe_layout(module);
   module[world_hit_offset] = std::byte{0xA1U};
   module[replay_hit_offset] = std::byte{0xB2U};
   const auto world_displacement = static_cast<std::int32_t>(
@@ -752,10 +783,10 @@ struct aggregate_resolver_fixture final {
       sizeof(player_right));
 
   auto& replay_bytes = game->memory[replay];
-  replay_bytes.assign(0x40U, std::byte{0U});
+  replay_bytes.assign(0x200U, std::byte{0U});
   write_value(replay_bytes, 0x08U, interface_value);
   auto& interface_bytes = game->memory[interface_value];
-  interface_bytes.assign(0x40U, std::byte{0U});
+  interface_bytes.assign(0x200U, std::byte{0U});
   write_value(interface_bytes, 0U, list);
   const std::int32_t count = 1;
   write_value(interface_bytes, 0x18U, count);
@@ -765,13 +796,16 @@ struct aggregate_resolver_fixture final {
 
   auto& fish_bytes = game->memory[fish];
   fish_bytes.assign(0x200U, std::byte{0U});
-  write_value(fish_bytes, 0x20U, profile.fish_model_hash);
+  write_value(fish_bytes, 0x20U, archetype);
   const std::array<float, 3U> fish_position{3.0F, 4.0F, 0.0F};
   std::memcpy(
       fish_bytes.data() + 0x90U,
       fish_position.data(),
       sizeof(fish_position));
   fish_bytes[profile.fish_active_offset] = std::byte{1U};
+  auto& archetype_bytes = game->memory[archetype];
+  archetype_bytes.assign(0x40U, std::byte{0U});
+  write_value(archetype_bytes, 0x18U, profile.fish_model_hash);
 
   auto& inventory_bytes = game->memory[inventory_scan_base];
   inventory_bytes.assign(0x1000U, std::byte{0U});
@@ -780,6 +814,7 @@ struct aggregate_resolver_fixture final {
         inventory_bytes, offset, *profile.inventory_binding, true);
   }
   game->regions = {
+      {module_base, 0x2000U, 0x1000U, 0x20U, 0x1000000U},
       {inventory_scan_base, 0x1000U, 0x1000U, 0x04U, 0x20000U},
       {inventory_scan_base + 0x1000U, 0x1000U, 0U, 0x01U, 0U},
   };
@@ -901,6 +936,97 @@ void test_aggregate_runtime_resolution_and_self_healing() {
           recovered.snapshot->reeling->active &&
           !recovered.snapshot->inventory.has_value(),
       "aggregate_generation_change_did_not_recover");
+}
+
+void test_trusted_runtime_semantic_admission() {
+  auto fixture = make_aggregate_resolver_fixture();
+  fixture.game->identity.image_sha256.clear();
+  fixture.game->identity.admission =
+      observation::process_admission::trusted_publisher_runtime;
+  fixture.game->identity.authority_fingerprint = 0x123456789ABCDEF0ULL;
+  fake_connector connector(fixture.game, nullptr);
+  observation::memory_capture_plan_resolver resolver(
+      connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &fixture.profile, 1U});
+  observation::memory_observer observer(connector);
+
+  const auto resolved = resolver.resolve_reeling(
+      1U, 100U, fixture.game->identity.generation);
+  require(resolved.ready() && resolved.profile.has_value() &&
+          resolved.profile->game.admission ==
+              observation::process_admission::trusted_publisher_runtime &&
+          resolved.profile->game.image_sha256.empty() &&
+          resolved.profile->game.authority_fingerprint ==
+              fixture.game->identity.authority_fingerprint,
+      "trusted_runtime_semantic_layout_not_admitted");
+  const auto captured = observer.capture(*resolved.profile, *resolved.plan);
+  require(captured.ready() && captured.snapshot->reeling.has_value() &&
+           captured.snapshot->reeling->active,
+      "trusted_runtime_semantic_snapshot_unavailable");
+
+  auto fingerprint_drift_fixture = make_aggregate_resolver_fixture();
+  fingerprint_drift_fixture.game->identity.image_sha256.clear();
+  fingerprint_drift_fixture.game->identity.admission =
+      observation::process_admission::trusted_publisher_runtime;
+  fingerprint_drift_fixture.game->identity.authority_fingerprint = 73U;
+  fake_connector fingerprint_drift_connector(
+      fingerprint_drift_fixture.game, nullptr);
+  observation::memory_capture_plan_resolver fingerprint_drift_resolver(
+      fingerprint_drift_connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &fingerprint_drift_fixture.profile, 1U});
+  observation::memory_observer fingerprint_drift_observer(
+      fingerprint_drift_connector);
+  const auto before_fingerprint_drift =
+      fingerprint_drift_resolver.resolve_reeling(
+          1U, 100U,
+          fingerprint_drift_fixture.game->identity.generation);
+  require(before_fingerprint_drift.ready(),
+      "trusted_runtime_fingerprint_fixture_not_admitted");
+  ++fingerprint_drift_fixture.game->identity.authority_fingerprint;
+  const auto after_fingerprint_drift = fingerprint_drift_observer.capture(
+      *before_fingerprint_drift.profile, *before_fingerprint_drift.plan);
+  require(after_fingerprint_drift.failure ==
+          observation::capture_failure::process_identity_mismatch,
+      "trusted_runtime_fingerprint_drift_was_admitted");
+
+  auto ambiguous_fixture = make_aggregate_resolver_fixture();
+  ambiguous_fixture.game->identity.image_sha256.clear();
+  ambiguous_fixture.game->identity.admission =
+      observation::process_admission::trusted_publisher_runtime;
+  ambiguous_fixture.game->identity.authority_fingerprint = 42U;
+  constexpr std::uintptr_t module_base = 0x140000000ULL;
+  constexpr std::size_t duplicate_hit = 0x680U;
+  constexpr std::size_t duplicate_slot = 0x718U;
+  constexpr std::uintptr_t replay = 0x200002000ULL;
+  auto& module = ambiguous_fixture.game->memory.at(module_base);
+  const auto& replay_pattern = ambiguous_fixture.profile.replay_pattern;
+  for (std::size_t index = 0U;
+       index < replay_pattern.bytes.size();
+       ++index) {
+    const auto value = replay_pattern.bytes[index];
+    module[duplicate_hit + index] = value < 0
+        ? std::byte{0U}
+        : static_cast<std::byte>(value);
+  }
+  const auto displacement = static_cast<std::int32_t>(
+      module_base + duplicate_slot -
+      (module_base + duplicate_hit + replay_pattern.instruction_length));
+  write_value(
+      module, duplicate_hit + replay_pattern.displacement_offset,
+      displacement);
+  write_value(module, duplicate_slot, replay);
+  fake_connector ambiguous_connector(ambiguous_fixture.game, nullptr);
+  observation::memory_capture_plan_resolver ambiguous_resolver(
+      ambiguous_connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &ambiguous_fixture.profile, 1U});
+  const auto ambiguous = ambiguous_resolver.resolve_reeling(
+      1U, 100U, ambiguous_fixture.game->identity.generation);
+  require(!ambiguous.ready() &&
+          ambiguous.reason == "memory_replay_endpoint_ambiguous",
+      "trusted_runtime_ambiguous_replay_was_admitted");
 }
 
 void test_inventory_scope_discovery_and_recovery() {
@@ -1229,6 +1355,7 @@ int main() {
     test_inventory_scope_discovery_and_recovery();
     test_inventory_scope_typed_blockers();
     test_aggregate_runtime_resolution_and_self_healing();
+    test_trusted_runtime_semantic_admission();
     test_independent_fish_identity_projection(rows);
     test_negative_and_profile_drift(rows);
     test_default_off_composition();

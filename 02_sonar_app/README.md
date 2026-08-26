@@ -19,9 +19,10 @@ Host/Engine composition; запуск рыбалки остаётся fail-close
 ## Структура
 
 - `src/dotnet/Sonar.Fishing.Host` - WPF Host, MVVM, настройки, licensing,
-  глобальная start/stop hotkey, Telegram и process supervision. Streaming и
-  general-update cores остаются fail-closed до перечисленных production
-  prerequisites.
+  глобальная start/stop hotkey, Telegram и process supervision. Compile-isolated
+  Local Access также владеет embedded streaming composition; ordinary licensed
+  streaming, stream chat и general-update activation остаются fail-closed до
+  перечисленных production prerequisites.
 - `native` - C++ Engine, detectors, memory observations, state machines,
   guarded mutation boundaries и offline IPC executable.
 - `contracts/ipc/v1` - versioned coarse Host/Engine contract.
@@ -32,11 +33,20 @@ Host/Engine composition; запуск рыбалки остаётся fail-close
 - `docs/architecture` - ADR, migration evidence и production cutover checklist.
 
 Общие IPC, process supervision, licensing verification,
-`Sonar.UI.Wpf 0.2.19` и CEF inventory-open facade
-`SonarMajesticCefInventory 0.1.0` потребляются как точные immutable Sonar
+`Sonar.UI.Wpf 0.2.21`, `SonarPlatformWindows 0.1.9`,
+`SonarMajesticCatalog 1.0.0` и CEF inventory facade
+`SonarMajesticCefInventory 0.1.18` потребляются как точные immutable Sonar
 Common packages. Setup/release проверяют manifest facade с SHA-256
-`B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8` и все
+`EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D` и все
 перечисленные payloads; исходники или sibling checkout Common не используются.
+Inventory content и GTA reeling runtime используют Common trusted-publisher
+facades: точная версия, hash, размер, PE timestamp и заранее известный loaded
+image size остаются forensic evidence и не являются availability gate. Reeling
+дополнительно требует unique executable-section player/replay/fish anchors и
+coherent capture под тем же Common authority fingerprint. Inventory facade
+выводит semantic binding из bounded coherent proof и публикует product-neutral
+open/weight/grid/item snapshot через отдельный Engine worker; неполный или
+нестабильный proof fail-closed возвращает unavailable без last-known replay.
 
 ## Безопасные команды
 
@@ -74,36 +84,39 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_native.ps1
 Безопасный запуск WPF Host с inert offline Engine:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_native.ps1 -NoBuild
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_native.ps1
 ```
 
 Команда не подключается к GTA и не разрешает capture, physical input или
-network adapters.
+network adapters. По умолчанию она сначала собирает актуальные Host и offline
+Engine, поэтому старый output не может получить новые аргументы запуска.
+`-NoBuild` предназначен только для файлов, уже собранных из текущего checkout.
 
-Одноразовая read-only проверка реального observation path выполняется только
-после свежего явного подтверждения:
+Одноразовая read-only проверка реального observation path запускается явной
+командой; отдельный confirmation toggle не дублируется:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_live_observation_preflight.ps1 -ConfirmedLiveReadOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_live_observation_preflight.ps1
 ```
 
 Она не запускает GTA и не отправляет input: проверяются exact target/focus,
-supported build profile, один frame + detector и один bounded memory aggregate.
+Common trusted module, unique semantic anchors, один frame + detector и один
+bounded memory aggregate.
 В stdout выходит только coarse readiness JSON. Полный протокол и причины
 отказа описаны в
 [live observation preflight](docs/architecture/LIVE_OBSERVATION_PREFLIGHT.md).
 
-Если preflight вернул `game_build_unsupported`, новый hash не подставляется в
-production автоматически. Для одной отдельной evidence-проверки существует
-diagnostic-only команда:
+Exact hash не подставляется в production: он вообще не является runtime gate.
+Для отдельной forensic evidence-проверки существует diagnostic-only команда:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_build_profile_compatibility_probe.ps1 -ConfirmedLiveBuildProfileCompatibility
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_build_profile_compatibility_probe.ps1
 ```
 
 Она требует foreground active-reeling state, выполняется без кадра и ввода и
 только проверяет frozen layout как in-memory candidate. Даже успешный результат
-не добавляет production profile. Точный контракт описан в
+не выдаёт production authority: shipping resolver выполняет собственную
+trusted/semantic проверку. Точный контракт описан в
 [build-profile compatibility probe](docs/architecture/BUILD_PROFILE_COMPATIBILITY_PROBE.md).
 
 ## Обычный запуск готовой версии
@@ -146,9 +159,9 @@ deterministic marker, строгий allowlist bundle и Desktop Runtime. Пол
 Builder по умолчанию использует стабильную локальную версию `1.0.0-local`.
 Product UI показывает активный `Локальный доступ`, не просит ключ и не выводит
 raw feature IDs или технический channel. В local feature set входят только
-capabilities с реальным production owner; пока недоступные Stream и stream chat
-не выдаются и не рекламируются как работающие. Техническая provenance остается
-в manifest и diagnostic log.
+capabilities с реальным owner: Stream доступен через exact embedded-tool
+composition, а пока отсутствующий stream chat не выдаётся и не рекламируется
+как работающий. Техническая provenance остается в manifest и diagnostic log.
 
 Он собирается в `build/developer-full-access/bundle`, имеет manifest schema 2,
 channel `developer-full-access-unsigned` и marker
@@ -157,14 +170,25 @@ channel `developer-full-access-unsigned` и marker
 verify требует подтвержденные одинаковые clean-build hashes;
 exact game build, coherent memory/capture, актуальное окно, foreground, input
 lease и final safety gates не ослабляются. Production EXE не принимает
-`--developer-full-access`, а ordinary run/install/update/rollback entrypoints
-отвергают такой bundle. Подробный контракт находится в
+`--developer-full-access`, а ordinary run и ordinary maintenance channel
+отвергают такой bundle. Тот же product-owned maintenance executor принимает
+его только при одновременных явных `-DevelopmentUnsigned` и
+`-DeveloperFullAccess`; смешивание каналов запрещено. Подробный контракт находится в
 [ADR-0002](docs/architecture/ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md).
 
-В этой compile-isolated композиции также явно разрешён только Common candidate
-`majestic-client-1.20.7-candidate-v1` для inventory-open. Обычная shipping
-композиция оставляет non-shipping profile запрещённым и observation inert до
-отдельного promotion. Детали coarse capture и retry находятся в
+Отдельная проверка локальной сборки запускает её дважды, принудительно завершает
+только точную дочернюю Engine первого запуска и требует автоматического
+восстановления, сохранения настроек и штатной очистки процессов:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_product_lifecycle.ps1 -DeveloperFullAccess -BundleDirectory .\build\developer-full-access\bundle -DurationSeconds 30
+```
+
+Inventory-open в обычной и compile-isolated композиции использует один и тот же
+Common trusted-publisher runtime. Локальный доступ не меняет publisher,
+file/process identity, generation или semantic gates. Exact profile 1.20.7
+сохранён только для forensic replay и characterization и не является runtime
+fallback. Детали coarse capture и retry находятся в
 [ADR-0004](docs/architecture/ADR-0004-COMMON-CEF-INVENTORY-OPEN.md).
 
 Точная матрица того, что работает в normal launch, а что остаётся выключенным
@@ -215,6 +239,17 @@ recovery выполняет только product-owned after-exit executor:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\invoke_local_release_maintenance.ps1 -Action Install -SourceBundle .\build\release\bundle -InstallDirectory .\build\sonar-fishing-local -DevelopmentUnsigned
 ```
+
+Для постоянно используемой сборки с локальным доступом действует отдельный
+канал той же атомарной транзакции:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\invoke_local_release_maintenance.ps1 -Action Install -SourceBundle .\build\developer-full-access\bundle -InstallDirectory .\build\sonar-fishing-local-access -DevelopmentUnsigned -DeveloperFullAccess
+```
+
+Обычная команда не принимает local-access manifest, а local-access команда не
+принимает ordinary manifest. Обе повторно проверяют exact manifest, hashes,
+build IDs, allowlist и отсутствие Python после каждого изменяющего этапа.
 
 Для `Update` и `Rollback` нужна новая пустая `-BackupDirectory`; `-DryRun`
 проверяет точные source/target/backup без изменения файлов. One-time import

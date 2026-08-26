@@ -30,11 +30,22 @@ string(FIND "${RESOLVER_CONTENT}"
     "embedded_memory_build_profiles()" EMBEDDED_REGISTRY_POSITION)
 string(FIND "${RESOLVER_CONTENT}"
     "select_memory_build_profile(" SELECTOR_POSITION)
+foreach(REQUIRED_TRUSTED_RUNTIME_CONTRACT
+        "process_admission::trusted_publisher_runtime"
+        "resolve_trusted_reeling_binding"
+        "authority_fingerprint")
+    string(FIND "${RESOLVER_CONTENT}"
+        "${REQUIRED_TRUSTED_RUNTIME_CONTRACT}" TRUSTED_RUNTIME_POSITION)
+    if(TRUSTED_RUNTIME_POSITION EQUAL -1)
+        message(FATAL_ERROR
+            "Shipping memory resolver lost trusted runtime contract: ${REQUIRED_TRUSTED_RUNTIME_CONTRACT}")
+    endif()
+endforeach()
 if(EMBEDDED_REGISTRY_POSITION EQUAL -1)
-    message(FATAL_ERROR "Shipping memory resolver lost embedded registry ownership")
+    message(FATAL_ERROR "Shipping memory resolver lost semantic layout registry ownership")
 endif()
 if(SELECTOR_POSITION EQUAL -1)
-    message(FATAL_ERROR "Shipping memory resolver lost exact embedded selector")
+    message(FATAL_ERROR "Shipping memory resolver lost forensic exact-profile branch")
 endif()
 
 file(READ "${NATIVE_ROOT}/CMakeLists.txt" ROOT_CMAKE)
@@ -63,7 +74,6 @@ endif()
 file(READ "${PRODUCT_ROOT}/scripts/run_build_profile_compatibility_probe.ps1"
     WRAPPER_SCRIPT)
 foreach(REQUIRED
-        "ConfirmedLiveBuildProfileCompatibility"
         "ValidateRange(5, 10)"
         "build_profile_compatibility_import_scan_failed"
         "build_profile_compatibility_network_dependency_detected"
@@ -104,10 +114,15 @@ endforeach()
 file(READ "${PRODUCT_ROOT}/product-commands.json" PRODUCT_COMMANDS)
 foreach(REQUIRED
         "fishing-build-profile-compatibility-probe"
-        "run_build_profile_compatibility_probe.ps1"
-        "-ConfirmedLiveBuildProfileCompatibility")
+        "run_build_profile_compatibility_probe.ps1")
     string(FIND "${PRODUCT_COMMANDS}" "${REQUIRED}" COMMAND_POSITION)
     if(COMMAND_POSITION EQUAL -1)
         message(FATAL_ERROR "Product command lost compatibility probe contract: ${REQUIRED}")
     endif()
 endforeach()
+string(FIND "${PRODUCT_COMMANDS}"
+    "ConfirmedLiveBuildProfileCompatibility" REDUNDANT_CONFIRMATION_POSITION)
+if(NOT REDUNDANT_CONFIRMATION_POSITION EQUAL -1)
+    message(FATAL_ERROR
+        "Product command exposes a redundant read-only confirmation toggle")
+endif()

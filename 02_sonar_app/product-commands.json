@@ -73,8 +73,8 @@
         {
           "id": "developmentUnsigned",
           "type": "bool",
-          "label": "Локальный unsigned-выпуск",
-          "description": "Не требует production-сертификат и явно маркирует сборку как development-unsigned.",
+          "label": "Обычная сборка без подписи",
+          "description": "Не требует production-сертификат, но при запуске сохраняет обычную проверку лицензии.",
           "argument": "-DevelopmentUnsigned",
           "defaultBoolean": true
         },
@@ -82,7 +82,7 @@
           "id": "skipOfflineTests",
           "type": "bool",
           "label": "Пропустить offline-тесты",
-          "description": "Допустимо только для локального unsigned-выпуска.",
+          "description": "Допустимо только для обычной development-unsigned сборки.",
           "argument": "-SkipOfflineTests",
           "defaultBoolean": false
         }
@@ -188,6 +188,44 @@
       ]
     },
     {
+      "id": "fishing-native-developer-full-access-lifecycle",
+      "category": "fishing",
+      "kind": "smoke",
+      "title": "Проверить устойчивость Fishing с локальным доступом",
+      "description": "Проверяет запуск, автоматическое восстановление Engine, сохранение настроек и два штатных выхода локальной полнофункциональной сборки без отправки игровых команд.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\test_product_lifecycle.ps1", "-DeveloperFullAccess"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\test_product_lifecycle.ps1", "{productRoot}\\scripts\\release_common.ps1"],
+      "parameters": [
+        {
+          "id": "bundleDirectory",
+          "type": "path",
+          "label": "Папка локальной сборки",
+          "description": "Проверенная сборка с локальным доступом.",
+          "argument": "-BundleDirectory",
+          "required": true,
+          "defaultValue": "build\\developer-full-access\\bundle",
+          "pathKind": "directory",
+          "mustExist": true
+        },
+        {
+          "id": "durationSeconds",
+          "type": "enum",
+          "label": "Время наблюдения",
+          "description": "Период после восстановления Engine, когда Host и новая Engine должны оставаться работоспособными.",
+          "argument": "-DurationSeconds",
+          "required": true,
+          "defaultValue": "30",
+          "options": [
+            { "value": "30", "label": "30 секунд" },
+            { "value": "60", "label": "1 минута" },
+            { "value": "120", "label": "2 минуты" }
+          ]
+        }
+      ]
+    },
+    {
       "id": "fishing-native-run",
       "category": "fishing",
       "kind": "run",
@@ -215,8 +253,8 @@
       "id": "fishing-native-local-release-maintenance",
       "category": "fishing",
       "kind": "package",
-      "title": "Установить или обновить локальную сборку Fishing",
-      "description": "Выполняет локальную install/update/rollback/recovery транзакцию после выхода Host и Engine. Все изменяемые каталоги ограничены безопасными потомками product build; сейчас доступен только явно маркированный development-unsigned режим.",
+      "title": "Установить обычную сборку Fishing без подписи",
+      "description": "Устанавливает, обновляет или откатывает development-unsigned сборку после выхода приложения. Она сохраняет обычную проверку лицензии и не является сборкой с локальным доступом.",
       "executable": "powershell.exe",
       "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\invoke_local_release_maintenance.ps1"],
       "workingDirectory": "{productRoot}",
@@ -313,23 +351,109 @@
       ]
     },
     {
+      "id": "fishing-native-local-access-release-maintenance",
+      "category": "fishing",
+      "kind": "package",
+      "title": "Установить или обновить Fishing с локальным доступом",
+      "description": "Устанавливает, обновляет, откатывает или восстанавливает полнофункциональную локальную сборку. Канал локального доступа изолирован от обычных и production-сборок.",
+      "executable": "powershell.exe",
+      "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\invoke_local_release_maintenance.ps1", "-DevelopmentUnsigned", "-DeveloperFullAccess"],
+      "workingDirectory": "{productRoot}",
+      "requiredPaths": ["{productRoot}\\scripts\\invoke_local_release_maintenance.ps1", "{productRoot}\\scripts\\release_common.ps1"],
+      "parameters": [
+        {
+          "id": "action",
+          "type": "enum",
+          "label": "Операция",
+          "description": "Install создаёт установку; Update сохраняет предыдущую версию; Rollback возвращает backup; Recover завершает прерванную транзакцию.",
+          "argument": "-Action",
+          "required": true,
+          "defaultValue": "Install",
+          "options": [
+            { "value": "Install", "label": "Установить" },
+            { "value": "Update", "label": "Обновить" },
+            { "value": "Rollback", "label": "Откатить" },
+            { "value": "Recover", "label": "Восстановить транзакцию" }
+          ]
+        },
+        {
+          "id": "sourceBundle",
+          "type": "path",
+          "label": "Исходная сборка",
+          "description": "Проверенная сборка с локальным доступом внутри каталога build.",
+          "argument": "-SourceBundle",
+          "required": true,
+          "defaultValue": "build\\developer-full-access\\bundle",
+          "pathKind": "directory",
+          "mustExist": true
+        },
+        {
+          "id": "installDirectory",
+          "type": "path",
+          "label": "Папка установки",
+          "description": "Каталог внутри build; для Install он не должен существовать, для остальных операций должен существовать.",
+          "argument": "-InstallDirectory",
+          "required": true,
+          "defaultValue": "build\\sonar-fishing-local-access",
+          "pathKind": "directory",
+          "mustExist": false
+        },
+        {
+          "id": "backupDirectory",
+          "type": "path",
+          "label": "Новый backup",
+          "description": "Новый каталог внутри build, обязательный для Update и Rollback; для Install и Recover оставить пустым.",
+          "argument": "-BackupDirectory",
+          "required": false,
+          "pathKind": "directory",
+          "mustExist": false
+        },
+        {
+          "id": "dryRun",
+          "type": "bool",
+          "label": "Только проверить",
+          "description": "Проверяет исходную сборку и план, не меняя файлы.",
+          "argument": "-DryRun",
+          "defaultBoolean": true
+        },
+        {
+          "id": "waitTimeoutSeconds",
+          "type": "enum",
+          "label": "Ожидание выхода",
+          "description": "Сколько ждать завершения Host и Engine выбранной установки.",
+          "argument": "-WaitTimeoutSeconds",
+          "required": true,
+          "defaultValue": "60",
+          "options": [
+            { "value": "30", "label": "30 секунд" },
+            { "value": "60", "label": "1 минута" },
+            { "value": "120", "label": "2 минуты" }
+          ]
+        }
+      ]
+    },
+    {
       "id": "fishing-native-run-offline",
       "category": "fishing",
       "kind": "run",
       "title": "Запустить Fishing без подключения к игре",
-      "description": "Открывает WPF Host с безопасно изолированным C++ Engine и не подключается к GTA.",
+      "description": "Собирает актуальную офлайн-версию и открывает Fishing без подключения к GTA. Использование готовых файлов включается отдельно.",
       "executable": "powershell.exe",
       "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\run_native.ps1"],
       "workingDirectory": "{productRoot}",
-      "requiredPaths": ["{productRoot}\\scripts\\run_native.ps1", "{productRoot}\\build\\native\\windows-msvc-v143-ipc\\engine_ipc\\Release\\SonarFishingOfflineEngine.exe"],
+      "requiredPaths": [
+        "{productRoot}\\scripts\\run_native.ps1",
+        "{productRoot}\\scripts\\run_dotnet.ps1",
+        "{productRoot}\\scripts\\build_native.ps1"
+      ],
       "parameters": [
         {
           "id": "noBuild",
           "type": "bool",
           "label": "Использовать готовую сборку",
-          "description": "Если выключить, перед запуском C++ Engine будет пересобран.",
+          "description": "Включайте только для Host и офлайн-компонента, уже собранных из текущего checkout.",
           "argument": "-NoBuild",
-          "defaultBoolean": true
+          "defaultBoolean": false
         }
       ]
     },
@@ -385,20 +509,12 @@
       "category": "fishing",
       "kind": "diagnostic",
       "title": "Проверить чтение Fishing в GTA без ввода",
-      "description": "Один раз проверяет окно, поддерживаемую сборку, кадр, detector и bounded memory-read. Не запускает GTA, не нажимает клавиши и не разрешает автоматизацию.",
+      "description": "Один раз проверяет окно, доверенный модуль GTA, уникальные игровые признаки, кадр и bounded memory-read. Не запускает GTA, не нажимает клавиши и не разрешает автоматизацию.",
       "executable": "powershell.exe",
       "arguments": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{productRoot}\\scripts\\run_live_observation_preflight.ps1"],
       "workingDirectory": "{productRoot}",
       "requiredPaths": ["{productRoot}\\scripts\\run_live_observation_preflight.ps1", "{productRoot}\\native\\live_observation_preflight\\CMakeLists.txt"],
       "parameters": [
-        {
-          "id": "confirmedLiveReadOnly",
-          "type": "bool",
-          "label": "Подтверждаю read-only проверку сейчас",
-          "description": "Обязательно для каждого запуска. После старта будет минимум 5 секунд, чтобы вернуть GTA на передний план.",
-          "argument": "-ConfirmedLiveReadOnly",
-          "defaultBoolean": false
-        },
         {
           "id": "noBuild",
           "type": "bool",
@@ -435,14 +551,6 @@
       "workingDirectory": "{productRoot}",
       "requiredPaths": ["{productRoot}\\scripts\\run_build_profile_compatibility_probe.ps1", "{productRoot}\\native\\build_profile_compatibility_probe\\CMakeLists.txt"],
       "parameters": [
-        {
-          "id": "confirmedLiveBuildProfileCompatibility",
-          "type": "bool",
-          "label": "Подтверждаю одну read-only проверку сейчас",
-          "description": "Одно подтверждение покрывает одну попытку. После запуска будет минимум 5 секунд, чтобы вернуть GTA на передний план.",
-          "argument": "-ConfirmedLiveBuildProfileCompatibility",
-          "defaultBoolean": false
-        },
         {
           "id": "noBuild",
           "type": "bool",

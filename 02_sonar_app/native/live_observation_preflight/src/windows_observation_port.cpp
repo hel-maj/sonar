@@ -1,8 +1,11 @@
 #include "windows_observation_port.h"
 
+#include <algorithm>
+#include <cwctype>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "sonar/fishing/memory_observation/memory_observation.h"
 #include "sonar/fishing/runtime_platform/platform_capture.h"
@@ -17,6 +20,17 @@ namespace memory = sonar::fishing::memory_observation;
 namespace platform = sonar::fishing::runtime_platform;
 namespace stage = sonar::fishing::stage_detection;
 namespace windows = sonar::platform::windows;
+
+[[nodiscard]] bool same_image_name(
+    const std::wstring_view left,
+    const std::wstring_view right) noexcept {
+  return left.size() == right.size() &&
+      std::equal(
+          left.begin(), left.end(), right.begin(),
+          [](const wchar_t first, const wchar_t second) {
+            return std::towlower(first) == std::towlower(second);
+          });
+}
 
 [[nodiscard]] readiness_reason map_window_reason(
     const windows::window_observation_reason reason) noexcept {
@@ -99,10 +113,19 @@ class windows_observation_port final : public observation_port {
           !session->generation_current()) {
         return {.reason = readiness_reason::game_build_unavailable};
       }
-      const auto selected = memory::select_embedded_memory_build_profile(
-          session->identity().image_name,
-          session->identity().image_sha256);
-      if (!selected.ready()) {
+      if (session->identity().admission !=
+              memory::process_admission::trusted_publisher_runtime ||
+          session->identity().authority_fingerprint == 0U) {
+        return {.reason = readiness_reason::game_build_unavailable};
+      }
+      const auto profiles = memory::embedded_memory_build_profiles();
+      const auto semantic_layout_available = std::ranges::any_of(
+          profiles,
+          [&](const auto& profile) {
+            return same_image_name(
+                profile.game.image_name, session->identity().image_name);
+          });
+      if (!semantic_layout_available) {
         return {
             .build_ready = true,
             .reason = readiness_reason::game_build_unsupported,

@@ -9,6 +9,8 @@ param(
     [string]$CommonNativePackage = $env:SONAR_COMMON_NATIVE_PACKAGE,
     [string]$CommonNativeWindowsPackage = $env:SONAR_COMMON_NATIVE_WINDOWS_PACKAGE,
     [string]$CommonNativeLicensingPackage = $env:SONAR_COMMON_NATIVE_LICENSING_PACKAGE,
+    [string]$CommonMajesticCatalogPackage =
+        $env:SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE,
     [string]$CommonMajesticCefInventoryPackage =
         $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
@@ -118,6 +120,55 @@ function Invoke-Checked([string]$Executable, [string[]]$Arguments) {
     }
 }
 
+function Assert-DeveloperStreamingTools {
+    $manifestPath = Join-Path $productRoot "contracts\streaming-tool-manifest.json"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "streaming_tool_manifest_missing"
+    }
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    $tools = @($manifest.tools)
+    if ($manifest.schema_version -ne 1 -or $tools.Count -ne 2) {
+        throw "streaming_tool_manifest_invalid"
+    }
+    $expectedTools = @{
+        ffmpeg = @{
+            file = "ffmpeg.exe"
+            resource = "Sonar.Fishing.Host.Streaming.ffmpeg.exe"
+        }
+        cloudflared = @{
+            file = "cloudflared.exe"
+            resource = "Sonar.Fishing.Host.Streaming.cloudflared.exe"
+        }
+    }
+    $ids = @($tools | ForEach-Object { [string]$_.id })
+    if (($ids | Sort-Object -Unique).Count -ne 2 -or
+        -not ($ids -contains "ffmpeg") -or
+        -not ($ids -contains "cloudflared")) {
+        throw "streaming_tool_manifest_invalid"
+    }
+    foreach ($tool in $tools) {
+        $id = [string]$tool.id
+        $fileName = [string]$tool.file_name
+        $resourceName = [string]$tool.resource_name
+        $toolVersion = [string]$tool.version
+        $expectedHash = ([string]$tool.sha256).ToUpperInvariant()
+        if ($fileName -cne $expectedTools[$id].file -or
+            $resourceName -cne $expectedTools[$id].resource -or
+            [string]::IsNullOrWhiteSpace($toolVersion) -or
+            $expectedHash -notmatch '^[0-9A-F]{64}$') {
+            throw "streaming_tool_manifest_invalid: $id"
+        }
+        $toolPath = Join-Path $productRoot "..\config\streaming\bin\$fileName"
+        if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+            throw "streaming_tool_missing: $id"
+        }
+        $actualHash = (Get-FileHash -LiteralPath $toolPath -Algorithm SHA256).Hash
+        if ($actualHash -cne $expectedHash) {
+            throw "streaming_tool_hash_mismatch: $id"
+        }
+    }
+}
+
 function Assert-ProductionAuthority {
     $authorityPath = Join-Path $productRoot "docs\migration\runtime-authority.json"
     if (-not (Test-Path -LiteralPath $authorityPath -PathType Leaf)) {
@@ -201,7 +252,9 @@ function Build-FishingEngine(
     [string]$ResolvedNativePackage,
     [string]$ResolvedNativeWindowsPackage,
     [string]$ResolvedNativeLicensingPackage,
+    [string]$ResolvedMajesticCatalogPackage,
     [string]$ResolvedMajesticCefInventoryPackage,
+    [string]$ResolvedInventoryContractRoot,
     [string]$ResolvedProtoc) {
     $nativeSource = Join-Path $productRoot "native"
     $nativeBuild = Join-Path $BuildRoot "native-build"
@@ -221,7 +274,9 @@ function Build-FishingEngine(
         "-DSONAR_COMMON_NATIVE_PACKAGE=$ResolvedNativePackage",
         "-DSONAR_COMMON_NATIVE_WINDOWS_PACKAGE=$ResolvedNativeWindowsPackage",
         "-DSONAR_COMMON_NATIVE_LICENSING_PACKAGE=$ResolvedNativeLicensingPackage",
+        "-DSONAR_COMMON_MAJESTIC_CATALOG_PACKAGE=$ResolvedMajesticCatalogPackage",
         "-DSONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE=$ResolvedMajesticCefInventoryPackage",
+        "-DSONAR_COMMON_INVENTORY_CONTRACT_ROOT=$ResolvedInventoryContractRoot",
         "-DSONAR_PROTOC_EXECUTABLE=$ResolvedProtoc",
         "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/INCREMENTAL:NO /OPT:REF /OPT:ICF /Brepro /PDBALTPATH:Sonar.Engine.pdb"
     )
@@ -266,6 +321,9 @@ function Sign-FishingExecutable(
 
 $noPythonGate = Join-Path $PSScriptRoot "test_no_python_runtime.ps1"
 & $noPythonGate -ProductRoot $productRoot -RunSelfTest
+if ($DeveloperFullAccess) {
+    Assert-DeveloperStreamingTools
+}
 if (-not $DevelopmentUnsigned) {
     Assert-ProductionAuthority
 }
@@ -273,11 +331,13 @@ if (-not $DevelopmentUnsigned) {
 if ($SkipOfflineTests) {
     & (Join-Path $PSScriptRoot "setup_native.ps1") `
         -CommonFeed $CommonFeed `
+        -CommonMajesticCatalogPackage $CommonMajesticCatalogPackage `
         -CommonMajesticCefInventoryPackage $CommonMajesticCefInventoryPackage
 }
 else {
     & (Join-Path $PSScriptRoot "test_native.ps1") `
         -CommonFeed $CommonFeed `
+        -CommonMajesticCatalogPackage $CommonMajesticCatalogPackage `
         -CommonMajesticCefInventoryPackage $CommonMajesticCefInventoryPackage
 }
 
@@ -286,22 +346,28 @@ $resolvedCommonFeed = Resolve-RequiredDirectory `
     $CommonFeed `
     (Join-Path $productRoot "..\..\.artifacts\sonar-feed") `
     "Sonar Common feed"
+$resolvedInventoryContractRoot = Resolve-FishingCommonInventoryContractRoot `
+    $resolvedCommonFeed $productRoot
 $resolvedNativePackage = Resolve-RequiredDirectory `
     $CommonNativePackage `
     (Join-Path $productRoot "..\..\.artifacts\sonar-native\0.1.1") `
     "Sonar Platform IPC native package"
 $resolvedNativeWindowsPackage = Resolve-RequiredDirectory `
     $CommonNativeWindowsPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.6") `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.9") `
     "Sonar Platform Windows native package"
 $resolvedNativeLicensingPackage = Resolve-RequiredDirectory `
     $CommonNativeLicensingPackage `
     (Join-Path $productRoot "..\..\.artifacts\sonar-native-licensing\0.1.2") `
     "Sonar Platform Licensing native package"
+$resolvedMajesticCatalogPackage = Resolve-RequiredDirectory `
+    $CommonMajesticCatalogPackage `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-catalog\1.0.0") `
+    "Sonar Majestic Catalog 1.0.0 package"
 $resolvedMajesticCefInventoryPackage = Resolve-RequiredDirectory `
     $CommonMajesticCefInventoryPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.0") `
-    "Sonar Majestic CEF Inventory 0.1.0 package"
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.18") `
+    "Sonar Majestic CEF Inventory 0.1.18 package"
 $resolvedMajesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
     $resolvedMajesticCefInventoryPackage
 $resolvedProtoc = Resolve-RequiredExecutable `
@@ -342,12 +408,16 @@ $firstHost = Publish-FishingHost $firstBuild $localFeed $resolvedProtoc
 $firstEngine = Build-FishingEngine `
     $firstBuild $resolvedCMake $resolvedNativePackage `
     $resolvedNativeWindowsPackage $resolvedNativeLicensingPackage `
-    $resolvedMajesticCefInventoryPackage $resolvedProtoc
+    $resolvedMajesticCatalogPackage $resolvedMajesticCefInventoryPackage `
+    $resolvedInventoryContractRoot `
+    $resolvedProtoc
 $secondHost = Publish-FishingHost $secondBuild $localFeed $resolvedProtoc
 $secondEngine = Build-FishingEngine `
     $secondBuild $resolvedCMake $resolvedNativePackage `
     $resolvedNativeWindowsPackage $resolvedNativeLicensingPackage `
-    $resolvedMajesticCefInventoryPackage $resolvedProtoc
+    $resolvedMajesticCatalogPackage $resolvedMajesticCefInventoryPackage `
+    $resolvedInventoryContractRoot `
+    $resolvedProtoc
 
 $firstHostHash = Get-FishingSha256 $firstHost
 $secondHostHash = Get-FishingSha256 $secondHost
@@ -414,7 +484,15 @@ else {
     -BundleDirectory $bundle `
     -BundleLifecycleStage Package
 Assert-FishingSystemDependencyClosure $bundle
-Assert-FishingHighConfidenceSecretScan $bundle
+if ($DeveloperFullAccess) {
+    Assert-FishingHighConfidenceSecretScan `
+        $bundle `
+        (Join-Path $productRoot 'contracts\streaming-tool-manifest.json') `
+        (Join-Path $productRoot '..\config\streaming\bin')
+}
+else {
+    Assert-FishingHighConfidenceSecretScan $bundle
+}
 
 Write-Output "PASS Fishing $releaseMode bundle: $bundle"
 Write-Output "BUNDLE_DIRECTORY=$bundle"

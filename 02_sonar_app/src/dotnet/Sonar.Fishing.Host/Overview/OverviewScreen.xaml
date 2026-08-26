@@ -21,7 +21,7 @@
                     </common:PageHeader.Status>
                 </common:PageHeader>
 
-                <layout:ResponsiveGrid Margin="0,16,0,0">
+                <layout:ResponsiveGrid>
                     <common:MetricCard
                         layout:ResponsiveGrid.CompactSpan="2"
                         layout:ResponsiveGrid.MediumSpan="4"

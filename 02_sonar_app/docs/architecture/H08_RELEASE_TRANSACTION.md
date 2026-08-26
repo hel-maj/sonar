@@ -1,7 +1,7 @@
 # H08: подписанная транзакция обновления Sonar Fishing
 
-Статус: offline core и local development maintenance verified, production
-signed activation partial
+Статус: offline core, local development и local-access maintenance verified;
+production signed activation partial
 
 Дата проверки: 2026-08-24
 
@@ -56,10 +56,14 @@ steady-state allowlist и удаляет transaction state. Исключение
 
 ## Локальная install/update/rollback/recovery
 
-`scripts/invoke_local_release_maintenance.ps1` поддерживает только свежий
-явный `-DevelopmentUnsigned`. `DevelopmentBundleVerifier` повторно проверяет
-exact manifest schema, пару build IDs, SHA-256 обоих EXE, determinism claim и
-отсутствие production-signature claim. Executor допускает ровно одну операцию:
+`scripts/invoke_local_release_maintenance.ps1` требует свежий явный
+`-DevelopmentUnsigned`. Обычный канал принимает только
+`development-unsigned`; отдельный compile-isolated канал дополнительно требует
+`-DeveloperFullAccess` и принимает только
+`developer-full-access-unsigned` schema 2 с exact marker. Каналы не принимают
+manifest, target или backup друг друга. `DevelopmentBundleVerifier` повторно
+проверяет exact manifest schema, пару build IDs, SHA-256 обоих EXE, determinism
+claim и отсутствие production-signature claim. Executor допускает ровно одну операцию:
 
 - `Install` атомарно создаёт новую установку через sibling staging directory;
 - `Update` сохраняет предыдущую проверенную тройку во внешний новый backup и
@@ -80,6 +84,23 @@ Product wrapper разрешает source, target и backup только как 
 повторяет allowlist/no-Python lifecycle gate и пишет только sanitized receipt
 без путей, PID или секретов. Это не подменяет production signing: без
 сертификата и подписанных release metadata production-signed mode отвергается.
+
+Фактическая local-access acceptance 2026-08-26 прошла на изолированной
+установке: `1.0.0-local` install, update до `1.0.1-local`, rollback,
+повторный update, финальный update до `1.0.2-local` и восстановление намеренно
+прерванной generation. После каждого этапа allowlist/no-Python gate был зелёным;
+`config/state.dat` и owned log сохранились, transaction residue после recovery
+равен нулю. Установленная `1.0.2-local` дополнительно пережила принудительное
+завершение Engine: Host поднял новое поколение без replay команд, сохранил
+настройки и снова опубликовал inventory snapshot.
+
+После exact repin на Common CEF inventory `0.1.18` и UI Kit `0.2.21` собран
+deterministic `1.0.3-local` и выполнен фактический `Update` установленной
+`1.0.2-local` с отдельным backup. Transaction вернул `accepted/updated`,
+сохранил owned user state и повторно прошёл `Updated` allowlist/no-Python gate.
+Затем из установленной `1.0.3-local` выполнен отдельный 30-секундный lifecycle:
+неожиданное завершение Engine было восстановлено новым поколением, оба запуска
+закончились normal exit, transaction residue и loose runtime files отсутствуют.
 
 ## Offline acceptance
 

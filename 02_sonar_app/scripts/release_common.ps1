@@ -435,13 +435,114 @@ function Get-FishingAuthenticodeStatus([string]$Path) {
     return [string]$signature.Status
 }
 
-function Assert-FishingHighConfidenceSecretScan([string]$BundleDirectory) {
-    $privateKeyPattern = '(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'
-    $telegramTokenPattern = '(?<![A-Za-z0-9_-])[0-9]{5,}:[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_-])'
+function Get-FishingHighConfidenceSecretFingerprints([string]$Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $text = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
+    $pattern =
+        '(?<private>(?i:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----))|' +
+        '(?<telegram>(?<![A-Za-z0-9_-])[0-9]{5,}:[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_-]))'
+    $fingerprints = foreach ($match in [regex]::Matches($text, $pattern)) {
+        $kind = if ($match.Groups['private'].Success) { 'private' } else { 'telegram' }
+        $matchBytes = [Text.Encoding]::UTF8.GetBytes($match.Value)
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $digest = ([BitConverter]::ToString(
+                $sha256.ComputeHash($matchBytes))).Replace('-', '')
+        }
+        finally {
+            $sha256.Dispose()
+        }
+        "$kind`:$digest"
+    }
+    return @($fingerprints | Sort-Object -CaseSensitive)
+}
+
+function Get-FishingTrustedEmbeddedSecretFingerprints(
+    [string]$ManifestPath,
+    [string]$ToolDirectory) {
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $ToolDirectory -PathType Container)) {
+        throw 'release_trusted_embedded_tool_contract_missing'
+    }
+
+    $manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
+    $tools = @($manifest.tools)
+    $expected = @{
+        ffmpeg = @{
+            file = 'ffmpeg.exe'
+            resource = 'Sonar.Fishing.Host.Streaming.ffmpeg.exe'
+        }
+        cloudflared = @{
+            file = 'cloudflared.exe'
+            resource = 'Sonar.Fishing.Host.Streaming.cloudflared.exe'
+        }
+    }
+    if ($manifest.schema_version -ne 1 -or $tools.Count -ne 2 -or
+        @($tools | ForEach-Object { [string]$_.id } | Sort-Object -Unique).Count -ne 2) {
+        throw 'release_trusted_embedded_tool_manifest_invalid'
+    }
+
+    $fingerprints = foreach ($tool in $tools) {
+        $id = [string]$tool.id
+        $fileName = [string]$tool.file_name
+        $resourceName = [string]$tool.resource_name
+        $expectedHash = ([string]$tool.sha256).ToUpperInvariant()
+        if (-not $expected.ContainsKey($id) -or
+            $fileName -cne $expected[$id].file -or
+            $resourceName -cne $expected[$id].resource -or
+            $expectedHash -notmatch '^[0-9A-F]{64}$' -or
+            [IO.Path]::GetFileName($fileName) -cne $fileName) {
+            throw "release_trusted_embedded_tool_manifest_invalid: $id"
+        }
+
+        $toolPath = Join-Path $ToolDirectory $fileName
+        if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+            throw "release_trusted_embedded_tool_missing: $id"
+        }
+        $toolItem = Get-Item -LiteralPath $toolPath -Force
+        if (($toolItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            (Get-FishingSha256 $toolPath) -cne $expectedHash) {
+            throw "release_trusted_embedded_tool_hash_mismatch: $id"
+        }
+        Get-FishingHighConfidenceSecretFingerprints $toolPath
+    }
+    $result = @($fingerprints | Sort-Object -CaseSensitive)
+    if ($result.Count -eq 0) {
+        throw 'release_trusted_embedded_tool_fingerprints_missing'
+    }
+    return $result
+}
+
+function Assert-FishingHighConfidenceSecretScan(
+    [string]$BundleDirectory,
+    [string]$TrustedEmbeddedToolManifestPath = '',
+    [string]$TrustedEmbeddedToolDirectory = '') {
+    $hasTrustedManifest = -not [string]::IsNullOrWhiteSpace(
+        $TrustedEmbeddedToolManifestPath)
+    $hasTrustedDirectory = -not [string]::IsNullOrWhiteSpace(
+        $TrustedEmbeddedToolDirectory)
+    if ($hasTrustedManifest -ne $hasTrustedDirectory) {
+        throw 'release_trusted_embedded_tool_contract_incomplete'
+    }
+    $trustedFingerprints = if ($hasTrustedManifest) {
+        @(Get-FishingTrustedEmbeddedSecretFingerprints `
+            $TrustedEmbeddedToolManifestPath `
+            $TrustedEmbeddedToolDirectory)
+    }
+    else {
+        @()
+    }
+
     foreach ($file in Get-ChildItem -LiteralPath $BundleDirectory -File -Recurse -Force) {
-        $bytes = [IO.File]::ReadAllBytes($file.FullName)
-        $text = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
-        if ($text -match $privateKeyPattern -or $text -match $telegramTokenPattern) {
+        $actualFingerprints = @(Get-FishingHighConfidenceSecretFingerprints $file.FullName)
+        if ($hasTrustedManifest -and $file.Name -ceq 'Sonar.exe') {
+            if (($actualFingerprints -join "`n") -cne
+                ($trustedFingerprints -join "`n")) {
+                throw "release_secret_marker_detected: $($file.Name)"
+            }
+            continue
+        }
+        if ($actualFingerprints.Count -ne 0) {
             throw "release_secret_marker_detected: $($file.Name)"
         }
     }

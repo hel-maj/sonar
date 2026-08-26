@@ -12,6 +12,10 @@
     <IsPackable>false</IsPackable>
     <SonarFishingDeveloperFullAccess Condition="'$(SonarFishingDeveloperFullAccess)' == ''">false</SonarFishingDeveloperFullAccess>
     <DefineConstants Condition="'$(SonarFishingDeveloperFullAccess)' == 'true'">$(DefineConstants);SONAR_FISHING_DEVELOPER_FULL_ACCESS</DefineConstants>
+    <SonarFishingStreamingToolRoot Condition="'$(SonarFishingStreamingToolRoot)' == ''">$(MSBuildProjectDirectory)\..\..\..\..\config\streaming\bin</SonarFishingStreamingToolRoot>
+    <SonarFishingEmbeddedStreaming Condition="'$(SonarFishingEmbeddedStreaming)' == '' and '$(SonarFishingDeveloperFullAccess)' == 'true' and Exists('$(SonarFishingStreamingToolRoot)\ffmpeg.exe') and Exists('$(SonarFishingStreamingToolRoot)\cloudflared.exe')">true</SonarFishingEmbeddedStreaming>
+    <SonarFishingEmbeddedStreaming Condition="'$(SonarFishingEmbeddedStreaming)' == ''">false</SonarFishingEmbeddedStreaming>
+    <DefineConstants Condition="'$(SonarFishingEmbeddedStreaming)' == 'true'">$(DefineConstants);SONAR_FISHING_EMBEDDED_STREAMING</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(SonarFishingReleaseBundle)' == 'true'">
@@ -38,7 +42,7 @@
     <PackageReference Include="Sonar.Platform.Ipc.Contracts" Version="[0.1.1]" />
     <PackageReference Include="Sonar.Platform.Ipc.NamedPipes" Version="[0.1.1]" />
     <PackageReference Include="Sonar.Platform.Processes" Version="[0.1.0]" />
-    <PackageReference Include="Sonar.UI.Wpf" Version="[0.2.19]" />
+    <PackageReference Include="Sonar.UI.Wpf" Version="[0.2.21]" />
   </ItemGroup>
 
   <ItemGroup>
@@ -51,5 +55,17 @@
     <EmbeddedResource
         Include="..\..\..\contracts\fishing\fish-catalog.json"
         LogicalName="Sonar.Fishing.Host.ProductCatalog.fish-catalog.json" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SonarFishingEmbeddedStreaming)' == 'true'">
+    <EmbeddedResource
+        Include="$(MSBuildProjectDirectory)\..\..\..\contracts\streaming-tool-manifest.json"
+        LogicalName="Sonar.Fishing.Host.Streaming.tool-manifest.json" />
+    <EmbeddedResource
+        Include="$(SonarFishingStreamingToolRoot)\ffmpeg.exe"
+        LogicalName="Sonar.Fishing.Host.Streaming.ffmpeg.exe" />
+    <EmbeddedResource
+        Include="$(SonarFishingStreamingToolRoot)\cloudflared.exe"
+        LogicalName="Sonar.Fishing.Host.Streaming.cloudflared.exe" />
   </ItemGroup>
 </Project>

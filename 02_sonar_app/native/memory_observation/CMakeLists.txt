@@ -1,23 +1,26 @@
 add_library(SonarFishingMemoryObservation STATIC
     src/build_profile_registry.cpp
     src/chat_decoder.cpp
+    src/executable_module_reader.cpp
     src/inventory_capture_plan_resolver.cpp
     src/memory_capture_plan_resolver.cpp
     src/memory_observer.cpp
     src/player_status_decoder.cpp
     src/reeling_inventory_decoders.cpp
+    src/trusted_reeling_binding.cpp
     src/windows_memory_connector.cpp
 )
 add_library(Sonar::FishingMemoryObservation ALIAS SonarFishingMemoryObservation)
 target_compile_features(SonarFishingMemoryObservation PUBLIC cxx_std_20)
 target_include_directories(SonarFishingMemoryObservation
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 target_link_libraries(SonarFishingMemoryObservation
     PUBLIC
         Sonar::PlatformWindowsProcess
+        Sonar::PlatformWindowsTrustedModule
         Sonar::PlatformInventoryState
-    PRIVATE bcrypt
 )
 target_compile_options(SonarFishingMemoryObservation
     PRIVATE /permissive- /utf-8 /W4 /WX /EHsc

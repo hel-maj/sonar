@@ -279,7 +279,7 @@ void publish_session_snapshot(
     catch_size->set_percent(item.percent);
   }
   const auto snapshot_payload = serialize_envelope(snapshot_envelope);
-  event_writer.publish_latest_snapshot(snapshot_payload);
+  event_writer.publish_latest_session_snapshot(snapshot_payload);
 }
 
 [[nodiscard]] sonar::fishing::ipc::v1::FishingPhase wire_phase(

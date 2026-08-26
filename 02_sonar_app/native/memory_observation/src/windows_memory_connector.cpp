@@ -1,166 +1,26 @@
 #include "sonar/fishing/memory_observation/memory_observation.h"
 
-#include <Windows.h>
-#include <bcrypt.h>
+#include "sonar/platform/windows/trusted_module.hpp"
 
-#include <array>
+#include <Windows.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
-#include <vector>
 
 namespace sonar::fishing::memory_observation {
 namespace {
 
-class unique_file final {
- public:
-  explicit unique_file(HANDLE value) noexcept : value_(value) {}
-  ~unique_file() {
-    if (value_ != INVALID_HANDLE_VALUE) {
-      CloseHandle(value_);
-    }
-  }
-  unique_file(const unique_file&) = delete;
-  unique_file& operator=(const unique_file&) = delete;
-  [[nodiscard]] HANDLE get() const noexcept { return value_; }
-
- private:
-  HANDLE value_{INVALID_HANDLE_VALUE};
-};
-
-class algorithm_handle final {
- public:
-  ~algorithm_handle() {
-    if (value_ != nullptr) {
-      BCryptCloseAlgorithmProvider(value_, 0U);
-    }
-  }
-  algorithm_handle(const algorithm_handle&) = delete;
-  algorithm_handle& operator=(const algorithm_handle&) = delete;
-  algorithm_handle() = default;
-  [[nodiscard]] BCRYPT_ALG_HANDLE* out() noexcept { return &value_; }
-  [[nodiscard]] BCRYPT_ALG_HANDLE get() const noexcept { return value_; }
-
- private:
-  BCRYPT_ALG_HANDLE value_{};
-};
-
-class hash_handle final {
- public:
-  ~hash_handle() {
-    if (value_ != nullptr) {
-      BCryptDestroyHash(value_);
-    }
-  }
-  hash_handle(const hash_handle&) = delete;
-  hash_handle& operator=(const hash_handle&) = delete;
-  hash_handle() = default;
-  [[nodiscard]] BCRYPT_HASH_HANDLE* out() noexcept { return &value_; }
-  [[nodiscard]] BCRYPT_HASH_HANDLE get() const noexcept { return value_; }
-
- private:
-  BCRYPT_HASH_HANDLE value_{};
-};
-
-[[nodiscard]] bool bcrypt_ok(const NTSTATUS status) noexcept {
-  return status >= 0;
-}
-
-[[nodiscard]] std::optional<std::string> sha256_file(
-    const std::wstring& path) noexcept {
-  try {
-    const unique_file file(CreateFileW(
-        path.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
-        nullptr));
-    if (file.get() == INVALID_HANDLE_VALUE) {
-      return std::nullopt;
-    }
-    algorithm_handle algorithm;
-    if (!bcrypt_ok(BCryptOpenAlgorithmProvider(
-            algorithm.out(), BCRYPT_SHA256_ALGORITHM, nullptr, 0U))) {
-      return std::nullopt;
-    }
-    DWORD object_size = 0U;
-    DWORD digest_size = 0U;
-    ULONG copied = 0U;
-    if (!bcrypt_ok(BCryptGetProperty(
-            algorithm.get(),
-            BCRYPT_OBJECT_LENGTH,
-            reinterpret_cast<PUCHAR>(&object_size),
-            sizeof(object_size),
-            &copied,
-            0U)) ||
-        copied != sizeof(object_size) || object_size == 0U ||
-        !bcrypt_ok(BCryptGetProperty(
-            algorithm.get(),
-            BCRYPT_HASH_LENGTH,
-            reinterpret_cast<PUCHAR>(&digest_size),
-            sizeof(digest_size),
-            &copied,
-            0U)) ||
-        copied != sizeof(digest_size) || digest_size != 32U) {
-      return std::nullopt;
-    }
-    std::vector<UCHAR> hash_object(object_size);
-    hash_handle hash;
-    if (!bcrypt_ok(BCryptCreateHash(
-            algorithm.get(),
-            hash.out(),
-            hash_object.data(),
-            static_cast<ULONG>(hash_object.size()),
-            nullptr,
-            0U,
-            0U))) {
-      return std::nullopt;
-    }
-    constexpr DWORD chunk_bytes = 1024U * 1024U;
-    std::vector<UCHAR> chunk(chunk_bytes);
-    for (;;) {
-      DWORD read = 0U;
-      if (!ReadFile(file.get(), chunk.data(), chunk_bytes, &read, nullptr)) {
-        return std::nullopt;
-      }
-      if (read == 0U) {
-        break;
-      }
-      if (!bcrypt_ok(BCryptHashData(hash.get(), chunk.data(), read, 0U))) {
-        return std::nullopt;
-      }
-    }
-    std::array<UCHAR, 32U> digest{};
-    if (!bcrypt_ok(BCryptFinishHash(
-            hash.get(), digest.data(), static_cast<ULONG>(digest.size()), 0U))) {
-      return std::nullopt;
-    }
-    constexpr std::array<char, 16U> hex{
-        '0', '1', '2', '3', '4', '5', '6', '7',
-        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-    std::string encoded;
-    encoded.reserve(digest.size() * 2U);
-    for (const auto value : digest) {
-      encoded.push_back(hex[(value >> 4U) & 0x0FU]);
-      encoded.push_back(hex[value & 0x0FU]);
-    }
-    return encoded;
-  } catch (...) {
-    return std::nullopt;
-  }
-}
-
 class common_windows_memory_session final : public readonly_memory_session {
  public:
   common_windows_memory_session(
-      sonar::platform::windows::readonly_process process,
+      std::unique_ptr<sonar::platform::windows::trusted_module_lease> lease,
       process_identity identity)
-      : process_(std::move(process)), identity_(std::move(identity)) {}
+      : lease_(std::move(lease)), identity_(std::move(identity)) {}
 
   [[nodiscard]] const process_identity& identity() const noexcept override {
     return identity_;
@@ -174,7 +34,7 @@ class common_windows_memory_session final : public readonly_memory_session {
       return false;
     }
     try {
-      process_.read_exact(address, destination);
+      lease_->process().read_exact(address, destination);
       return true;
     } catch (...) {
       return false;
@@ -185,7 +45,7 @@ class common_windows_memory_session final : public readonly_memory_session {
       sonar::platform::windows::memory_region_snapshot>
   query_region(const std::uintptr_t address) noexcept override {
     try {
-      return process_.query_region(address);
+      return lease_->process().query_region(address);
     } catch (...) {
       return std::nullopt;
     }
@@ -193,16 +53,39 @@ class common_windows_memory_session final : public readonly_memory_session {
 
   [[nodiscard]] bool generation_current() noexcept override {
     try {
-      return process_.generation_matches(identity_.generation);
+      return lease_ != nullptr &&
+          lease_->revalidate() ==
+              sonar::platform::windows::trusted_module_admission_status::ready;
     } catch (...) {
       return false;
     }
   }
 
  private:
-  sonar::platform::windows::readonly_process process_;
+  std::unique_ptr<sonar::platform::windows::trusted_module_lease> lease_;
   process_identity identity_;
 };
+
+struct role_policy final {
+  std::wstring_view image_name;
+  std::string_view publisher_thumbprint;
+};
+
+[[nodiscard]] role_policy policy_for(const process_role role) noexcept {
+  switch (role) {
+    case process_role::game:
+      return {
+          L"GTA5.exe",
+          "565932392989B3616F2968E1B1D6F974561B1F32",
+      };
+    case process_role::webengine:
+      return {
+          L"majestic-webengine.exe",
+          "B03C125E345303D797A951DA1BC76B960C21FF57",
+      };
+  }
+  return {};
+}
 
 class common_windows_memory_connector final : public memory_connector {
  public:
@@ -215,26 +98,43 @@ class common_windows_memory_connector final : public memory_connector {
       return nullptr;
     }
     try {
+      const auto product_policy = policy_for(role);
+      if (product_policy.image_name.empty() ||
+          product_policy.publisher_thumbprint.empty()) {
+        reason = "memory_process_role_invalid";
+        return nullptr;
+      }
       auto process = sonar::platform::windows::readonly_process::open(
           process_id,
           sonar::platform::windows::process_access_profile::memory_regions);
-      const auto generation = process.generation();
-      const auto path = process.image_path();
-      const auto hash = sha256_file(path);
-      if (!hash.has_value()) {
-        reason = "memory_image_hash_unavailable";
+      auto admitted = sonar::platform::windows::open_trusted_module_lease(
+          std::move(process),
+          {
+              .process_image_name = std::wstring(product_policy.image_name),
+              .module_name = std::wstring(product_policy.image_name),
+              .accepted_publisher_thumbprints = {
+                  std::string(product_policy.publisher_thumbprint),
+              },
+          });
+      if (!admitted.ready()) {
+        reason = "memory_trusted_module_";
+        reason += sonar::platform::windows::trusted_module_admission_status_name(
+            admitted.status);
         return nullptr;
       }
+      const auto& authority = admitted.lease->authority();
       process_identity identity{
           .role = role,
-          .generation = generation,
-          .image_name = process.image_name(),
-          .image_sha256 = *hash,
-          .modules = process.modules(),
+          .generation = authority.generation,
+          .image_name = std::wstring(product_policy.image_name),
+          .image_sha256 = {},
+          .admission = process_admission::trusted_publisher_runtime,
+          .authority_fingerprint = authority.identity_fingerprint,
+          .modules = {authority.module},
       };
       reason = "ready";
       return std::make_unique<common_windows_memory_session>(
-          std::move(process), std::move(identity));
+          std::move(admitted.lease), std::move(identity));
     } catch (const sonar::platform::windows::process_error&) {
       reason = "memory_process_unavailable";
       return nullptr;

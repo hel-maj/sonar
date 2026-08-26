@@ -12,12 +12,19 @@ internal enum LocalReleaseMaintenanceAction
     ImportLicense,
 }
 
+internal enum LocalReleaseChannel
+{
+    DevelopmentUnsigned,
+    DeveloperFullAccessUnsigned,
+}
+
 internal sealed record LocalReleaseMaintenanceRequest(
     LocalReleaseMaintenanceAction Action,
     string SourceBundle,
     string InstallRoot,
     string? BackupDirectory,
     bool DryRun,
+    LocalReleaseChannel Channel = LocalReleaseChannel.DevelopmentUnsigned,
     string? LegacyLicenseSettingsPath = null);
 
 internal sealed record LocalReleaseMaintenanceResult(
@@ -33,7 +40,9 @@ internal static class LocalReleaseMaintenance
         LocalReleaseMaintenanceRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var source = DevelopmentBundleVerifier.Verify(request.SourceBundle);
+        var source = DevelopmentBundleVerifier.Verify(
+            request.SourceBundle,
+            request.Channel);
         var installRoot = Path.GetFullPath(request.InstallRoot);
         if (SamePath(source.Root, installRoot) ||
             IsDescendant(source.Root, installRoot) ||
@@ -45,7 +54,7 @@ internal static class LocalReleaseMaintenance
         return request.Action switch
         {
             LocalReleaseMaintenanceAction.Install =>
-                Install(source, installRoot, request.DryRun),
+                Install(source, installRoot, request.DryRun, request.Channel),
             LocalReleaseMaintenanceAction.Update =>
                 Replace(source, installRoot, request.BackupDirectory, request.DryRun,
                     allowOlder: false),
@@ -63,7 +72,8 @@ internal static class LocalReleaseMaintenance
     private static LocalReleaseMaintenanceResult Install(
         VerifiedDevelopmentBundle source,
         string installRoot,
-        bool dryRun)
+        bool dryRun,
+        LocalReleaseChannel channel)
     {
         var parent = ValidateNewDirectoryTarget(installRoot, "release_install_target_invalid");
         if (dryRun)
@@ -79,9 +89,9 @@ internal static class LocalReleaseMaintenance
         {
             CopyReleaseFiles(source.Root, temporary);
             InitializeRuntimeState(temporary);
-            var verified = DevelopmentBundleVerifier.Verify(temporary);
+            var verified = DevelopmentBundleVerifier.Verify(temporary, channel);
             Directory.Move(temporary, installRoot);
-            _ = DevelopmentBundleVerifier.Verify(installRoot);
+            _ = DevelopmentBundleVerifier.Verify(installRoot, channel);
             return Result("installed", verified, changed: true);
         }
         catch
@@ -101,7 +111,7 @@ internal static class LocalReleaseMaintenance
         bool dryRun,
         bool allowOlder)
     {
-        var current = DevelopmentBundleVerifier.Verify(installRoot);
+        var current = DevelopmentBundleVerifier.Verify(installRoot, source.Channel);
         if (!allowOlder &&
             DevelopmentBundleVerifier.CompareVersions(source.Version, current.Version) < 0)
         {
@@ -129,7 +139,7 @@ internal static class LocalReleaseMaintenance
         try
         {
             CopyReleaseFiles(current.Root, backup);
-            _ = DevelopmentBundleVerifier.Verify(backup);
+            _ = DevelopmentBundleVerifier.Verify(backup, source.Channel);
         }
         catch
         {
@@ -151,7 +161,9 @@ internal static class LocalReleaseMaintenance
             CopyReleaseFiles(source.Root, staging);
             ReleaseInstallLayout.ValidatePayloadDirectory(staging);
             ReleaseSwapTransaction.ApplyVerifiedPayloadDirectory(current.Root, staging);
-            var verified = DevelopmentBundleVerifier.Verify(current.Root);
+            var verified = DevelopmentBundleVerifier.Verify(
+                current.Root,
+                source.Channel);
             return Result(allowOlder ? "rolled_back" : "updated", verified, changed: true);
         }
         catch
@@ -178,7 +190,9 @@ internal static class LocalReleaseMaintenance
             return Result("recovery_ready", executorBundle, changed: false);
         }
         ReleaseSwapRecovery.Recover(installRoot);
-        var current = DevelopmentBundleVerifier.Verify(installRoot);
+        var current = DevelopmentBundleVerifier.Verify(
+            installRoot,
+            executorBundle.Channel);
         return Result("recovered", current, changed: true);
     }
 

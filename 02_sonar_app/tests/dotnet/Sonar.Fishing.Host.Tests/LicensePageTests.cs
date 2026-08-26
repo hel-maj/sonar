@@ -1,5 +1,6 @@
 using Sonar.Fishing.Host.LicensePage;
 using Sonar.Fishing.Host.Licensing;
+using Sonar.Fishing.Host.ProductNavigation;
 using Sonar.Fishing.Host.SettingsPersistence;
 using System.Windows;
 
@@ -46,9 +47,17 @@ internal static class LicensePageTests
         TestAssert.Equal("Доступные функции", viewModel.Subscription,
             "Local access advertised capabilities missing from production composition");
         TestAssert.True(
-            !DeveloperFullAccessPolicy.Features.Contains("stream", StringComparer.Ordinal) &&
+            DeveloperFullAccessPolicy.Features.Contains("stream", StringComparer.Ordinal) &&
             !DeveloperFullAccessPolicy.Features.Contains("stream_chat", StringComparer.Ordinal),
-            "Local access granted unavailable streaming capabilities");
+            "Local access did not match the available stream and unavailable chat compositions");
+        var localFeatures = DeveloperFullAccessPolicy.Features.ToHashSet(StringComparer.Ordinal);
+        foreach (var page in FishingProductPageCatalog.All)
+        {
+            TestAssert.Equal(
+                page.Id,
+                FishingProductPageCatalog.ResolveAllowed(page.Id, localFeatures),
+                $"Local access redirected the {page.Id} page to the license page");
+        }
         var accepted = viewModel.ActivateAsync("unused", CancellationToken.None)
             .GetAwaiter().GetResult();
         TestAssert.True(!accepted && !activationCalled,

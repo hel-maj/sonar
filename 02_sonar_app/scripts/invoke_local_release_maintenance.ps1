@@ -10,6 +10,7 @@ param(
     [string]$BackupDirectory = "",
     [string]$LegacyLicenseSettingsPath = "",
     [switch]$DevelopmentUnsigned,
+    [switch]$DeveloperFullAccess,
     [switch]$DryRun,
     [ValidateRange(5, 120)]
     [int]$WaitTimeoutSeconds = 60
@@ -67,7 +68,17 @@ $source = Assert-FishingSafeBuildPath `
 if (-not (Test-Path -LiteralPath $source -PathType Container)) {
     throw "release_maintenance_source_missing: $source"
 }
-[void](Read-FishingBundleManifest $productRoot $source "development-unsigned")
+$expectedReleaseMode = if ($DeveloperFullAccess) {
+    "developer-full-access-unsigned"
+}
+else {
+    "development-unsigned"
+}
+[void](Read-FishingBundleManifest `
+    $productRoot `
+    $source `
+    $expectedReleaseMode `
+    -AllowDeveloperFullAccess:$DeveloperFullAccess)
 $executor = Join-Path $source "Sonar.exe"
 
 $target = Assert-FishingSafeBuildPath `
@@ -134,6 +145,9 @@ $executorArguments = @(
     "--receipt", $receipt,
     "--wait-timeout-seconds", [string]$WaitTimeoutSeconds,
     "--development-unsigned")
+if ($DeveloperFullAccess) {
+    $executorArguments += "--developer-full-access"
+}
 if ($requiresBackup) {
     $executorArguments += @("--backup", $backup)
 }

@@ -11,7 +11,7 @@ internal static class LocalReleaseMaintenanceTests
     public static IReadOnlyList<TestCase> Create() =>
     [
         new("local_release_bundle_verification_rejects_tampering", BundleVerificationIsExact),
-        new("local_release_rejects_developer_authority_bundle_contamination", DeveloperBundleIsNotInstallable),
+        new("local_release_developer_authority_requires_explicit_isolated_channel", DeveloperBundleRequiresExplicitChannel),
         new("local_release_install_update_and_rollback_preserve_user_state", LifecyclePreservesState),
         new("local_release_interrupted_swap_recovers_previous_pair", InterruptedSwapRecovers),
         new("local_release_after_exit_command_is_explicit_and_bounded", CommandContractIsBounded),
@@ -97,21 +97,46 @@ internal static class LocalReleaseMaintenanceTests
             "Local lifecycle left transaction residue");
     }
 
-    private static void DeveloperBundleIsNotInstallable()
+    private static void DeveloperBundleRequiresExplicitChannel()
     {
         using var scope = TempScope.Create();
-        var bundle = scope.CreateBundle("developer", "1.0.0", "host-dev", "engine-dev");
-        var manifestPath = Path.Combine(bundle, "bundle-manifest.json");
-        var manifest = File.ReadAllText(manifestPath, Encoding.UTF8)
-            .Replace(
-                "\"schemaVersion\":1,\"product\":\"fishing\",\"releaseMode\":\"development-unsigned\"",
-                "\"schemaVersion\":2,\"product\":\"fishing\",\"releaseMode\":\"developer-full-access-unsigned\",\"developerFullAccess\":true",
-                StringComparison.Ordinal);
-        File.WriteAllText(manifestPath, manifest, new UTF8Encoding(false));
+        var bundle = scope.CreateBundle(
+            "developer",
+            "1.0.0",
+            "host-dev",
+            "engine-dev",
+            LocalReleaseChannel.DeveloperFullAccessUnsigned);
 
         TestAssert.Throws<InvalidOperationException>(
             () => DevelopmentBundleVerifier.Verify(bundle),
-            "Local maintenance accepted a developer authority bundle");
+            "Ordinary maintenance accepted a developer authority bundle");
+        var verified = DevelopmentBundleVerifier.Verify(
+            bundle,
+            LocalReleaseChannel.DeveloperFullAccessUnsigned);
+        TestAssert.Equal(
+            LocalReleaseChannel.DeveloperFullAccessUnsigned,
+            verified.Channel,
+            "Explicit local-access channel identity changed");
+
+        var install = Path.Combine(scope.Root, "developer-installed");
+        _ = LocalReleaseMaintenance.Execute(new LocalReleaseMaintenanceRequest(
+            LocalReleaseMaintenanceAction.Install,
+            bundle,
+            install,
+            null,
+            DryRun: false,
+            Channel: LocalReleaseChannel.DeveloperFullAccessUnsigned));
+        _ = DevelopmentBundleVerifier.Verify(
+            install,
+            LocalReleaseChannel.DeveloperFullAccessUnsigned);
+        TestAssert.Throws<InvalidOperationException>(
+            () => DevelopmentBundleVerifier.Verify(install),
+            "Installed local-access bundle crossed into the ordinary channel");
+        TestAssert.Throws<InvalidOperationException>(
+            () => DevelopmentBundleVerifier.Verify(
+                install,
+                (LocalReleaseChannel)int.MaxValue),
+            "Unknown local release channel was accepted");
     }
 
     private static void InterruptedSwapRecovers()
@@ -183,6 +208,36 @@ internal static class LocalReleaseMaintenanceTests
         TestAssert.Equal(TimeSpan.FromSeconds(30), parsed.WaitTimeout,
             "After-exit timeout changed");
         TestAssert.True(parsed.Request.DryRun, "Dry-run gate was lost");
+
+        var developerSource = scope.CreateBundle(
+            "developer-source",
+            "1.2.0",
+            "host-dev",
+            "engine-dev",
+            LocalReleaseChannel.DeveloperFullAccessUnsigned);
+        var developerTarget = scope.CreateBundle(
+            "developer-target",
+            "1.1.0",
+            "host-dev-old",
+            "engine-dev-old",
+            LocalReleaseChannel.DeveloperFullAccessUnsigned);
+        var developerParsed = ReleaseMaintenanceCommand.Parse(
+        [
+            "--release-maintenance",
+            "--action", "update",
+            "--source", developerSource,
+            "--target", developerTarget,
+            "--backup", Path.Combine(scope.Root, "developer-backup"),
+            "--receipt", Path.Combine(scope.Root, "developer-receipt.json"),
+            "--wait-timeout-seconds", "30",
+            "--development-unsigned",
+            "--developer-full-access",
+            "--dry-run",
+        ]);
+        TestAssert.Equal(
+            LocalReleaseChannel.DeveloperFullAccessUnsigned,
+            developerParsed.Request.Channel,
+            "Developer maintenance command lost its isolated channel");
 
         TestAssert.Throws<InvalidOperationException>(
             () => ReleaseMaintenanceCommand.Parse(
@@ -281,7 +336,8 @@ internal static class LocalReleaseMaintenanceTests
             string name,
             string version,
             string hostText,
-            string engineText)
+            string engineText,
+            LocalReleaseChannel channel = LocalReleaseChannel.DevelopmentUnsigned)
         {
             var directory = Path.Combine(Root, name);
             Directory.CreateDirectory(directory);
@@ -291,9 +347,14 @@ internal static class LocalReleaseMaintenanceTests
             File.WriteAllBytes(Path.Combine(directory, "Sonar.Engine.exe"), engine);
             var hostHash = Convert.ToHexString(SHA256.HashData(host));
             var engineHash = Convert.ToHexString(SHA256.HashData(engine));
+            var identity = channel == LocalReleaseChannel.DeveloperFullAccessUnsigned
+                ? "\"schemaVersion\":2,\"product\":\"fishing\"," +
+                  "\"releaseMode\":\"developer-full-access-unsigned\"," +
+                  "\"developerFullAccess\":true,"
+                : "\"schemaVersion\":1,\"product\":\"fishing\"," +
+                  "\"releaseMode\":\"development-unsigned\",";
             var manifest =
-                $"{{\"schemaVersion\":1,\"product\":\"fishing\"," +
-                $"\"releaseMode\":\"development-unsigned\",\"version\":\"{version}\"," +
+                $"{{{identity}\"version\":\"{version}\"," +
                 "\"source\":{\"commitSha\":\"0000000000000000000000000000000000000000\",\"dirty\":true}," +
                 "\"ipc\":{\"schema\":\"ipc/v1/sonar_fishing.proto\"," +
                 $"\"schemaSha256\":\"{new string('0', 64)}\"}}," +

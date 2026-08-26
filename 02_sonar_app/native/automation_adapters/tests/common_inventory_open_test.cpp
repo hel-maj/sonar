@@ -67,38 +67,17 @@ class scripted_retry_clock final : public adapters::inventory_retry_clock {
   std::uint64_t now_ns{1'000'000'000ULL};
 };
 
-void compile_isolated_policy_is_explicit() {
-  constexpr auto shipping =
-      adapters::common_inventory_open_policy_for_build<false>();
-  constexpr auto local =
-      adapters::common_inventory_open_policy_for_build<true>();
-  static_assert(!shipping.observation_enabled);
-  static_assert(!shipping.candidate_profile_approved);
-  static_assert(!shipping.closed_state_bootstrap_approved);
-  static_assert(local.observation_enabled);
-  static_assert(local.candidate_profile_approved);
-  static_assert(local.closed_state_bootstrap_approved);
-  static_assert(local.profile_id ==
-      adapters::common_inventory_open_candidate_profile_id);
+void trusted_publisher_composition_is_uniform_and_inert_until_capture() {
+  static_assert(adapters::common_inventory_open_authority_id ==
+      "common-trusted-publisher-runtime-v1");
+  static_assert(adapters::common_inventory_open_authority_revision == 1U);
 
-  const auto selected = adapters::selected_common_inventory_open_policy();
-#if defined(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
-  require(selected.observation_enabled &&
-          selected.candidate_profile_approved &&
-          selected.closed_state_bootstrap_approved,
-          "Local Access must explicitly admit only the built-in candidate");
-#else
-  require(!selected.observation_enabled &&
-          !selected.candidate_profile_approved &&
-          !selected.closed_state_bootstrap_approved,
-          "ordinary shipping composition must stay denied and inert");
+  // Construction itself performs no process, file or memory observation. The
+  // structural ownership test separately proves that the concrete source uses
+  // Common's trusted-publisher factory with observation enabled.
   auto source = adapters::make_common_inventory_open_source();
-  require(source != nullptr, "disabled Common facade must still be constructible");
-  const auto result = source->capture({.process_id = 1U});
-  require(result.state == inventory::observed_state::unknown &&
-          result.reason == "production_inventory_source_disabled",
-          "disabled Common facade must map source_disabled without touching GTA");
-#endif
+  require(source != nullptr,
+      "trusted-publisher Common facade must be constructible without live I/O");
 }
 
 void aggregate_routing_is_bounded_and_generation_safe() {
@@ -220,7 +199,7 @@ void unknown_backoff_is_exponential_and_capped() {
 }  // namespace
 
 int main() {
-  compile_isolated_policy_is_explicit();
+  trusted_publisher_composition_is_uniform_and_inert_until_capture();
   aggregate_routing_is_bounded_and_generation_safe();
   unknown_backoff_is_exponential_and_capped();
   std::cout << "PASS common inventory-open adapter tests\n";

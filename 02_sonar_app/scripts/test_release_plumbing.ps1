@@ -83,6 +83,79 @@ try {
         throw "release_test_manifest_determinism_lost"
     }
 
+    $secretFixtureRoot = Join-Path $testRoot 'secret-scan-fixture'
+    $secretBundle = Join-Path $secretFixtureRoot 'bundle'
+    $secretTools = Join-Path $secretFixtureRoot 'tools'
+    New-Item -ItemType Directory -Path $secretBundle -Force | Out-Null
+    New-Item -ItemType Directory -Path $secretTools -Force | Out-Null
+    $ffmpegFixture = [Text.Encoding]::ASCII.GetBytes(
+        'ffmpeg -----BEGIN PRIVATE KEY----- 12345:ABCDEFGHIJKLMNOPQRSTUVWXYZ_1234')
+    $cloudflaredFixture = [Text.Encoding]::ASCII.GetBytes(
+        'cloudflared -----BEGIN OPENSSH PRIVATE KEY-----')
+    [IO.File]::WriteAllBytes((Join-Path $secretTools 'ffmpeg.exe'), $ffmpegFixture)
+    [IO.File]::WriteAllBytes(
+        (Join-Path $secretTools 'cloudflared.exe'),
+        $cloudflaredFixture)
+    $trustedHostBytes = [byte[]]::new(
+        $ffmpegFixture.Length + 1 + $cloudflaredFixture.Length)
+    [Array]::Copy($ffmpegFixture, 0, $trustedHostBytes, 0, $ffmpegFixture.Length)
+    $trustedHostBytes[$ffmpegFixture.Length] = [byte][char]' '
+    [Array]::Copy(
+        $cloudflaredFixture,
+        0,
+        $trustedHostBytes,
+        ($ffmpegFixture.Length + 1),
+        $cloudflaredFixture.Length)
+    $secretHostPath = Join-Path $secretBundle 'Sonar.exe'
+    $secretEnginePath = Join-Path $secretBundle 'Sonar.Engine.exe'
+    [IO.File]::WriteAllBytes($secretHostPath, $trustedHostBytes)
+    [IO.File]::WriteAllBytes(
+        $secretEnginePath,
+        [Text.Encoding]::ASCII.GetBytes('safe engine'))
+    $secretManifestPath = Join-Path $secretFixtureRoot 'streaming-tool-manifest.json'
+    $secretManifest = [ordered]@{
+        schema_version = 1
+        tools = @(
+            [ordered]@{
+                id = 'ffmpeg'
+                file_name = 'ffmpeg.exe'
+                resource_name = 'Sonar.Fishing.Host.Streaming.ffmpeg.exe'
+                version = 'fixture'
+                sha256 = Get-FishingSha256 (Join-Path $secretTools 'ffmpeg.exe')
+            },
+            [ordered]@{
+                id = 'cloudflared'
+                file_name = 'cloudflared.exe'
+                resource_name = 'Sonar.Fishing.Host.Streaming.cloudflared.exe'
+                version = 'fixture'
+                sha256 = Get-FishingSha256 (Join-Path $secretTools 'cloudflared.exe')
+            }
+        )
+    }
+    [IO.File]::WriteAllText(
+        $secretManifestPath,
+        ($secretManifest | ConvertTo-Json -Depth 5),
+        [Text.UTF8Encoding]::new($false))
+    Assert-FishingHighConfidenceSecretScan `
+        $secretBundle $secretManifestPath $secretTools
+    [IO.File]::WriteAllBytes(
+        $secretHostPath,
+        [Text.Encoding]::ASCII.GetBytes(
+            ([Text.Encoding]::ASCII.GetString($trustedHostBytes) +
+             ' 99999:ZYXWVUTSRQPONMLKJIHGFEDCBA_4321')))
+    Assert-Throws {
+        Assert-FishingHighConfidenceSecretScan `
+            $secretBundle $secretManifestPath $secretTools
+    } 'release_secret_marker_detected: Sonar.exe'
+    [IO.File]::WriteAllBytes($secretHostPath, $trustedHostBytes)
+    [IO.File]::WriteAllBytes(
+        $secretEnginePath,
+        [Text.Encoding]::ASCII.GetBytes('-----BEGIN RSA PRIVATE KEY-----'))
+    Assert-Throws {
+        Assert-FishingHighConfidenceSecretScan `
+            $secretBundle $secretManifestPath $secretTools
+    } 'release_secret_marker_detected: Sonar.Engine.exe'
+
     $developerManifest = New-FishingBundleManifestData `
         $productRoot `
         $bundle `
@@ -371,13 +444,15 @@ try {
         $releaseBuilderText -notmatch 'SONAR_FISHING_DEVELOPER_FULL_ACCESS' -or
         $releaseBuilderText -notmatch
             'SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE' -or
+        $releaseBuilderText -notmatch
+            'SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE' -or
         $releaseBuilderText -notmatch 'Assert-FishingCommonInventoryPackage') {
         throw "release_clean_build_contract_invalid"
     }
     $inventoryPackageGateText = Get-Content -Raw -LiteralPath `
         (Join-Path $PSScriptRoot "common_inventory_package.ps1")
     if ($inventoryPackageGateText -notmatch
-            'B44CD61110B4B4E152DE52245021CD4C12233E2886EE1FDF323942F27C2352F8' -or
+            'EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D' -or
         $inventoryPackageGateText -notmatch
             'common_inventory_payload_hash_mismatch' -or
         $inventoryPackageGateText -notmatch
@@ -421,10 +496,24 @@ try {
         $developerAdmissionText -match 'test_no_python_runtime|DependencyClosure|SecretScan') {
         throw "release_developer_launch_admission_contract_invalid"
     }
+    $maintenanceWrapperText = Get-Content -Raw -LiteralPath `
+        (Join-Path $PSScriptRoot "invoke_local_release_maintenance.ps1")
+    if ($maintenanceWrapperText -notmatch '\[switch\]\$DeveloperFullAccess' -or
+        $maintenanceWrapperText -notmatch
+            '-AllowDeveloperFullAccess:\$DeveloperFullAccess' -or
+        $maintenanceWrapperText -notmatch
+            '\$executorArguments \+= "--developer-full-access"') {
+        throw "release_local_access_maintenance_channel_invalid"
+    }
     $normalLifecycleText = Get-Content -Raw -LiteralPath `
         (Join-Path $PSScriptRoot "test_product_lifecycle.ps1")
-    if ($normalLifecycleText -notmatch 'Intentionally no arguments' -or
-        $normalLifecycleText -match '\.ArgumentList\.Add|\.Arguments\s*=' -or
+    $lifecycleArguments = @([regex]::Matches(
+        $normalLifecycleText,
+        '\.Arguments\s*=\s*"--developer-full-access"'))
+    if ($normalLifecycleText -notmatch 'No argument in the ordinary path' -or
+        $normalLifecycleText -match '\.ArgumentList\.Add' -or
+        $normalLifecycleText -notmatch '\[switch\]\$DeveloperFullAccess' -or
+        $lifecycleArguments.Count -ne 2 -or
         $normalLifecycleText -notmatch 'release_engine_exited_during_sustain' -or
         $normalLifecycleText -notmatch 'release_engine_recovery_timeout' -or
         $normalLifecycleText -notmatch 'release_persistent_state_lost_after_restart') {

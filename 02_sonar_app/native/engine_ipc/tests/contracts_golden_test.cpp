@@ -98,6 +98,28 @@ int main() {
         serialized == catch_disposition_golden,
         "catch_disposition_native_wire_parity_changed");
 
+    const std::string inventory_snapshot_golden =
+        read_golden("inventory_snapshot_event.hex");
+    sonar::fishing::ipc::v1::Envelope inventory_snapshot;
+    require(
+        inventory_snapshot.ParseFromString(inventory_snapshot_golden),
+        "inventory_snapshot_golden_parse_failed");
+    require(
+        inventory_snapshot.has_inventory_state_snapshot(),
+        "inventory_snapshot_golden_payload_case_changed");
+    require(
+        inventory_snapshot.inventory_state_snapshot().availability() ==
+            sonar::inventory::ipc::v1::INVENTORY_AVAILABILITY_READY &&
+            inventory_snapshot.inventory_state_snapshot().revision() == 1U,
+        "inventory_snapshot_golden_fields_changed");
+    serialized.clear();
+    require(
+        inventory_snapshot.SerializeToString(&serialized),
+        "inventory_snapshot_golden_serialize_failed");
+    require(
+        serialized == inventory_snapshot_golden,
+        "inventory_snapshot_native_wire_parity_changed");
+
     std::cout << "PASS Fishing product envelopes native golden parity\n";
     return 0;
   } catch (const std::exception& error) {

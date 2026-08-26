@@ -26,6 +26,9 @@ $BundleDirectory = (Resolve-Path -LiteralPath $BundleDirectory).Path
     -BundleDirectory $BundleDirectory `
     -BundleLifecycleStage Package
 Assert-FishingSystemDependencyClosure $BundleDirectory
-Assert-FishingHighConfidenceSecretScan $BundleDirectory
+Assert-FishingHighConfidenceSecretScan `
+    $BundleDirectory `
+    (Join-Path $productRoot 'contracts\streaming-tool-manifest.json') `
+    (Join-Path $productRoot '..\config\streaming\bin')
 
 Write-Output "PASS Fishing developer-full-access full verification: $BundleDirectory"

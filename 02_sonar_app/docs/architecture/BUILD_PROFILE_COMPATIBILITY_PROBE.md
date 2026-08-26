@@ -1,8 +1,8 @@
 # Fishing build-profile compatibility probe
 
-Статус: diagnostic реализован и принят offline; единственный live pass выполнен
-2026-08-24 и fail-closed отклонён. Текущая GTA build остаётся unsupported и не
-добавлена в production registry.
+Статус: forensic diagnostic реализован и принят offline; единственный live pass
+2026-08-24 fail-closed отклонён. После ADR-0005 exact hash больше не является
+production availability gate и этот документ не определяет runtime admission.
 
 ## Причина появления
 
@@ -19,11 +19,13 @@ memory_ready=false
 reason=game_build_unsupported
 ```
 
-Единственный embedded profile допускает exact `GTA5.exe` SHA-256
+На тот момент единственный embedded profile допускал exact `GTA5.exe` SHA-256
 `677E4E355CFBDB13273B1D992407E3C261B3A108DC4DD5C8A0C4C1DA651802E5`.
 Результат доказывает hash drift, но намеренно не раскрывает новый hash и не
-даёт evidence, достаточного для добавления production profile. Wildcard или
-перенос старого layout на новый hash без проверки запрещён.
+даёт evidence, достаточного для подтверждения layout. Wildcard или перенос
+старых addresses без semantic проверки запрещён. Теперь shipping resolver
+выполняет эту проверку непосредственно после Common trusted admission; SHA
+остаётся только provenance.
 
 ## Diagnostic-only boundary
 
@@ -34,8 +36,9 @@ OFF-by-default non-shipping target. Он не связан с `Sonar.Engine.exe`
 
 Diagnostic:
 
-1. Находит exact `GTA5.exe`, проверяет одно foreground client window и получает
-   SHA-256 через production least-rights connector.
+1. Находит exact `GTA5.exe`, проверяет одно foreground client window, получает
+   Common trusted lease и дополнительно вычисляет SHA-256 через отдельный
+   forensic connector; hash не участвует в admission lease.
 2. Выбирает frozen baseline только по exact id
    `majestic-gta5-677e4e35-v1` и revision `1`, deep-clone-ит его в памяти и
    меняет только game hash. Уже admitted hash отклоняется.
@@ -83,32 +86,31 @@ PID, HWND, path, absolute/module-relative addresses, raw module/memory values,
 frame, stage, confidence, positions и distance не выводятся и не сохраняются.
 
 Даже `ready=true` является только compatibility evidence для offline review.
-Он не добавляет profile в registry, не разрешает normal Engine, overlay или
-physical input. Новый immutable profile/revision, canonical fixture/hash pin,
-regressions и обычный supported-profile preflight остаются отдельными gates.
+Он не добавляет profile в registry и не разрешает overlay или physical input.
+Production Engine независимо требует Common lease, unique semantic anchors,
+coherent capture и обычные final gates.
 
 ## Одна подготовленная попытка
 
 Probe требует active-reeling state и foreground GTA, поэтому сначала полностью
-подготавливается offline, затем пользователь один раз подтверждает одну попытку:
+подготавливается offline. Явный запуск команды задаёт одну попытку:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_build_profile_compatibility_probe.ps1 -ConfirmedLiveBuildProfileCompatibility
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_build_profile_compatibility_probe.ps1
 ```
 
 Wrapper проверяет offline suite и binary imports, даёт 5-10 секунд для возврата
 в GTA и выполняет один pass. Ввода, screen capture/recording, overlay, network,
-window activation и повторной попытки нет. Switch является внутренней safety
-assertion того же подтверждения, а не причиной спрашивать пользователя второй
-раз. Звуковые сигналы отсутствуют.
+window activation и повторной попытки нет. Отдельный user-facing confirmation
+switch не дублируется; внутренний EXE safety argument остаётся. Звуковые
+сигналы отсутствуют.
 
 Точный later protocol и receipt:
 
 1. Offline проверки и CMake/import/source isolation должны быть зелёны;
    прямой запуск diagnostic EXE запрещён.
-2. Пользователь вручную оставляет GTA на active reeling и foreground;
-   затем одно fresh contextual confirmation покрывает ровно одну
-   попытку.
+2. Пользователь вручную оставляет GTA на active reeling и foreground; один
+   явный запуск wrapper покрывает ровно одну попытку.
 3. Wrapper выполняет один bounded pass после delay не менее пяти
    секунд; exit `0` означает `ready=true`, exit `2` — санитизированный
    fail-closed result.
@@ -116,9 +118,10 @@ assertion того же подтверждения, а не причиной с�
    allowlist. PID/HWND/path/address/raw frame/raw memory/value не сохраняются.
 5. После любого result нет retry. Если понадобится новая
    state-dependent попытка, она сначала снова подготавливается offline и
-   получает новое одноразовое confirmation.
+   запускается новой явной командой.
 6. Даже `ready=true` передаётся только в offline profile review; registry
-   не меняется и shipping Engine не получает admission.
+   не меняется. Shipping Engine получает admission только через собственный
+   trusted/semantic path, а не из receipt probe.
 
 Единственная разрешённая live compatibility попытка 2026-08-24 вернула exit 2:
 
@@ -148,8 +151,9 @@ Sanitized ignored receipt сохранён в
 SHA-256 —
 `33A3C6F23E95C1B3647A35238BEC09F99459B3B707A32EA63715B12DF7D15F15`.
 Повторной попытки, ввода, активации окна, screen capture, overlay или сети не
-было. Этот result не доказывает layout compatibility: production registry и
-shipping resolver не менялись, inventory input остаётся запрещённым.
+было. Этот result не доказывает layout compatibility и не переинтерпретируется
+как production evidence. Текущий shipping resolver сам выполняет более сильный
+semantic admission; inventory/input остаются под собственными fresh gates.
 
 ## Build и release exclusion
 

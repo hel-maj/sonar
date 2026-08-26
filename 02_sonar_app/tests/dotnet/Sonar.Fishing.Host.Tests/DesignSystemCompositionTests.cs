@@ -7,8 +7,10 @@ using System.Windows.Input;
 using System.IO;
 using System.Diagnostics;
 using Sonar.Fishing.Host.AboutPage;
+using Sonar.Fishing.Host.EngineHealth;
 using Sonar.Fishing.Host.FishingPage;
 using Sonar.Fishing.Host.LicensePage;
+using Sonar.Fishing.Host.InventoryPage;
 using Sonar.Fishing.Host.Overview;
 using Sonar.Fishing.Host.SettingsPage;
 using Sonar.Fishing.Host.SettingsPersistence;
@@ -29,11 +31,12 @@ internal static class DesignSystemCompositionTests
         new("navigation_footer_never_overlaps_navigation_or_page_content", FooterDoesNotOverlapContent),
         new("overview_fits_compact_viewport_without_page_scroll", OverviewFitsCompactViewport),
         new("embedded_fishing_brand_has_no_loose_runtime_asset", BrandIsEmbedded),
-        new("all_eight_product_pages_are_composed_from_common_patterns", AllPagesAreComposed),
+        new("all_nine_product_pages_are_composed_from_common_patterns", AllPagesAreComposed),
+        new("page_content_uses_one_shared_header_gap", PageContentUsesOneSharedHeaderGap),
         new("settings_page_persists_one_complete_next_revision", SettingsSaveIsAtomic),
         new("rapid_product_settings_toggles_preserve_final_intent_without_banner_spam", RapidSettingsTogglesRemainResponsive),
         new("repeated_product_navigation_and_focus_never_resolve_unset_value", RepeatedNavigationAndFocusRemainStable),
-        new("settings_combo_projects_selected_record_label", SettingsComboProjectsSelectedLabel),
+        new("settings_combo_projects_record_labels_in_selection_and_dropdown", SettingsComboProjectsRecordLabels),
         new("product_text_inputs_use_common_keyed_templates", ProductTextInputsUseCommonTemplates),
         new("settings_threshold_sliders_use_common_template_without_geometry_change", SettingsSlidersUseCommonTemplate),
         new("fish_selection_uses_common_nested_scroll_gutter", FishSelectionUsesCommonScrollGutter),
@@ -126,11 +129,65 @@ internal static class DesignSystemCompositionTests
         AssertPage<LicenseScreen>(shell, () => shell.ViewModel.ShowLicenseCommand.Execute(null));
         AssertPage<OverviewScreen>(shell, () => shell.ViewModel.ShowOverviewCommand.Execute(null));
         AssertPage<FishingPageControl>(shell, () => shell.ViewModel.ShowFishingCommand.Execute(null));
+        AssertPage<InventoryScreen>(shell, () => shell.ViewModel.ShowInventoryCommand.Execute(null));
         AssertPage<SettingsScreen>(shell, () => shell.ViewModel.ShowSettingsCommand.Execute(null));
         AssertPage<StatisticsScreen>(shell, () => shell.ViewModel.ShowStatisticsCommand.Execute(null));
         AssertPage<StreamingScreen>(shell, () => shell.ViewModel.ShowStreamingCommand.Execute(null));
         AssertPage<TelegramScreen>(shell, () => shell.ViewModel.ShowTelegramCommand.Execute(null));
         AssertPage<AboutScreen>(shell, () => shell.ViewModel.ShowAboutCommand.Execute(null));
+    }
+
+    private static void PageContentUsesOneSharedHeaderGap()
+    {
+        var shell = new FishingHostShell
+        {
+            ViewModel = UiGalleryRenderer.CreateGalleryViewModel(),
+        };
+        var pages = new (string Title, Action Navigate)[]
+        {
+            ("Проверка приложения", () => shell.ViewModel.ShowEngineHealthCommand.Execute(null)),
+            ("Лицензия", () => shell.ViewModel.ShowLicenseCommand.Execute(null)),
+            ("Обзор", () => shell.ViewModel.ShowOverviewCommand.Execute(null)),
+            ("Рыбалка", () => shell.ViewModel.ShowFishingCommand.Execute(null)),
+            ("Инвентарь", () => shell.ViewModel.ShowInventoryCommand.Execute(null)),
+            ("Настройки", () => shell.ViewModel.ShowSettingsCommand.Execute(null)),
+            ("Статистика", () => shell.ViewModel.ShowStatisticsCommand.Execute(null)),
+            ("Стрим", () => shell.ViewModel.ShowStreamingCommand.Execute(null)),
+            ("Telegram", () => shell.ViewModel.ShowTelegramCommand.Execute(null)),
+            ("О программе", () => shell.ViewModel.ShowAboutCommand.Execute(null)),
+        };
+
+        foreach (var (title, navigate) in pages)
+        {
+            navigate();
+            Arrange(shell, new Size(1_280, 800));
+            var pageHost = TestAssert.IsType<ContentControl>(
+                shell.FindName("PageHost"),
+                "Page host is missing");
+            var header = WpfTestVisualTree.FindDescendants<PageHeader>(pageHost)
+                .Single(item => string.Equals(item.Title, title, StringComparison.Ordinal));
+            var stack = TestAssert.IsType<StackPanel>(
+                VisualTreeHelper.GetParent(header),
+                $"{title} page header is not placed in the page content stack");
+            var headerIndex = stack.Children.IndexOf(header);
+            var firstContent = stack.Children
+                .OfType<FrameworkElement>()
+                .Skip(headerIndex + 1)
+                .FirstOrDefault(item => item.Visibility == Visibility.Visible)
+                ?? throw new InvalidOperationException($"{title} page content is missing");
+            var headerBounds = BoundsWithin(stack, header);
+            var contentBounds = BoundsWithin(stack, firstContent);
+            var actualGap = contentBounds.Top - headerBounds.Bottom;
+
+            TestAssert.Equal(
+                0d,
+                firstContent.Margin.Top,
+                $"{title} page adds a second top margin after PageHeader");
+            TestAssert.True(
+                Math.Abs(actualGap - header.Margin.Bottom) <= 0.5,
+                $"{title} page header gap is {actualGap:F1} DIP instead of the shared " +
+                $"{header.Margin.Bottom:F1} DIP");
+        }
     }
 
     private static void SettingsSaveIsAtomic()
@@ -206,6 +263,7 @@ internal static class DesignSystemCompositionTests
         {
             () => shell.ViewModel.ShowOverviewCommand.Execute(null),
             () => shell.ViewModel.ShowFishingCommand.Execute(null),
+            () => shell.ViewModel.ShowInventoryCommand.Execute(null),
             () => shell.ViewModel.ShowSettingsCommand.Execute(null),
             () => shell.ViewModel.ShowStatisticsCommand.Execute(null),
             () => shell.ViewModel.ShowStreamingCommand.Execute(null),
@@ -251,7 +309,7 @@ internal static class DesignSystemCompositionTests
             "Product keyboard traversal did not cover every focused control");
     }
 
-    private static void SettingsComboProjectsSelectedLabel()
+    private static void SettingsComboProjectsRecordLabels()
     {
         var shell = new FishingHostShell
         {
@@ -278,6 +336,31 @@ internal static class DesignSystemCompositionTests
         TestAssert.True(
             visibleText.All(item => !item.Contains("FishingSettingsOption", StringComparison.Ordinal)),
             "Selected settings option leaked its raw record representation");
+
+        var generator = (IItemContainerGenerator)selector.ItemContainerGenerator;
+        using var generation = generator.StartAt(
+            new GeneratorPosition(-1, 0),
+            GeneratorDirection.Forward,
+            allowStartAtRealizedItem: true);
+        var dropDownItem = TestAssert.IsType<ComboBoxItem>(
+            generator.GenerateNext(out _),
+            "Settings dropdown item was not generated");
+        generator.PrepareItemContainer(dropDownItem);
+        var dropDownHost = new Grid();
+        dropDownHost.Children.Add(dropDownItem);
+        Arrange(dropDownHost, new Size(360, 64));
+
+        var dropDownText = WpfTestVisualTree.FindDescendants<TextBlock>(dropDownItem)
+            .Select(item => item.Text)
+            .Where(item => !string.IsNullOrEmpty(item))
+            .ToArray();
+        TestAssert.True(
+            dropDownText.Contains("Продолжить рыбалку", StringComparer.Ordinal),
+            "Settings dropdown item did not render its DisplayMemberPath label");
+        TestAssert.True(
+            dropDownText.All(item =>
+                !item.Contains("FishingSettingsOption", StringComparison.Ordinal)),
+            "Settings dropdown item leaked its raw record representation");
     }
 
     private static void ProductTextInputsUseCommonTemplates()

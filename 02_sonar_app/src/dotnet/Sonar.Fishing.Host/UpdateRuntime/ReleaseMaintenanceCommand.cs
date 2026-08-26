@@ -51,6 +51,7 @@ internal static partial class ReleaseMaintenanceCommand
         var waitTimeoutSeconds = 60;
         var dryRun = false;
         var developmentUnsigned = false;
+        var developerFullAccess = false;
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         for (var index = 1; index < arguments.Count; index++)
@@ -61,6 +62,10 @@ internal static partial class ReleaseMaintenanceCommand
                 case "--development-unsigned":
                     RequireUnique(seen, token);
                     developmentUnsigned = true;
+                    break;
+                case "--developer-full-access":
+                    RequireUnique(seen, token);
+                    developerFullAccess = true;
                     break;
                 case "--dry-run":
                     RequireUnique(seen, token);
@@ -164,6 +169,9 @@ internal static partial class ReleaseMaintenanceCommand
                 Path.GetFullPath(target),
                 backup is null ? null : Path.GetFullPath(backup),
                 dryRun,
+                developerFullAccess
+                    ? LocalReleaseChannel.DeveloperFullAccessUnsigned
+                    : LocalReleaseChannel.DevelopmentUnsigned,
                 legacyLicenseSettings is null
                     ? null
                     : Path.GetFullPath(legacyLicenseSettings)),

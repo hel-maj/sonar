@@ -6,9 +6,7 @@ foreach(FORBIDDEN
         "Sonar.Fishing.BuildProfileCompatibilityProbe"
         "nonshipping-build-profile-candidate-v1"
         "candidate_sha256"
-        "module_executable_scan_incomplete"
-        "world_endpoint_ambiguous"
-        "replay_endpoint_ambiguous")
+        "memory_forensic_image_hash_unavailable")
     list(FILTER ENGINE_STRINGS INCLUDE REGEX "${FORBIDDEN}")
     if(ENGINE_STRINGS)
         message(FATAL_ERROR "Shipping Engine contains diagnostic marker: ${FORBIDDEN}")

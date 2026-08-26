@@ -21,16 +21,16 @@ internal static class UiGalleryRendererTests
     private static void CoverageIsComplete()
     {
         var definitions = UiGalleryRenderer.Definitions;
-        TestAssert.Equal(180, definitions.Count, "UI gallery render matrix is incomplete");
+        TestAssert.Equal(204, definitions.Count, "UI gallery render matrix is incomplete");
         TestAssert.Equal(
-            180,
+            204,
             definitions.Select(definition =>
                 $"{definition.PageId}/{definition.VariantId}/{definition.LayoutId}/{definition.DpiPercent}")
                 .Distinct(StringComparer.Ordinal)
                 .Count(),
             "UI gallery render matrix contains duplicate cases");
         TestAssert.Equal(
-            9,
+            11,
             definitions.Select(definition => definition.PageId)
                 .Distinct(StringComparer.Ordinal)
                 .Count(),

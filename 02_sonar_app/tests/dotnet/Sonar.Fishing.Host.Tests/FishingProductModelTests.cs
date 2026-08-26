@@ -25,13 +25,14 @@ internal static class FishingProductModelTests
     private static void PageCatalogPreservesUnion()
     {
         var pages = FishingProductPageCatalog.All;
-        TestAssert.Equal(8, pages.Count, "Production page catalog count changed");
+        TestAssert.Equal(9, pages.Count, "Production page catalog count changed");
         TestAssert.True(
             pages.Select(page => page.Title).SequenceEqual(
             [
                 "Обзор",
                 "Лицензия",
                 "Рыбалка",
+                "Инвентарь",
                 "Настройки",
                 "Статистика",
                 "Стрим",

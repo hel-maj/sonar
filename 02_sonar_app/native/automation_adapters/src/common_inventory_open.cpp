@@ -22,19 +22,13 @@ namespace {
 class common_inventory_open_source final : public inventory_open_source {
  public:
   common_inventory_open_source() {
-    const auto selected = selected_common_inventory_open_policy();
     sonar::majestic::cef_inventory::acquisition_policy policy;
-    policy.profile =
-        sonar::majestic::cef_inventory::majestic_client_1_20_7_candidate;
-    policy.allow_closed_open_state_bootstrap =
-        selected.closed_state_bootstrap_approved;
-    const auto approval = selected.candidate_profile_approved
-        ? sonar::majestic::cef_inventory::nonshipping_profile_approval::
-              majestic_client_1_20_7_candidate
-        : sonar::majestic::cef_inventory::nonshipping_profile_approval::denied;
+    // A coherent semantic CLOSED root remains useful to Fishing, but this
+    // never bypasses Common's trusted-publisher and file/process proof.
+    policy.allow_closed_open_state_bootstrap = true;
     acquisition_ = sonar::majestic::cef_inventory::
-        create_win32_inventory_open_acquisition(
-            policy, approval, selected.observation_enabled);
+        create_win32_trusted_publisher_inventory_open_acquisition(
+            policy, true);
   }
 
   [[nodiscard]] inventory_open_source_result capture(
@@ -105,15 +99,6 @@ class steady_inventory_retry_clock final : public inventory_retry_clock {
 };
 
 }  // namespace
-
-common_inventory_open_composition_policy
-selected_common_inventory_open_policy() noexcept {
-#if defined(SONAR_FISHING_DEVELOPER_FULL_ACCESS)
-  return common_inventory_open_policy_for_build<true>();
-#else
-  return common_inventory_open_policy_for_build<false>();
-#endif
-}
 
 std::unique_ptr<inventory_open_source> make_common_inventory_open_source()
     noexcept {

@@ -36,7 +36,8 @@ const std::string& event_delivery_error::reason() const noexcept {
 
 event_outbox::event_outbox(const event_delivery_limits limits)
     : priority_(limits.safety, limits.lifecycle, limits.normal),
-      latest_snapshot_(limits.latest_snapshot_bytes) {}
+      latest_session_snapshot_(limits.latest_session_snapshot_bytes),
+      latest_inventory_snapshot_(limits.latest_inventory_snapshot_bytes) {}
 
 void event_outbox::enqueue_priority(
     const std::span<const std::byte> payload,
@@ -48,12 +49,25 @@ void event_outbox::enqueue_priority(
   }
 }
 
-void event_outbox::publish_latest_snapshot(
+void event_outbox::publish_latest_session_snapshot(
     const std::span<const std::byte> payload) {
   std::string_view reason;
-  if (!latest_snapshot_.publish(payload, reason)) {
+  if (!latest_session_snapshot_.publish(payload, reason)) {
     throw event_delivery_error(
-        reason.empty() ? "event_snapshot_publish_failed" : std::string(reason));
+        reason.empty()
+            ? "event_session_snapshot_publish_failed"
+            : std::string(reason));
+  }
+}
+
+void event_outbox::publish_latest_inventory_snapshot(
+    const std::span<const std::byte> payload) {
+  std::string_view reason;
+  if (!latest_inventory_snapshot_.publish(payload, reason)) {
+    throw event_delivery_error(
+        reason.empty()
+            ? "event_inventory_snapshot_publish_failed"
+            : std::string(reason));
   }
 }
 
@@ -61,14 +75,36 @@ std::optional<std::vector<std::byte>> event_outbox::take_next() {
   if (auto priority = priority_.try_dequeue(); priority.has_value()) {
     return priority;
   }
-  return latest_snapshot_.take();
+  if (take_inventory_next_) {
+    if (auto inventory = latest_inventory_snapshot_.take();
+        inventory.has_value()) {
+      take_inventory_next_ = false;
+      return inventory;
+    }
+    if (auto session = latest_session_snapshot_.take(); session.has_value()) {
+      take_inventory_next_ = true;
+      return session;
+    }
+  } else {
+    if (auto session = latest_session_snapshot_.take(); session.has_value()) {
+      take_inventory_next_ = true;
+      return session;
+    }
+    if (auto inventory = latest_inventory_snapshot_.take();
+        inventory.has_value()) {
+      take_inventory_next_ = false;
+      return inventory;
+    }
+  }
+  return std::nullopt;
 }
 
 bool event_outbox::has_pending() const {
   return priority_.usage(sonar::platform::ipc::frame_priority::safety).count != 0 ||
       priority_.usage(sonar::platform::ipc::frame_priority::lifecycle).count != 0 ||
       priority_.usage(sonar::platform::ipc::frame_priority::normal).count != 0 ||
-      latest_snapshot_.pending_bytes() != 0;
+      latest_session_snapshot_.pending_bytes() != 0 ||
+      latest_inventory_snapshot_.pending_bytes() != 0;
 }
 
 event_delivery_usage event_outbox::usage() const {
@@ -77,8 +113,14 @@ event_delivery_usage event_outbox::usage() const {
       .lifecycle = priority_.usage(
           sonar::platform::ipc::frame_priority::lifecycle),
       .normal = priority_.usage(sonar::platform::ipc::frame_priority::normal),
-      .latest_snapshot_bytes = latest_snapshot_.pending_bytes(),
-      .coalesced_snapshot_count = latest_snapshot_.coalesced_count(),
+      .latest_session_snapshot_bytes =
+          latest_session_snapshot_.pending_bytes(),
+      .latest_inventory_snapshot_bytes =
+          latest_inventory_snapshot_.pending_bytes(),
+      .coalesced_session_snapshot_count =
+          latest_session_snapshot_.coalesced_count(),
+      .coalesced_inventory_snapshot_count =
+          latest_inventory_snapshot_.coalesced_count(),
   };
 }
 
@@ -159,11 +201,19 @@ void event_writer::enqueue_priority(
   state_->wake.notify_one();
 }
 
-void event_writer::publish_latest_snapshot(
+void event_writer::publish_latest_session_snapshot(
     const std::span<const std::byte> payload) {
   const std::scoped_lock lock(state_->gate);
   state_->require_healthy_and_accepting();
-  state_->outbox.publish_latest_snapshot(payload);
+  state_->outbox.publish_latest_session_snapshot(payload);
+  state_->wake.notify_one();
+}
+
+void event_writer::publish_latest_inventory_snapshot(
+    const std::span<const std::byte> payload) {
+  const std::scoped_lock lock(state_->gate);
+  state_->require_healthy_and_accepting();
+  state_->outbox.publish_latest_inventory_snapshot(payload);
   state_->wake.notify_one();
 }
 

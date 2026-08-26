@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "tools": [
+    {
+      "id": "ffmpeg",
+      "file_name": "ffmpeg.exe",
+      "resource_name": "Sonar.Fishing.Host.Streaming.ffmpeg.exe",
+      "version": "8.1.1-essentials_build-www.gyan.dev",
+      "sha256": "228D7A8556258DE907FDB55F36850078EBC7680B84EC30D84EA02E99BEC1D1EB"
+    },
+    {
+      "id": "cloudflared",
+      "file_name": "cloudflared.exe",
+      "resource_name": "Sonar.Fishing.Host.Streaming.cloudflared.exe",
+      "version": "2026.5.2",
+      "sha256": "20B9638F685333D623798E733EFFBAD2487093F15BA592F6C7752360FF3B7AB7"
+    }
+  ]
+}

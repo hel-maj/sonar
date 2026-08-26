@@ -34,7 +34,7 @@
                 </common:PageHeader>
 
                 <common:NotificationBanner
-                    Margin="0,24,0,0"
+                    Margin="0,0,0,24"
                     Header="{Binding ViewModel.SaveStatus, ElementName=Root}"
                     Tone="Warning">
                     <common:NotificationBanner.Style>
@@ -51,9 +51,7 @@
                     </common:NotificationBanner.Style>
                 </common:NotificationBanner>
 
-                <common:SettingsSection
-                    Margin="0,24,0,0"
-                    Header="Поведение">
+                <common:SettingsSection Header="Поведение">
                     <StackPanel>
                         <common:SettingItem Header="Автоматически использовать еду" Description="Восстанавливать показатели игрока по заданным порогам">
                             <common:ToggleSwitch IsChecked="{Binding ViewModel.AutoMeal, ElementName=Root, Mode=TwoWay}" />

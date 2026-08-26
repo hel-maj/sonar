@@ -1,8 +1,8 @@
 # Fishing live observation preflight
 
-Статус: non-shipping prerequisite реализован и принят offline. Первый live GTA
-pass 2026-08-24 выполнился ровно один раз и fail-closed обнаружил unsupported
-game build; дальнейших live reads в этой попытке не было.
+Статус: non-shipping prerequisite реализован и принят offline. Исторический
+live pass 2026-08-24 отражает удалённый SHA-gated admission; после ADR-0005
+нужен свежий acceptance текущего trusted/semantic path.
 
 ## Назначение
 
@@ -10,12 +10,13 @@ game build; дальнейших live reads в этой попытке не бы
 production observation path перед отдельной проверкой автоматизации:
 
 ```text
-exact GTA5.exe resolver
+exact GTA5.exe target resolver
   -> current foreground client snapshot
-  -> exact executable hash / embedded profile selection
+  -> Common trusted-module lease / Rockstar publisher
   -> one coherent GDI client frame
   -> production Fishing stage detector
-  -> one bounded reeling memory aggregate
+  -> unique semantic player/replay/fish anchors
+  -> one bounded reeling memory aggregate under the same authority fingerprint
   -> sanitized readiness result
 ```
 
@@ -34,7 +35,8 @@ adapter-а инертен; observation начинается только пос�
 отклоняется до выделения frame buffer, если client area больше `16 777 216`
 пикселей. Memory resolver сохраняет существующие bounds: module scan не больше
 256 MiB, один read не больше 256 KiB, не больше 96 regions и 1 MiB aggregate.
-Любая смена process/window generation, geometry, profile или sequence даёт
+Любая смена process/window generation, Common authority fingerprint, geometry,
+semantic layout или sequence даёт
 fail-closed result.
 
 Stdout содержит только schema version, общий флаг и шесть readiness flags:
@@ -45,20 +47,21 @@ confidence/stage и memory values наружу не выводятся.
 ## Безопасная команда разработчика
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_live_observation_preflight.ps1 -ConfirmedLiveReadOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_live_observation_preflight.ps1
 ```
 
 Скрипт сначала выполняет offline gate/build, затем проверяет imports готового
 EXE на input API и network DLL. Для уже принятой сборки можно явно добавить
-`-NoBuild`. После подтверждения скрипт даёт минимум пять секунд, чтобы вернуть
-GTA на передний план, и делает ровно один observation pass.
+`-NoBuild`. Сам явный запуск команды является contextual request; отдельный
+checkbox/switch подтверждения не дублируется. Скрипт даёт минимум пять секунд,
+чтобы вернуть GTA на передний план, и делает ровно один observation pass.
 
 Перед каждым live запуском нужен новый gate:
 
-1. Запустить поддерживаемую сборку GTA/Majestic и перейти в сцену рыбалки с
+1. Запустить GTA/Majestic и перейти в сцену рыбалки с
    активной рыбой, чтобы reeling memory aggregate был наблюдаем.
 2. Закрыть игровые меню и оставить client area видимой, не свёрнутой.
-3. Запустить команду с `-ConfirmedLiveReadOnly`.
+3. Запустить команду или одноимённое действие Developer Launcher.
 4. Во время пятисекундного отсчёта вернуть GTA на передний план и не менять
    окно/разрешение до результата.
 5. Принять только `ready=true`; любой другой reason не разрешает physical-input
@@ -74,7 +77,7 @@ CMake option `SONAR_FISHING_BUILD_LIVE_OBSERVATION_PREFLIGHT` по умолча�
 проверяет:
 
 - pure runner success/failure, one-shot ordering и capture budget;
-- fail-closed unsupported build, detector и memory paths;
+- fail-closed trusted admission, semantic ambiguity, detector и memory paths;
 - exact coarse JSON allowlist без fine/sensitive данных;
 - source boundary без mutation API и запуск без подтверждения с exit code 64;
 - normal native CTest/IPC regression suite.
@@ -88,15 +91,16 @@ preflight не попадает в shipping/install/update bundle.
 episode или устойчивость длительной сессии. Эти проверки остаются отдельными
 явно подтверждаемыми этапами.
 
-Первый live результат имел `process/window/build/capture=true`,
+Исторический live результат имел `process/window/build/capture=true`,
 `profile/memory=false`, reason `game_build_unsupported`. Единственный frozen
-profile не совпал с текущим executable hash; hash намеренно не входит в coarse
-JSON. Production registry не изменялся. Для отдельной evidence-проверки нового
+profile не совпал с executable hash в старой архитектуре; hash намеренно не
+входит в coarse JSON. Этот receipt не блокирует production после ADR-0005.
+Для отдельной forensic evidence-проверки
 hash подготовлен [build-profile compatibility probe](BUILD_PROFILE_COMPATIBILITY_PROBE.md),
 который также не является wildcard fallback или registry admission.
 
 Единственный последующий compatibility pass получил candidate SHA-256, но
 fail-closed завершился `pattern_scan_incomplete`: cross-pattern uniqueness,
-fish identity и coherent snapshot не подтверждены. Поэтому новый hash не
-enrolled, а inventory open/close и другие physical-input проверки не
-выполнялись.
+fish identity и coherent snapshot не подтверждены. Он остаётся историческим
+forensic receipt; свежий production preflight обязан доказать те же semantic
+инварианты напрямую без hash enrollment.

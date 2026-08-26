@@ -6,13 +6,22 @@ set(SONAR_PLATFORM_SCHEMA_ROOT
     "${SONAR_COMMON_NATIVE_PACKAGE}/share/sonar-platform-ipc/contracts")
 set(SONAR_PLATFORM_SCHEMA
     "${SONAR_PLATFORM_SCHEMA_ROOT}/ipc/v1/sonar_platform.proto")
+set(SONAR_INVENTORY_SCHEMA
+    "${SONAR_COMMON_INVENTORY_CONTRACT_ROOT}/inventory/v1/sonar_inventory.proto")
 set(SONAR_FISHING_GENERATED_ROOT "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(SONAR_FISHING_GENERATED_HEADER
     "${SONAR_FISHING_GENERATED_ROOT}/ipc/v1/sonar_fishing.pb.h")
 set(SONAR_FISHING_GENERATED_SOURCE
     "${SONAR_FISHING_GENERATED_ROOT}/ipc/v1/sonar_fishing.pb.cc")
+set(SONAR_INVENTORY_GENERATED_HEADER
+    "${SONAR_FISHING_GENERATED_ROOT}/inventory/v1/sonar_inventory.pb.h")
+set(SONAR_INVENTORY_GENERATED_SOURCE
+    "${SONAR_FISHING_GENERATED_ROOT}/inventory/v1/sonar_inventory.pb.cc")
 
-foreach(required_file IN ITEMS "${SONAR_FISHING_SCHEMA}" "${SONAR_PLATFORM_SCHEMA}")
+foreach(required_file IN ITEMS
+    "${SONAR_FISHING_SCHEMA}"
+    "${SONAR_PLATFORM_SCHEMA}"
+    "${SONAR_INVENTORY_SCHEMA}")
     if(NOT EXISTS "${required_file}")
         message(FATAL_ERROR "Missing IPC schema: ${required_file}")
     endif()
@@ -24,18 +33,26 @@ add_custom_command(
     OUTPUT
         "${SONAR_FISHING_GENERATED_HEADER}"
         "${SONAR_FISHING_GENERATED_SOURCE}"
+        "${SONAR_INVENTORY_GENERATED_HEADER}"
+        "${SONAR_INVENTORY_GENERATED_SOURCE}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${SONAR_FISHING_GENERATED_ROOT}"
     COMMAND "${SONAR_PROTOC_EXECUTABLE}"
         "--proto_path=${SONAR_FISHING_CONTRACT_ROOT}"
         "--proto_path=${SONAR_PLATFORM_SCHEMA_ROOT}"
+        "--proto_path=${SONAR_COMMON_INVENTORY_CONTRACT_ROOT}"
         "--cpp_out=${SONAR_FISHING_GENERATED_ROOT}"
         "${SONAR_FISHING_SCHEMA}"
-    DEPENDS "${SONAR_FISHING_SCHEMA}" "${SONAR_PLATFORM_SCHEMA}"
+        "${SONAR_INVENTORY_SCHEMA}"
+    DEPENDS
+        "${SONAR_FISHING_SCHEMA}"
+        "${SONAR_PLATFORM_SCHEMA}"
+        "${SONAR_INVENTORY_SCHEMA}"
     VERBATIM
 )
 
 add_library(SonarFishingIpcContracts STATIC
     "${SONAR_FISHING_GENERATED_SOURCE}"
+    "${SONAR_INVENTORY_GENERATED_SOURCE}"
 )
 add_library(Sonar::FishingIpcContracts ALIAS SonarFishingIpcContracts)
 target_compile_features(SonarFishingIpcContracts PUBLIC cxx_std_20)
@@ -48,6 +65,7 @@ target_link_libraries(SonarFishingIpcContracts
 target_compile_options(SonarFishingIpcContracts PRIVATE /permissive- /utf-8)
 set_source_files_properties(
     "${SONAR_FISHING_GENERATED_SOURCE}"
+    "${SONAR_INVENTORY_GENERATED_SOURCE}"
     PROPERTIES COMPILE_OPTIONS "/W0;/WX-"
 )
 
@@ -63,6 +81,26 @@ target_link_libraries(SonarFishingEventDelivery
     PUBLIC Sonar::PlatformIpcTransport
 )
 target_compile_options(SonarFishingEventDelivery
+    PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
+)
+
+add_library(SonarFishingInventoryObservation STATIC
+    src/inventory_observation_worker.cpp
+    src/production_inventory_sampler.cpp
+)
+add_library(
+    Sonar::FishingInventoryObservation
+    ALIAS SonarFishingInventoryObservation
+)
+target_compile_features(SonarFishingInventoryObservation PUBLIC cxx_std_20)
+target_include_directories(SonarFishingInventoryObservation
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_link_libraries(SonarFishingInventoryObservation
+    PUBLIC Sonar::MajesticCefInventoryContent
+    PRIVATE Sonar::MajesticCefInventory
+)
+target_compile_options(SonarFishingInventoryObservation
     PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
 )
 
@@ -122,6 +160,7 @@ set(SONAR_FISHING_ENGINE_RUNTIME_SOURCES
     src/engine_protocol.cpp
     src/engine_runtime.cpp
     src/entitlement_commands.cpp
+    src/inventory_events.cpp
     src/session_commands.cpp
     src/settings_commands.cpp
 )
@@ -140,6 +179,7 @@ if(SONAR_FISHING_BUILD_OFFLINE_IPC)
             Sonar::FishingEntitlement
             Sonar::FishingIpcContracts
             Sonar::FishingEventDelivery
+            Sonar::FishingInventoryObservation
             Sonar::FishingSessionControl
             Sonar::FishingProductionComposition
             Sonar::PlatformIpcTransport
@@ -168,6 +208,7 @@ target_link_libraries(SonarFishingEngine
         Sonar::FishingEntitlement
         Sonar::FishingIpcContracts
         Sonar::FishingEventDelivery
+        Sonar::FishingInventoryObservation
         Sonar::FishingSessionControl
         Sonar::FishingProductionComposition
         Sonar::PlatformIpcTransport
@@ -192,6 +233,40 @@ add_executable(SonarFishingIpcContractsTests
 
 add_executable(SonarFishingEventDeliveryTests
     tests/event_delivery_test.cpp
+)
+
+add_executable(SonarFishingInventoryEventsTests
+    tests/inventory_events_test.cpp
+    src/inventory_events.cpp
+    src/engine_protocol.cpp
+)
+
+add_executable(SonarFishingInventoryObservationTests
+    tests/inventory_observation_worker_test.cpp
+)
+target_compile_features(
+    SonarFishingInventoryObservationTests PRIVATE cxx_std_20
+)
+target_link_libraries(SonarFishingInventoryObservationTests
+    PRIVATE Sonar::FishingInventoryObservation
+)
+target_compile_options(SonarFishingInventoryObservationTests
+    PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
+)
+target_compile_features(SonarFishingInventoryEventsTests PRIVATE cxx_std_20)
+target_include_directories(SonarFishingInventoryEventsTests
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(SonarFishingInventoryEventsTests
+    PRIVATE
+        Sonar::FishingIpcContracts
+        Sonar::FishingEventDelivery
+        Sonar::FishingSessionControl
+        Sonar::MajesticCefInventoryContent
+        Sonar::PlatformIpcTransport
+)
+target_compile_options(SonarFishingInventoryEventsTests
+    PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
 )
 target_compile_features(SonarFishingEventDeliveryTests PRIVATE cxx_std_20)
 target_link_libraries(SonarFishingEventDeliveryTests
@@ -241,6 +316,14 @@ add_test(
 add_test(
     NAME sonar_fishing.ipc.event_delivery
     COMMAND SonarFishingEventDeliveryTests
+)
+add_test(
+    NAME sonar_fishing.ipc.inventory_events
+    COMMAND SonarFishingInventoryEventsTests
+)
+add_test(
+    NAME sonar_fishing.ipc.inventory_observation
+    COMMAND SonarFishingInventoryObservationTests
 )
 add_test(
     NAME sonar_fishing.ipc.session_control

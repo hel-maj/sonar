@@ -11,6 +11,8 @@ public sealed class HostLifecycleCoordinator : IHostLifecycle
     private readonly ITelegramRuntimeLifecycle? _telegram;
     private readonly ILicenseRuntimeLifecycle? _license;
     private readonly IHostHotkeyRuntimeLifecycle? _hotkeys;
+    private readonly IDisposable? _uiLifetime;
+    private readonly IAsyncDisposable? _asyncLifetime;
     private readonly object _sync = new();
     private Task? _startupTask;
     private Task? _stopTask;
@@ -28,12 +30,16 @@ public sealed class HostLifecycleCoordinator : IHostLifecycle
         EngineHealthViewModel engineHealth,
         ITelegramRuntimeLifecycle? telegram,
         ILicenseRuntimeLifecycle? license,
-        IHostHotkeyRuntimeLifecycle? hotkeys = null)
+        IHostHotkeyRuntimeLifecycle? hotkeys = null,
+        IDisposable? uiLifetime = null,
+        IAsyncDisposable? asyncLifetime = null)
     {
         _engineHealth = engineHealth ?? throw new ArgumentNullException(nameof(engineHealth));
         _telegram = telegram;
         _license = license;
         _hotkeys = hotkeys;
+        _uiLifetime = uiLifetime;
+        _asyncLifetime = asyncLifetime;
     }
 
     public Task StartAsync()
@@ -95,7 +101,24 @@ public sealed class HostLifecycleCoordinator : IHostLifecycle
         }
         finally
         {
-            await _engineHealth.StopAsync().ConfigureAwait(false);
+            try
+            {
+                await _engineHealth.StopAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                try
+                {
+                    if (_asyncLifetime is not null)
+                    {
+                        await _asyncLifetime.DisposeAsync().ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _uiLifetime?.Dispose();
+                }
+            }
         }
 
         if (startupFailure is not null)

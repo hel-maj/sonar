@@ -2,6 +2,7 @@ using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.SettingsPersistence;
 using Sonar.Fishing.Host.EngineIntegration.Notifications;
+using Sonar.Fishing.Host.EngineIntegration.Inventory;
 
 namespace Sonar.Fishing.Host.EngineIntegration.Supervision;
 
@@ -9,7 +10,10 @@ namespace Sonar.Fishing.Host.EngineIntegration.Supervision;
 /// Product policy for one long-lived Engine session. Generic process containment
 /// remains owned by Sonar.Platform.Processes.
 /// </summary>
-internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngineNotificationSource
+internal sealed class EngineSessionSupervisor :
+    IAsyncDisposable,
+    IFishingEngineNotificationSource,
+    IFishingInventorySnapshotSource
 {
     private readonly IEngineManagedSessionFactory factory;
     private readonly EngineRestartPolicy policy;
@@ -27,6 +31,8 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngine
     private Action<FishingSessionStateSnapshot>? sessionStateHandler;
     private IEngineNotificationFrameSource? notificationFrameSource;
     private Action<FishingEngineNotificationFrame>? notificationFrameHandler;
+    private IEngineInventorySnapshotFrameSource? inventoryFrameSource;
+    private Action<FishingInventorySnapshotFrame>? inventoryFrameHandler;
     private Task? monitorTask;
     private Exception? lastMonitorFailure;
     private ulong generation;
@@ -53,6 +59,8 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngine
     internal event Action<FishingSessionStateSnapshot>? SessionStateChanged;
 
     public event Action<FishingEngineNotificationReceipt>? NotificationReceived;
+
+    public event Action<FishingInventorySnapshotReceipt>? InventorySnapshotReceived;
 
     internal async Task<EngineSupervisorSnapshot> CheckAsync(
         CancellationToken cancellationToken)
@@ -324,6 +332,13 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngine
                 candidateFrameHandler = frame => OnNotificationReceived(binding, frame);
                 frameSource.NotificationReceived += candidateFrameHandler;
             }
+            Action<FishingInventorySnapshotFrame>? candidateInventoryHandler = null;
+            if (candidate is IEngineInventorySnapshotFrameSource inventorySource)
+            {
+                candidateInventoryHandler = frame =>
+                    OnInventorySnapshotReceived(binding, frame);
+                inventorySource.InventorySnapshotReceived += candidateInventoryHandler;
+            }
             lock (eventForwardingGate)
             {
                 session = candidate;
@@ -333,6 +348,8 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngine
                 sessionStateHandler = candidateStateHandler;
                 notificationFrameSource = candidate as IEngineNotificationFrameSource;
                 notificationFrameHandler = candidateFrameHandler;
+                inventoryFrameSource = candidate as IEngineInventorySnapshotFrameSource;
+                inventoryFrameHandler = candidateInventoryHandler;
             }
             restartDelayRequired = false;
             lastMonitorFailure = null;
@@ -489,9 +506,11 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngine
     private async ValueTask RetireSessionAsync()
     {
         IEngineManagedSession? retiring;
+        EngineGenerationBinding? retiringBinding;
         lock (eventForwardingGate)
         {
             retiring = session;
+            retiringBinding = activeEventBinding;
             session = null;
             activeEventBinding = null;
         }
@@ -508,11 +527,34 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngine
             }
             notificationFrameSource = null;
             notificationFrameHandler = null;
+            if (inventoryFrameSource is not null && inventoryFrameHandler is not null)
+            {
+                inventoryFrameSource.InventorySnapshotReceived -= inventoryFrameHandler;
+            }
+            inventoryFrameSource = null;
+            inventoryFrameHandler = null;
             sessionStateSource = null;
             sessionStateHandler = null;
             lock (eventForwardingGate)
             {
                 SessionStateChanged?.Invoke(FishingSessionStateSnapshot.Empty);
+                if (retiringBinding is not null)
+                {
+                    try
+                    {
+                        InventorySnapshotReceived?.Invoke(
+                            new FishingInventorySnapshotReceipt(
+                                retiringBinding.Generation,
+                                ulong.MaxValue,
+                                0,
+                                Sonar.Fishing.Host.InventoryPage.InventoryProductState.Unknown));
+                    }
+                    catch
+                    {
+                        // The process is already retired; presentation cleanup
+                        // cannot delay replacement generation startup.
+                    }
+                }
             }
             await retiring.DisposeAsync().ConfigureAwait(false);
         }
@@ -554,6 +596,32 @@ internal sealed class EngineSessionSupervisor : IAsyncDisposable, IFishingEngine
             {
                 // Notification consumers are observational and cannot own Engine
                 // session lifecycle or runtime authority.
+            }
+        }
+    }
+
+    private void OnInventorySnapshotReceived(
+        EngineGenerationBinding binding,
+        FishingInventorySnapshotFrame frame)
+    {
+        lock (eventForwardingGate)
+        {
+            if (!ReferenceEquals(activeEventBinding, binding))
+            {
+                return;
+            }
+            try
+            {
+                InventorySnapshotReceived?.Invoke(new FishingInventorySnapshotReceipt(
+                    binding.Generation,
+                    frame.Sequence,
+                    frame.CapturedAtUnixMs,
+                    frame.Snapshot));
+            }
+            catch
+            {
+                // Inventory presentation is observational and cannot own the
+                // Engine process or revoke runtime authority.
             }
         }
     }

@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-    [switch]$ConfirmedLiveBuildProfileCompatibility,
     [switch]$NoBuild,
     [ValidateRange(5, 10)]
     [int]$ReturnToGameDelaySeconds = 5,
@@ -10,10 +9,6 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-
-if (-not $ConfirmedLiveBuildProfileCompatibility) {
-    throw "live_build_profile_compatibility_confirmation_required"
-}
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $buildRoot = Join-Path $productRoot "build\native\windows-msvc-v143-ipc"

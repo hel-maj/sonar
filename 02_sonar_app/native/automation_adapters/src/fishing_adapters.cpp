@@ -210,8 +210,8 @@ memory_snapshot_result resolved_fishing_memory_source::capture(
     memory_observation::coherent_memory_snapshot snapshot{
         .sequence = sequence,
         .captured_at_steady_ns = captured_at_steady_ns,
-        .profile_id = std::string(common_inventory_open_package_version),
-        .profile_revision = 1U,
+        .profile_id = std::string(common_inventory_open_authority_id),
+        .profile_revision = common_inventory_open_authority_revision,
         .game_generation = game_generation,
         .inventory_open_state = observed.state,
     };

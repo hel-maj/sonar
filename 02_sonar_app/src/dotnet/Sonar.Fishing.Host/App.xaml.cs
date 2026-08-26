@@ -284,6 +284,7 @@ public partial class App : Application
             healthUseCase,
             automationRuntime,
             supervisor,
+            supervisor,
             _licenseRuntime,
             hotkeyRuntime,
             activateLicense,

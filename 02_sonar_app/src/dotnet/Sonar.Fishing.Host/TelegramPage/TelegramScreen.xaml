@@ -38,7 +38,7 @@
 
                 <common:NotificationBanner
                     x:Name="TelegramInteractionBanner"
-                    Margin="0,24,0,0"
+                    Margin="0,0,0,24"
                     Header="{Binding ViewModel.InteractionMessage, ElementName=Root}"
                     Tone="Warning">
                     <common:NotificationBanner.Style>
@@ -58,7 +58,6 @@
                 </common:NotificationBanner>
 
                 <common:SettingsSection
-                    Margin="0,24,0,0"
                     Header="Подключение"
                     Description="Токен хранится только на этом компьютере.">
                     <StackPanel>

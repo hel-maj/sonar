@@ -20,6 +20,25 @@ target_compile_options(SonarFishingBuildProfileCompatibilityProbeCore
     PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
 )
 
+add_library(SonarFishingForensicMemoryConnector STATIC
+    src/windows_forensic_memory_connector.cpp
+)
+target_compile_features(
+    SonarFishingForensicMemoryConnector PRIVATE cxx_std_20
+)
+target_include_directories(
+    SonarFishingForensicMemoryConnector
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(
+    SonarFishingForensicMemoryConnector
+    PRIVATE Sonar::FishingMemoryObservation bcrypt
+)
+target_compile_options(
+    SonarFishingForensicMemoryConnector
+    PRIVATE /permissive- /utf-8 /W4 /WX /EHsc
+)
+
 add_executable(SonarFishingBuildProfileCompatibilityProbeTests
     tests/build_profile_compatibility_probe_test.cpp
 )
@@ -78,7 +97,6 @@ add_test(
 add_executable(SonarFishingBuildProfileCompatibilityProbeTool
     src/main.cpp
     src/candidate_reeling_validator.cpp
-    src/executable_module_reader.cpp
     src/windows_compatibility_port.cpp
 )
 set_target_properties(
@@ -89,11 +107,14 @@ target_compile_features(
     SonarFishingBuildProfileCompatibilityProbeTool PRIVATE cxx_std_20
 )
 target_include_directories(SonarFishingBuildProfileCompatibilityProbeTool
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../memory_observation/src"
 )
 target_link_libraries(SonarFishingBuildProfileCompatibilityProbeTool
     PRIVATE
         Sonar::FishingBuildProfileCompatibilityProbeCore
+        SonarFishingForensicMemoryConnector
         Sonar::FishingRuntimePlatform
         Sonar::FishingMemoryObservation
 )
@@ -134,6 +155,7 @@ target_link_libraries(
     SonarFishingInventoryStateCharacterizationTool
     PRIVATE
         Sonar::FishingBuildProfileCompatibilityProbeCore
+        SonarFishingForensicMemoryConnector
         Sonar::FishingMemoryObservation
 )
 target_compile_options(
@@ -156,7 +178,6 @@ add_test(
 
 add_executable(SonarFishingBuildProfileCompatibilityValidatorTests
     src/candidate_reeling_validator.cpp
-    src/executable_module_reader.cpp
     tests/candidate_reeling_validator_test.cpp
 )
 target_compile_features(
@@ -164,7 +185,9 @@ target_compile_features(
 )
 target_include_directories(
     SonarFishingBuildProfileCompatibilityValidatorTests
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../memory_observation/src"
 )
 target_link_libraries(SonarFishingBuildProfileCompatibilityValidatorTests
     PRIVATE
