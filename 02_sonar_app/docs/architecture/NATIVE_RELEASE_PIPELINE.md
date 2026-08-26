@@ -285,11 +285,13 @@ unsigned smoke не является доказательством signing ил
   Фактический update установленной `1.0.2-local` принят как `1.0.3-local`, а
   отдельный 30-секундный lifecycle подтвердил Engine crash/replacement, два
   normal exit и повторный exact allowlist/no-Python gate;
-- current Common UI 0.2.21 visual artifact находится в
+- last completed pre-0.2.22 Common UI visual artifact находится в
   `build/ui-gallery-0221-final/`: 204 PNG для всех product pages/variants,
   compact/medium/expanded layouts и 100/125/150/200% DPI. Manifest фиксирует
-  `CommonUiVersion=0.2.21` и имеет SHA-256
+  historical `CommonUiVersion=0.2.21` и имеет SHA-256
   `43A2D07AEACEC9ACFE493DBF8D204EBA23333467B9C3DE3C7C7F9FE1F58DA00C`;
+- current source exact-pins immutable Common UI 0.2.22 and passes a zero-warning
+  Host build; a fresh product visual corpus remains an explicit acceptance gate;
 
 - local development-unsigned wrapper исторически прошёл atomic install,
   update с Common UI `0.2.17` на `0.2.18`, rollback и synthetic interrupted

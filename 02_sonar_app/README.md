@@ -33,7 +33,7 @@ Host/Engine composition; запуск рыбалки остаётся fail-close
 - `docs/architecture` - ADR, migration evidence и production cutover checklist.
 
 Общие IPC, process supervision, licensing verification,
-`Sonar.UI.Wpf 0.2.21`, `SonarPlatformWindows 0.1.9`,
+`Sonar.UI.Wpf 0.2.22`, `SonarPlatformWindows 0.1.9`,
 `SonarMajesticCatalog 1.0.0` и CEF inventory facade
 `SonarMajesticCefInventory 0.1.19` потребляются как точные immutable Sonar
 Common packages. Setup/release проверяют manifest facade с SHA-256

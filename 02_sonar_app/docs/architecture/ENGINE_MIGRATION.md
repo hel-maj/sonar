@@ -429,7 +429,7 @@ Dependency direction проверена по restore assets:
 
 ```text
 Sonar.Fishing.Host
-  -> exact PackageReference Sonar.UI.Wpf [0.2.21]
+  -> exact PackageReference Sonar.UI.Wpf [0.2.22]
   -> Phase 4 Platform IPC PackageReference, currently pinned [0.1.1]
   -> product Sonar.Fishing.Ipc.Contracts ProjectReference
   -> Microsoft Windows Desktop Runtime/SDK references
@@ -437,8 +437,8 @@ Sonar.Fishing.Host
 
 `ProjectReference` или source copy из Common отсутствуют. Product-local
 `ProjectReference` на Fishing contracts добавлен только в Phase 4. Текущий
-UI package 0.2.21 проверен из accepted feed с SHA-256
-`BCF274F21A2BBBB0BC21799D489881AF086929AEA26547EEF4E816590D2D2675`.
+UI package 0.2.22 проверен из accepted feed с SHA-256
+`A2B33A8D7E6F7F4803F8A5D4F703CF091D8D4A18B51F4147413A8D90837BA6A8`.
 Phase 3 WPF tests ссылаются через `ProjectReference` только на product Host
 project.
 
@@ -602,8 +602,8 @@ Managed package hashes frozen workspace feed `.artifacts/sonar-feed` (его м�
   `0CF50FDAFFF00608F0B5742C39A15B3AB24CF79329DA8B07A01404E9F7A45214`;
 - `Sonar.Platform.Processes.0.1.0.nupkg` -
   `03DEE12DCB7F2C30A21921A9198CA5388D93A682B8CCE69658CAD0E1996AE5EB`;
-- `Sonar.UI.Wpf.0.2.21.nupkg` -
-  `BCF274F21A2BBBB0BC21799D489881AF086929AEA26547EEF4E816590D2D2675`.
+- `Sonar.UI.Wpf.0.2.22.nupkg` -
+  `A2B33A8D7E6F7F4803F8A5D4F703CF091D8D4A18B51F4147413A8D90837BA6A8`.
 
 Phase 5 removed temporary Common duplicates:
 

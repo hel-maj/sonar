@@ -100,7 +100,7 @@ $majesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
     $majesticCefInventoryPackage
 $expected = @{
     (Join-Path $commonFeed "Sonar.Inventory.Ipc.Contracts.0.1.0.nupkg") = "C5A771A49D5E9B67E366E3A82AD0066E528B65536BA6B1293EBC0854DE9E3172"
-    (Join-Path $commonFeed "Sonar.UI.Wpf.0.2.21.nupkg") = "BCF274F21A2BBBB0BC21799D489881AF086929AEA26547EEF4E816590D2D2675"
+    (Join-Path $commonFeed "Sonar.UI.Wpf.0.2.22.nupkg") = "A2B33A8D7E6F7F4803F8A5D4F703CF091D8D4A18B51F4147413A8D90837BA6A8"
     (Join-Path $commonFeed "emoji.wpf.0.3.4.nupkg") = "A9C0570F97961E3DC2B2BA9E41EB7B28808733D194742D837653478EECE7D191"
     (Join-Path $commonFeed "stfu.0.1.1.nupkg") = "BDD1BAEEEC5FF16B74D0354B88393D002A6E8ECBB19793AB900B9151CE686B3A"
     (Join-Path $commonFeed "jeremyansel.hlsl.targets.1.0.13.nupkg") = "4F4CC76E9EFD35F605042FB6D8BD64EF1203F2174DED65217779BB049CFB22E8"

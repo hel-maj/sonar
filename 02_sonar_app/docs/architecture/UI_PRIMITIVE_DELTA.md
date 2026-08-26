@@ -1,6 +1,6 @@
 # Sonar Fishing UI primitive delta
 
-Статус: verified migration inventory; frozen Common 0.2.21 adopted
+Статус: verified migration inventory; frozen Common 0.2.22 adopted
 
 Дата: 2026-08-22
 
@@ -164,8 +164,8 @@ policy и live start/stop commands остаются в ledger как Pending. De
 contained diagnostic receipt. Эти migration states не меняют Common primitive
 contract и не стирают Fishing-specific requirements.
 
-Fishing now consumes frozen `Sonar.UI.Wpf 0.2.21`, SHA-256
-`BCF274F21A2BBBB0BC21799D489881AF086929AEA26547EEF4E816590D2D2675`.
+Fishing now consumes frozen `Sonar.UI.Wpf 0.2.22`, SHA-256
+`A2B33A8D7E6F7F4803F8A5D4F703CF091D8D4A18B51F4147413A8D90837BA6A8`.
 No local responsive shell/sidebar/nav/page-header, dashboard/settings/table/
 master-detail, loading/empty/error/unavailable/dialog/notification or grid
 template was copied. The package supplies available-content-width compact 4,
