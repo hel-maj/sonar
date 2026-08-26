@@ -1491,7 +1491,7 @@ access, pinned file/module identity, region enumeration and exact memory reads.
 Fishing adds Rockstar publisher policy, bounded semantic scan and decoder/
 layout policy; it contains no local signer/file/process verifier. Normal
 Engine instantiates this adapter for reeling only. A separate cancellable Engine
-worker owns exact-pinned Common `SonarMajesticCefInventory 0.1.18` content
+worker owns exact-pinned Common `SonarMajesticCefInventory 0.1.19` content
 provider, so cold discovery/content decode cannot block reeling, control IPC or
 heartbeat. Common owns CEF/V8 discovery, version-independent publisher/file/
 process admission, coherent read transaction, hot binding and product-neutral

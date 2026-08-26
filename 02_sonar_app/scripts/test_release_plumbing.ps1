@@ -452,7 +452,7 @@ try {
     $inventoryPackageGateText = Get-Content -Raw -LiteralPath `
         (Join-Path $PSScriptRoot "common_inventory_package.ps1")
     if ($inventoryPackageGateText -notmatch
-            'EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D' -or
+            '1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612' -or
         $inventoryPackageGateText -notmatch
             'common_inventory_payload_hash_mismatch' -or
         $inventoryPackageGateText -notmatch

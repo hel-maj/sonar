@@ -17,7 +17,7 @@
         "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-native-windows/0.1.9",
         "SONAR_COMMON_NATIVE_LICENSING_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-native-licensing/0.1.2",
         "SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-majestic-catalog/1.0.0",
-        "SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-majestic-cef-inventory/0.1.18"
+        "SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE": "${sourceDir}/../../../.artifacts/sonar-majestic-cef-inventory/0.1.19"
       }
     }
   ],

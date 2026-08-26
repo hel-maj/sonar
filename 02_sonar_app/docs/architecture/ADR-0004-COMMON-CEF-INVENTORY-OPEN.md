@@ -14,9 +14,10 @@ reeling path или повторять на каждом UI frame после `un
 
 ## Решение
 
-Fishing exact-pins установленный `SonarMajesticCefInventory 0.1.18`, targets
+Fishing exact-pins установленный `SonarMajesticCefInventory 0.1.19`, targets
 `Sonar::MajesticCefInventory` и `Sonar::MajesticCefInventoryContent`; SHA-256 его `SHA256SUMS.txt` равен
-`EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D`.
+`1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612`
+из Sonar Common commit `0c4baf0391134f05edd9a62e154001decb593c49`.
 Continuous content factory включает closed-state bootstrap на собственной копии
 policy, поэтому содержимое не зависит от открытости inventory UI. Общий
 `acquisition_policy` остаётся strict-by-default; closed path по-прежнему требует

@@ -512,7 +512,7 @@ if ($actualMajesticCatalogManifestHash -ne $expectedMajesticCatalogManifestHash)
 }
 $resolvedMajesticCefInventoryPackage = Resolve-Directory `
     $CommonMajesticCefInventoryPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.18") `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.19") `
     "Installed Sonar Majestic CEF Inventory package"
 $resolvedMajesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
     $resolvedMajesticCefInventoryPackage

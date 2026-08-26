@@ -35,9 +35,10 @@ Host/Engine composition; запуск рыбалки остаётся fail-close
 Общие IPC, process supervision, licensing verification,
 `Sonar.UI.Wpf 0.2.21`, `SonarPlatformWindows 0.1.9`,
 `SonarMajesticCatalog 1.0.0` и CEF inventory facade
-`SonarMajesticCefInventory 0.1.18` потребляются как точные immutable Sonar
+`SonarMajesticCefInventory 0.1.19` потребляются как точные immutable Sonar
 Common packages. Setup/release проверяют manifest facade с SHA-256
-`EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D` и все
+`1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612`
+из Sonar Common commit `0c4baf0391134f05edd9a62e154001decb593c49` и все
 перечисленные payloads; исходники или sibling checkout Common не используются.
 Inventory content и GTA reeling runtime используют Common trusted-publisher
 facades: точная версия, hash, размер, PE timestamp и заранее известный loaded

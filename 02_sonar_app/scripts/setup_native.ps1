@@ -88,7 +88,7 @@ $majesticCatalogPackage = (Resolve-Path -LiteralPath `
     $majesticCatalogPackage -ErrorAction Stop).Path
 $majesticCefInventoryPackage = if (
     [string]::IsNullOrWhiteSpace($CommonMajesticCefInventoryPackage)) {
-    Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.18"
+    Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.19"
 }
 elseif ([IO.Path]::IsPathRooted($CommonMajesticCefInventoryPackage)) {
     $CommonMajesticCefInventoryPackage

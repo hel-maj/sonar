@@ -29,10 +29,10 @@ logs/
 protobuf code, logo, fish catalog и изображения встроены в два EXE.
 
 Native configure exact-pins installed
-`SonarMajesticCefInventory 0.1.18` / `Sonar::MajesticCefInventory` /
+`SonarMajesticCefInventory 0.1.19` / `Sonar::MajesticCefInventory` /
 `Sonar::MajesticCefInventoryContent`. Setup, full
 offline gate и оба clean release build проверяют SHA-256 manifest
-`EC109F38E0F0BF1428EA63505B186022CE2116301014E0578AB0886DF7CFCF7D` и каждый
+`1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612` и каждый
 listed payload. Sibling Common checkout и loose runtime dependency запрещены.
 
 ## Entrypoints

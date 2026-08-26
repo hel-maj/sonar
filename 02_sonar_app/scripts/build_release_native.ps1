@@ -366,8 +366,8 @@ $resolvedMajesticCatalogPackage = Resolve-RequiredDirectory `
     "Sonar Majestic Catalog 1.0.0 package"
 $resolvedMajesticCefInventoryPackage = Resolve-RequiredDirectory `
     $CommonMajesticCefInventoryPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.18") `
-    "Sonar Majestic CEF Inventory 0.1.18 package"
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.19") `
+    "Sonar Majestic CEF Inventory 0.1.19 package"
 $resolvedMajesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
     $resolvedMajesticCefInventoryPackage
 $resolvedProtoc = Resolve-RequiredExecutable `
