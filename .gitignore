@@ -27,6 +27,17 @@ env/
 build/
 dist/
 /.codex-temp/
+/.artifacts/
+**/CMakeFiles/
+**/Testing/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
 *.egg-info/
 *.build/
 *.dist/
