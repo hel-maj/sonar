@@ -29,11 +29,14 @@ logs/
 protobuf code, logo, fish catalog и изображения встроены в два EXE.
 
 Native configure exact-pins installed
-`SonarMajesticCefInventory 0.1.19` / `Sonar::MajesticCefInventory` /
-`Sonar::MajesticCefInventoryContent`. Setup, full
-offline gate и оба clean release build проверяют SHA-256 manifest
-`1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612` и каждый
-listed payload. Sibling Common checkout и loose runtime dependency запрещены.
+`SonarMajesticRuntimeModule 0.1.3` / `Sonar::MajesticRuntimeModule` и
+`SonarMajesticCefInventory 0.1.31` / `Sonar::MajesticCefInventory` /
+`Sonar::MajesticCefInventoryContent`. Setup, full offline gate и оба clean
+release build проверяют SHA-256 manifests
+`6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845` и
+`37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22`, а также
+каждый listed payload. Sibling Common checkout и loose runtime dependency
+запрещены.
 
 ## Entrypoints
 
@@ -92,7 +95,13 @@ availability/update-block admission gates и сохраняет production windo
 process/generation, foreground, capture, input и final safety gates.
 Inventory-open использует тот же Common trusted-publisher runtime, что и
 ordinary shipping; exact client profiles остаются forensic-only. Builder по
-умолчанию маркирует версию как `1.0.0-local`; product UI
+умолчанию маркирует следующую незанятую версию как `1.0.6-local`; перед следующим
+изменением публикуемых байтов версия монотонно увеличивается и не
+переиспользуется. Builder собирает и полностью проверяет candidate в
+`build/release-work/current`, затем до overwrite сравнивает exact
+relative-file/length/SHA-256 tree с существующим output. Одинаковые
+product/release mode/version с другим tree fail-closed отклоняются;
+exact same tree остаётся idempotent no-op. Product UI
 показывает `Локальный доступ` без key activation, raw feature IDs или internal
 channel. Ordinary `run_product.ps1` и ordinary maintenance channel намеренно
 отвергают её; отдельный maintenance channel требует оба явных switch
@@ -285,16 +294,17 @@ unsigned smoke не является доказательством signing ил
   Фактический update установленной `1.0.2-local` принят как `1.0.3-local`, а
   отдельный 30-секундный lifecycle подтвердил Engine crash/replacement, два
   normal exit и повторный exact allowlist/no-Python gate;
-- current compile-isolated local-access bundle `1.0.4-local` собран из clean
+- historical compile-isolated local-access bundle `1.0.4-local` собран из clean
   commit `c4efc6892e43b467c0c2271214a54eae646afb2e` после exact repin на
-  `SonarMajesticCefInventory 0.1.19` и `Sonar.UI.Wpf 0.2.22`. Два независимых
+  `SonarMajesticCefInventory 0.1.21` и `Sonar.UI.Wpf 0.2.22`. Два независимых
   build-root дали byte-identical EXE; exact allowlist, no-Python, dependency,
   secret и package-integrity gates прошли. Bundle hashes:
   `Sonar.exe=614F2950C76774A839875230C0552E2B88264426D147262B4A87C2B04AF2FB73`,
   `Sonar.Engine.exe=53BE5BAB4174D2DAF2E29F1F259348FA40C68144A41F837C3F0FFEF3F926D10D`,
   `bundle-manifest.json=7686643D0C673F525B67AE5F1DEC4C937F8ED0578CC4161A3DE7EB7A544E57B7`.
   Build-only acceptance не запускал окно; fresh lifecycle/installation остаются
-  отдельными runtime gates;
+  отдельными runtime gates. Этот bundle предшествует следующему historical source repin на
+  `SonarMajesticCefInventory 0.1.22`;
 - last completed pre-0.2.22 Common UI visual artifact находится в
   `build/ui-gallery-0221-final/`: 204 PNG для всех product pages/variants,
   compact/medium/expanded layouts и 100/125/150/200% DPI. Manifest фиксирует
@@ -302,6 +312,28 @@ unsigned smoke не является доказательством signing ил
   `43A2D07AEACEC9ACFE493DBF8D204EBA23333467B9C3DE3C7C7F9FE1F58DA00C`;
 - current source exact-pins immutable Common UI 0.2.22 and passes a zero-warning
   Host build; a fresh product visual corpus remains an explicit acceptance gate;
+- previous compile-isolated local-access bundle `1.0.1-local` собран 2026-08-27
+  после exact repin на `SonarMajesticRuntimeModule 0.1.1` и
+  `SonarMajesticCefInventory 0.1.25`: `249/249` WPF, `50/50` native CTest и
+  `8/8` typed IPC tests зелёные, две сборки детерминированы, exact
+  two-EXE allowlist/no-Python gate пройден. Bundle hashes:
+  `Sonar.exe=A2B41BE9D6CBD3D7B9B871934FC932F6802139E5D3CA3E035930FFAF7EAA0162`,
+  `Sonar.Engine.exe=8821FD318625B474CF91158ABFF72696CCFB843193D30CE674B19333972AC170`,
+  `bundle-manifest.json=75E1E2BFEEF829D3F01A36751BA2145A74AD90D9B0E7C22B8884855D87FF2257`.
+  Реальный 30-секундный hidden lifecycle подтвердил Engine crash/replacement,
+  persistent restart и normal exit без смены foreground. Изолированные
+  install/update/rollback/recovery/final-update сохранили `state.dat`, прошли
+  stage-specific no-Python gates и оставили нулевой transaction residue;
+- historical local-access release `1.0.5-local` followed the exact
+  `SonarMajesticRuntimeModule 0.1.3` and `SonarMajesticCefInventory 0.1.31`
+  repin. Its pre-publication candidate passed `249/249` WPF, `50/50` native
+  CTest, `8/8` typed IPC, deterministic two-build verification, strict
+  two-EXE/no-Python checks, VerifyOnly and a 30-second hidden
+  crash/recovery/normal-exit lifecycle. Final immutable hashes are read from
+  the clean-source `bundle-manifest.json` after source publication rather than
+  predicted in this source document;
+- the next unused product-owned default is `1.0.6-local`; no build or runtime
+  acceptance for that version is claimed by this source-only repin;
 
 - local development-unsigned wrapper исторически прошёл atomic install,
   update с Common UI `0.2.17` на `0.2.18`, rollback и synthetic interrupted

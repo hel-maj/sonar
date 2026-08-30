@@ -120,6 +120,23 @@ int main() {
         serialized == inventory_snapshot_golden,
         "inventory_snapshot_native_wire_parity_changed");
 
+    const std::string reset_statistics_golden =
+        read_golden("reset_fishing_session_statistics_request.hex");
+    sonar::fishing::ipc::v1::Envelope reset_statistics;
+    require(
+        reset_statistics.ParseFromString(reset_statistics_golden),
+        "reset_statistics_golden_parse_failed");
+    require(
+        reset_statistics.has_reset_fishing_session_statistics_request(),
+        "reset_statistics_golden_payload_case_changed");
+    serialized.clear();
+    require(
+        reset_statistics.SerializeToString(&serialized),
+        "reset_statistics_golden_serialize_failed");
+    require(
+        serialized == reset_statistics_golden,
+        "reset_statistics_native_wire_parity_changed");
+
     std::cout << "PASS Fishing product envelopes native golden parity\n";
     return 0;
   } catch (const std::exception& error) {

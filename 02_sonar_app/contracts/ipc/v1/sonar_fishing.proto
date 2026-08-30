@@ -29,6 +29,7 @@ message Envelope {
     RevokeSignedEntitlementResult revoke_signed_entitlement_result = 21;
     FishingNotificationEvent fishing_notification_event = 22;
     sonar.inventory.ipc.v1.InventoryStateSnapshot inventory_state_snapshot = 23;
+    ResetFishingSessionStatisticsRequest reset_fishing_session_statistics_request = 24;
   }
 }
 
@@ -70,6 +71,13 @@ message EvaluateCatchDispositionResult {
 // StopAutomation command and is not duplicated in this product schema.
 message StartFishingSessionRequest {
   uint64 expected_revision = 1;
+}
+
+// One coarse in-memory reset intent. The Engine linearizes it with catch and
+// tackle updates, preserves the running automation lifecycle and publishes one
+// correlated aggregate snapshot. A failed or lost command is never replayed by
+// a replacement Engine generation.
+message ResetFishingSessionStatisticsRequest {
 }
 
 enum OverweightAction {

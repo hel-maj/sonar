@@ -33,6 +33,11 @@ struct session_transition final {
   std::string_view reason;
 };
 
+struct session_completion_reconciliation final {
+  bool transitioned{};
+  std::string_view correlation_id;
+};
+
 class fishing_session_lifecycle final {
  public:
   [[nodiscard]] session_transition validate_start(
@@ -40,6 +45,9 @@ class fishing_session_lifecycle final {
   [[nodiscard]] session_transition start(
       const start_session_context& context) noexcept;
   [[nodiscard]] session_transition stop() noexcept;
+  [[nodiscard]] session_completion_reconciliation reconcile_completion(
+      bool operation_completed,
+      std::string_view active_start_correlation_id) noexcept;
 
   [[nodiscard]] bool running() const noexcept;
   [[nodiscard]] std::uint64_t settings_revision() const noexcept;

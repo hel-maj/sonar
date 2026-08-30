@@ -15,6 +15,12 @@ internal static class TelegramBotApiClientTests
         new("telegram_http_client_sends_bounded_html_and_menu_contract", SendMessageMatches),
         new("telegram_http_client_edits_message_and_supports_https_url_button", EditMessageMatches),
         new("telegram_http_client_parses_offset_long_poll_without_network", GetUpdatesMatches),
+        new("telegram_http_client_get_me_validates_bot_identity", GetMeMatches),
+        new("telegram_http_client_get_me_rejects_non_bot_without_secret_leak", GetMeRejectsNonBot),
+        new("telegram_http_client_get_me_classifies_rejected_credentials", GetMeRejectsCredentials),
+        new("telegram_http_client_get_me_rejects_malformed_envelope", GetMeRejectsMalformedEnvelope),
+        new("telegram_http_client_get_me_honors_cancellation", GetMeHonorsCancellation),
+        new("telegram_availability_probe_maps_get_me_without_network", AvailabilityProbeMapsGetMe),
         new("telegram_http_client_sends_photo_as_bounded_multipart", SendPhotoMatches),
         new("telegram_http_client_classifies_unchanged_edit_without_response_leak", UnchangedEditMatches),
         new("telegram_http_client_redacts_token_from_stable_failures", FailureRedactsToken),
@@ -124,6 +130,121 @@ internal static class TelegramBotApiClientTests
                 .Select(value => value.GetString())
                 .SequenceEqual(["message", "callback_query"], StringComparer.Ordinal),
             "Allowed Telegram updates changed");
+    }
+
+    private static void GetMeMatches()
+    {
+        CapturedRequest? captured = null;
+        using var httpClient = Client(request =>
+        {
+            captured = request;
+            return JsonResponse(
+                HttpStatusCode.OK,
+                "{\"ok\":true,\"result\":{\"id\":123,\"is_bot\":true,\"username\":\"sonar_test_bot\"}}");
+        });
+        var api = new TelegramBotApiClient(httpClient, Token);
+
+        var identity = api.GetMeAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+        TestAssert.Equal(123L, identity.Id, "Telegram bot id changed");
+        TestAssert.Equal("sonar_test_bot", identity.Username, "Telegram bot username changed");
+        TestAssert.Equal(HttpMethod.Get, captured!.Method, "getMe did not use a side-effect-free GET");
+        TestAssert.Equal($"/bot{Token}/getMe", captured.Uri.AbsolutePath, "getMe endpoint changed");
+    }
+
+    private static void GetMeRejectsNonBot()
+    {
+        using var httpClient = Client(_ => JsonResponse(
+            HttpStatusCode.OK,
+            "{\"ok\":true,\"result\":{\"id\":123,\"is_bot\":false,\"username\":\"person\"}}"));
+        var api = new TelegramBotApiClient(httpClient, Token);
+
+        var exception = TestAssert.Throws<TelegramBotApiException>(
+            () => api.GetMeAsync(CancellationToken.None).GetAwaiter().GetResult(),
+            "Non-bot getMe identity was accepted");
+
+        TestAssert.Equal(
+            "telegram_bot_identity_invalid",
+            exception.Reason,
+            "Invalid getMe identity reason changed");
+        TestAssert.True(
+            !exception.ToString().Contains(Token, StringComparison.Ordinal),
+            "Invalid getMe identity exposed the token");
+    }
+
+    private static void GetMeHonorsCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var httpClient = new HttpClient(new WaitingHandler())
+        {
+            BaseAddress = new Uri("https://api.telegram.test/"),
+            Timeout = Timeout.InfiniteTimeSpan,
+        };
+        var api = new TelegramBotApiClient(httpClient, Token);
+        cancellation.Cancel();
+
+        TestAssert.Throws<OperationCanceledException>(
+            () => api.GetMeAsync(cancellation.Token).GetAwaiter().GetResult(),
+            "getMe ignored caller cancellation");
+    }
+
+    private static void GetMeRejectsCredentials()
+    {
+        using var httpClient = Client(_ => JsonResponse(
+            HttpStatusCode.Unauthorized,
+            "{\"ok\":false,\"error_code\":401,\"description\":\"secret rejected\"}"));
+        var api = new TelegramBotApiClient(httpClient, Token);
+
+        var exception = TestAssert.Throws<TelegramBotApiException>(
+            () => api.GetMeAsync(CancellationToken.None).GetAwaiter().GetResult(),
+            "Rejected Telegram credentials escaped the stable API error");
+
+        TestAssert.Equal(401, exception.StatusCode!.Value, "getMe HTTP status was lost");
+        TestAssert.Equal(401, exception.ApiErrorCode!.Value, "getMe API error code was lost");
+        TestAssert.True(
+            !exception.ToString().Contains("secret rejected", StringComparison.Ordinal) &&
+            !exception.ToString().Contains(Token, StringComparison.Ordinal),
+            "getMe rejection leaked remote text or token");
+    }
+
+    private static void AvailabilityProbeMapsGetMe()
+    {
+        var probe = new TelegramAvailabilityProbe(
+            () => new CapturingHandler(_ => JsonResponse(
+                HttpStatusCode.Unauthorized,
+                "{\"ok\":false,\"error_code\":401,\"description\":\"unsafe detail\"}")),
+            new Uri("https://api.telegram.test/"));
+        var candidate = new TelegramAvailabilityCandidate(Token, [42]);
+
+        var result = probe.ProbeAsync(candidate, CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        TestAssert.True(!result.Available, "Rejected getMe was reported available");
+        TestAssert.Equal(
+            TelegramAvailabilityFailure.CredentialsRejected,
+            result.Failure,
+            "Credential rejection was not mapped to the typed failure");
+        TestAssert.True(
+            !candidate.ToString().Contains(Token, StringComparison.Ordinal),
+            "Availability candidate exposed the token");
+    }
+
+    private static void GetMeRejectsMalformedEnvelope()
+    {
+        using var httpClient = Client(_ => JsonResponse(HttpStatusCode.OK, "[]"));
+        var api = new TelegramBotApiClient(httpClient, Token);
+
+        var exception = TestAssert.Throws<TelegramBotApiException>(
+            () => api.GetMeAsync(CancellationToken.None).GetAwaiter().GetResult(),
+            "Malformed getMe envelope escaped the stable API error");
+
+        TestAssert.Equal(
+            "telegram_response_invalid",
+            exception.Reason,
+            "Malformed getMe envelope reason changed");
+        TestAssert.True(
+            !exception.ToString().Contains(Token, StringComparison.Ordinal),
+            "Malformed getMe envelope exposed the token");
     }
 
     private static void SendPhotoMatches()
@@ -250,5 +371,16 @@ internal static class TelegramBotApiClientTests
             HttpRequestMessage request,
             CancellationToken cancellationToken) =>
             throw new HttpRequestException($"unsafe transport detail: {request.RequestUri}");
+    }
+
+    private sealed class WaitingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        }
     }
 }

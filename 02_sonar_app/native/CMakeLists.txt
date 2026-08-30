@@ -44,11 +44,22 @@ enable_testing()
 if(NOT DEFINED SONAR_COMMON_NATIVE_WINDOWS_PACKAGE OR
    NOT IS_DIRECTORY "${SONAR_COMMON_NATIVE_WINDOWS_PACKAGE}")
     message(FATAL_ERROR
-        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE must point to installed Sonar Platform Windows 0.1.9")
+        "SONAR_COMMON_NATIVE_WINDOWS_PACKAGE must point to installed Sonar Platform Windows 0.1.12")
 endif()
 find_package(
-    SonarPlatformWindows 0.1.9 EXACT CONFIG REQUIRED
+    SonarPlatformWindows 0.1.12 EXACT CONFIG REQUIRED
     PATHS "${SONAR_COMMON_NATIVE_WINDOWS_PACKAGE}/lib/cmake/SonarPlatformWindows"
+    NO_DEFAULT_PATH
+)
+
+if(NOT DEFINED SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE OR
+   NOT IS_DIRECTORY "${SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE}")
+    message(FATAL_ERROR
+        "SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE must point to installed Sonar Majestic Runtime Module 0.1.3")
+endif()
+find_package(
+    SonarMajesticRuntimeModule 0.1.3 EXACT CONFIG REQUIRED
+    PATHS "${SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE}/lib/cmake/SonarMajesticRuntimeModule"
     NO_DEFAULT_PATH
 )
 
@@ -66,10 +77,10 @@ find_package(
 if(NOT DEFINED SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE OR
    NOT IS_DIRECTORY "${SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE}")
     message(FATAL_ERROR
-        "SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE must point to installed Sonar Majestic Catalog 1.0.0")
+        "SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE must point to installed Sonar Majestic Catalog 1.1.0")
 endif()
 find_package(
-    SonarMajesticCatalog 1.0.0 EXACT CONFIG REQUIRED
+    SonarMajesticCatalog 1.1.0 EXACT CONFIG REQUIRED
     PATHS "${SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE}/lib/cmake/SonarMajesticCatalog"
     NO_DEFAULT_PATH
 )
@@ -77,10 +88,10 @@ find_package(
 if(NOT DEFINED SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE OR
    NOT IS_DIRECTORY "${SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE}")
     message(FATAL_ERROR
-        "SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE must point to installed Sonar Majestic CEF Inventory 0.1.19")
+        "SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE must point to installed Sonar Majestic CEF Inventory 0.1.31")
 endif()
 find_package(
-    SonarMajesticCefInventory 0.1.19 EXACT CONFIG REQUIRED
+    SonarMajesticCefInventory 0.1.31 EXACT CONFIG REQUIRED
     PATHS "${SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE}/lib/cmake/SonarMajesticCefInventory"
     NO_DEFAULT_PATH
 )

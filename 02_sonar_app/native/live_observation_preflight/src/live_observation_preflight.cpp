@@ -81,6 +81,45 @@ preflight_result run(observation_port& port) noexcept {
   }
 }
 
+readiness_reason classify_memory_failure_reason(
+    const std::string_view reason) noexcept {
+  if (reason == "memory_process_generation_changed" ||
+      reason == "memory_process_generation_mismatch" ||
+      reason == "memory_process_identity_mismatch") {
+    return readiness_reason::game_target_changed;
+  }
+  if (reason == "memory_module_executable_scan_incomplete") {
+    return readiness_reason::memory_module_scan_incomplete;
+  }
+  if (reason == "memory_active_fish_ambiguous") {
+    return readiness_reason::memory_active_fish_ambiguous;
+  }
+  if (reason == "memory_active_fish_incomplete") {
+    return readiness_reason::memory_active_fish_incomplete;
+  }
+  if (reason == "memory_active_fish_unavailable") {
+    return readiness_reason::memory_active_fish_unavailable;
+  }
+  if (reason == "memory_semantic_layout_ambiguous" ||
+      reason == "memory_world_endpoint_ambiguous" ||
+      reason == "memory_replay_endpoint_ambiguous") {
+    return readiness_reason::memory_semantic_layout_ambiguous;
+  }
+  if (reason == "memory_semantic_layout_unavailable" ||
+      reason == "memory_semantic_layout_unresolved" ||
+      reason == "memory_module_layout_unavailable" ||
+      reason.starts_with("memory_world_") ||
+      reason.starts_with("memory_replay_")) {
+    return readiness_reason::memory_semantic_layout_unresolved;
+  }
+  if (reason.ends_with("_read_failed") ||
+      reason.ends_with("_decode_failed") ||
+      reason == "memory_evidence_decode_failed") {
+    return readiness_reason::memory_capture_unavailable;
+  }
+  return readiness_reason::memory_unavailable;
+}
+
 std::string_view reason_key(const readiness_reason reason) noexcept {
   switch (reason) {
     case readiness_reason::ready: return "ready";
@@ -106,6 +145,20 @@ std::string_view reason_key(const readiness_reason reason) noexcept {
       return "detector_unavailable";
     case readiness_reason::memory_unavailable:
       return "memory_unavailable";
+    case readiness_reason::memory_module_scan_incomplete:
+      return "memory_module_scan_incomplete";
+    case readiness_reason::memory_semantic_layout_unresolved:
+      return "memory_semantic_layout_unresolved";
+    case readiness_reason::memory_semantic_layout_ambiguous:
+      return "memory_semantic_layout_ambiguous";
+    case readiness_reason::memory_active_fish_unavailable:
+      return "memory_active_fish_unavailable";
+    case readiness_reason::memory_active_fish_incomplete:
+      return "memory_active_fish_incomplete";
+    case readiness_reason::memory_active_fish_ambiguous:
+      return "memory_active_fish_ambiguous";
+    case readiness_reason::memory_capture_unavailable:
+      return "memory_capture_unavailable";
     case readiness_reason::internal_error:
       return "internal_error";
   }

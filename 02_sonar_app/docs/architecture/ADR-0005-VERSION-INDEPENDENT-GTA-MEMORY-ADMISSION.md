@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-08-26
 - Owner: Sonar Fishing
-- Common dependency: `SonarPlatformWindows` 0.1.9
+- Common dependencies: `SonarMajesticRuntimeModule` 0.1.3,
+  `SonarPlatformWindows` 0.1.12
 
 ## Goal
 
@@ -16,9 +17,10 @@
 
 ## Решение
 
-`Sonar::PlatformWindowsTrustedModule` владеет Win32-механикой допуска. Fishing
-передаёт product policy: process/module `GTA5.exe` и accepted publisher
-Rockstar Games. Common на одном pinned file handle проверяет уникальный модуль,
+`Sonar::MajesticRuntimeModule` владеет semantic role `gta5`, process/module и
+accepted-publisher policy, а также использует
+`Sonar::PlatformWindowsTrustedModule` как Win32-механику допуска. Fishing
+передаёт только role и текущий PID. Common на одном pinned file handle проверяет уникальный модуль,
 ненулевые bounds, равенство disk PE `SizeOfImage` loaded size, WinTrust signer
 и timestamp, затем связывает cold/hot наблюдения fingerprint-ом process/module/
 file identity.
@@ -39,16 +41,17 @@ forensic provenance и replay. Shipping connector не вычисляет SHA-25
 
 ## Границы и failure semantics
 
-- Common владеет signer/file/process/module verifier; Fishing не копирует его.
-- Fishing владеет Rockstar publisher policy и semantic layout/feature policy.
+- Common владеет role/module/publisher policy и signer/file/process/module
+  verifier; Fishing не копирует их.
+- Fishing владеет semantic player/replay/fish binding, layout и feature policy.
 - Неоднозначный, неполный или устаревший scan возвращает address-free reason и
   не создаёт capture plan.
 - Process/module/file drift отзывает lease; stale address, snapshot или input
   не replay-ятся.
 - Физический ввод по-прежнему проходит automation lease, свежий coherent
   observation, foreground gate и final packet-budget gate.
-- Common inventory-open facade остаётся независимым consumer и не проходит
-  через Fishing legacy inventory resolver.
+- Common inventory-open facade переиспользует тот же RuntimeModule owner и не
+  проходит через Fishing legacy inventory resolver.
 
 ## Migration и rollback
 

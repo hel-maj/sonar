@@ -33,15 +33,17 @@ Host/Engine composition; запуск рыбалки остаётся fail-close
 - `docs/architecture` - ADR, migration evidence и production cutover checklist.
 
 Общие IPC, process supervision, licensing verification,
-`Sonar.UI.Wpf 0.2.22`, `SonarPlatformWindows 0.1.9`,
-`SonarMajesticCatalog 1.0.0` и CEF inventory facade
-`SonarMajesticCefInventory 0.1.19` потребляются как точные immutable Sonar
-Common packages. Setup/release проверяют manifest facade с SHA-256
-`1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612`
-из Sonar Common commit `0c4baf0391134f05edd9a62e154001decb593c49` и все
-перечисленные payloads; исходники или sibling checkout Common не используются.
-Inventory content и GTA reeling runtime используют Common trusted-publisher
-facades: точная версия, hash, размер, PE timestamp и заранее известный loaded
+`Sonar.UI.Wpf 0.2.22`, `SonarPlatformWindows 0.1.12`,
+`SonarMajesticCatalog 1.1.0`, runtime admission facade
+`SonarMajesticRuntimeModule 0.1.3` и CEF inventory facade
+`SonarMajesticCefInventory 0.1.31` потребляются как точные immutable Sonar
+Common packages. Setup/release проверяют manifest SHA-256 соответственно
+`6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845` и
+`37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22`, а также
+все перечисленные payloads; исходники или sibling checkout Common не
+используются. RuntimeModule владеет role-based trusted-publisher admission, а
+CEF Inventory переиспользует тот же owner и добавляет bounded V8/content
+semantics. Точная версия, hash, размер, PE timestamp и заранее известный loaded
 image size остаются forensic evidence и не являются availability gate. Reeling
 дополнительно требует unique executable-section player/replay/fish anchors и
 coherent capture под тем же Common authority fingerprint. Inventory facade
@@ -136,28 +138,41 @@ Runtime 10 x64, после чего запускает `Sonar.exe` с пусты
 не обходит лицензию, startup availability, target, foreground или input-safety
 проверки.
 
-Для локальной проверки владельцем существует отдельный compile-isolated bundle:
+Для постоянного локального использования владельцем существует отдельная
+сборка с локальным доступом. Она не запрашивает ключ и не подключается к
+сервису лицензий. Выполняйте четыре этапа по порядку:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_developer_full_access.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_developer_full_access.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full_access.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full_access.ps1 -VerifyOnly -BundleDirectory .\build\developer-full-access\bundle
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full_access.ps1 -Wait -BundleDirectory .\build\developer-full-access\bundle
+# После выхода из приложения:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_product_lifecycle.ps1 -DeveloperFullAccess -BundleDirectory .\build\developer-full-access\bundle -DurationSeconds 30
 ```
 
 `build_developer_full_access.ps1` принимает `-Version` и `-OutputDirectory`;
-`-SkipOfflineTests` предназначен только для промежуточной разработки.
-`verify_developer_full_access.ps1` и `run_developer_full_access.ps1` принимают
-`-BundleDirectory`, а run дополнительно поддерживает `-Wait`. Внутренний
-`-VerifyOnly` проверяет WinPS-compatible launch contract без запуска UI и
-используется regression-тестом.
+`-SkipOfflineTests` сокращает предварительную проверку и предназначен только
+для промежуточной сборки; итоговая проверка результата всё равно выполняется.
+Проверка запуска и запуск принимают `-BundleDirectory`.
+Для запуска `-Wait` оставляет команду активной до штатного выхода приложения.
+Проверка устойчивости принимает `-DurationSeconds` со значениями 30, 60 или
+120 секунд и выполняется только после завершения интерактивного запуска.
 
-Run не повторяет offline suites, repository-wide no-Python scan, dependency
-closure и secret scan. Перед каждым стартом он выполняет только launch admission:
-проверяет exact local-access manifest, hashes и build IDs пары EXE,
-deterministic marker, строгий allowlist bundle и Desktop Runtime. Полная
-проверка остаётся отдельной командой `verify_developer_full_access.ps1`.
+Builder сам выполняет полную проверку результата. Повторить её отдельно без
+пересборки можно командой:
 
-Builder по умолчанию использует стабильную локальную версию `1.0.0-local`.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_developer_full_access.ps1 -BundleDirectory .\build\developer-full-access\bundle
+```
+
+`-VerifyOnly` проверяет возможность запуска и не открывает приложение. Этот
+быстрый этап не заменяет полную проверку сборки.
+
+Builder по умолчанию использует следующую незанятую локальную версию `1.0.6-local`.
+Перед следующим изменением публикуемой пары EXE номер нужно увеличить: один
+номер версии не переиспользуется для разных байтов bundle. Builder сначала проверяет
+candidate-bundle и отклоняет same-version дерево с другим SHA-256 до
+удаления или overwrite текущего output.
 Product UI показывает активный `Локальный доступ`, не просит ключ и не выводит
 raw feature IDs или технический channel. В local feature set входят только
 capabilities с реальным owner: Stream доступен через exact embedded-tool
@@ -177,13 +192,9 @@ lease и final safety gates не ослабляются. Production EXE не п�
 `-DeveloperFullAccess`; смешивание каналов запрещено. Подробный контракт находится в
 [ADR-0002](docs/architecture/ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md).
 
-Отдельная проверка локальной сборки запускает её дважды, принудительно завершает
-только точную дочернюю Engine первого запуска и требует автоматического
-восстановления, сохранения настроек и штатной очистки процессов:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_product_lifecycle.ps1 -DeveloperFullAccess -BundleDirectory .\build\developer-full-access\bundle -DurationSeconds 30
-```
+Проверка устойчивости запускает локальную сборку дважды, имитирует внутренний
+сбой и требует автоматического восстановления, сохранения настроек и штатной
+очистки процессов. Игровые действия при этом не выполняются.
 
 Inventory-open в обычной и compile-isolated композиции использует один и тот же
 Common trusted-publisher runtime. Локальный доступ не меняет publisher,
@@ -287,6 +298,7 @@ Loose DLL, source, wheel, interpreter, PDB, asset, database, dump и history
 - [Architecture decision](docs/architecture/ADR-0001-WPF-CSHARP-CPP-ENGINE.md)
 - [Developer full-access authority](docs/architecture/ADR-0002-DEVELOPER-FULL-ACCESS-AUTHORITY.md)
 - [Bounded Engine notification events](docs/architecture/ADR-0003-BOUNDED-ENGINE-NOTIFICATION-EVENTS.md)
+- [Current-session statistics reset](docs/architecture/ADR-0006-CURRENT-SESSION-STATISTICS-RESET.md)
 - [Engine migration evidence](docs/architecture/ENGINE_MIGRATION.md)
 - [Production cutover checklist](docs/architecture/PRODUCTION_CUTOVER_CHECKLIST.md)
 - [Native release pipeline](docs/architecture/NATIVE_RELEASE_PIPELINE.md)

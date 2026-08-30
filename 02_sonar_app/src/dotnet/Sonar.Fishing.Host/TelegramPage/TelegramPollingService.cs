@@ -2,18 +2,60 @@ using Sonar.Fishing.Host.SettingsPersistence;
 
 namespace Sonar.Fishing.Host.TelegramPage;
 
+public sealed class TelegramPollingCursor
+{
+    private readonly object gate = new();
+    private long? nextOffset;
+
+    public long? NextOffset
+    {
+        get
+        {
+            lock (gate)
+            {
+                return nextOffset;
+            }
+        }
+    }
+
+    public bool TryAdvance(long updateId)
+    {
+        if (updateId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(updateId));
+        }
+        lock (gate)
+        {
+            if (nextOffset is { } minimum && updateId < minimum)
+            {
+                return false;
+            }
+            nextOffset = checked(updateId + 1);
+            return true;
+        }
+    }
+}
+
 public sealed class TelegramPollingService
 {
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(2);
     private readonly ITelegramBotApi api;
     private readonly TelegramInboundRouter router;
     private readonly Func<TelegramInboundDecision, CancellationToken, Task> dispatch;
+    private readonly TelegramPollingCursor cursor;
+    private readonly Action? reportAvailable;
+    private readonly Action<TelegramAvailabilityFailure>? reportUnavailable;
+    private readonly TimeSpan retryDelay;
     private int running;
 
     public TelegramPollingService(
         ITelegramBotApi api,
         TelegramInboundRouter router,
-        Func<TelegramInboundDecision, CancellationToken, Task> dispatch)
+        Func<TelegramInboundDecision, CancellationToken, Task> dispatch,
+        TelegramPollingCursor? cursor = null,
+        Action? reportAvailable = null,
+        Action<TelegramAvailabilityFailure>? reportUnavailable = null,
+        TimeSpan? retryDelay = null)
     {
         ArgumentNullException.ThrowIfNull(api);
         ArgumentNullException.ThrowIfNull(router);
@@ -21,6 +63,14 @@ public sealed class TelegramPollingService
         this.api = api;
         this.router = router;
         this.dispatch = dispatch;
+        this.cursor = cursor ?? new TelegramPollingCursor();
+        this.reportAvailable = reportAvailable;
+        this.reportUnavailable = reportUnavailable;
+        this.retryDelay = retryDelay ?? RetryDelay;
+        if (this.retryDelay <= TimeSpan.Zero || this.retryDelay == Timeout.InfiniteTimeSpan)
+        {
+            throw new ArgumentOutOfRangeException(nameof(retryDelay));
+        }
     }
 
     public async Task RunAsync(
@@ -47,7 +97,6 @@ public sealed class TelegramPollingService
 
         try
         {
-            long? nextOffset = null;
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -60,17 +109,16 @@ public sealed class TelegramPollingService
                 try
                 {
                     var updates = await api.GetUpdatesAsync(
-                        nextOffset,
+                        cursor.NextOffset,
                         longPollingTimeoutSeconds: 20,
                         cancellationToken).ConfigureAwait(false);
+                    reportAvailable?.Invoke();
                     foreach (var update in updates.OrderBy(update => update.UpdateId))
                     {
-                        if (nextOffset is { } minimum && update.UpdateId < minimum)
+                        if (!cursor.TryAdvance(update.UpdateId))
                         {
                             continue;
                         }
-
-                        nextOffset = checked(update.UpdateId + 1);
                         var decision = router.RouteJson(
                             update.Utf8Json.Span,
                             runtimeEnabled: true,
@@ -88,9 +136,10 @@ public sealed class TelegramPollingService
                         }
                     }
                 }
-                catch (TelegramBotApiException)
+                catch (TelegramBotApiException exception)
                 {
-                    await Task.Delay(RetryDelay, cancellationToken).ConfigureAwait(false);
+                    reportUnavailable?.Invoke(TelegramAvailabilityProbe.Classify(exception));
+                    await Task.Delay(retryDelay, cancellationToken).ConfigureAwait(false);
                 }
             }
         }

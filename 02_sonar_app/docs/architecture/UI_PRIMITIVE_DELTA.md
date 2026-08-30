@@ -172,7 +172,7 @@ template was copied. The package supplies available-content-width compact 4,
 medium 8 and expanded 12 columns with Common-owned gutters, page padding,
 maximum content width, vertical rhythm and span/start behavior.
 
-Current adoption gate is 8/8 pages and 180 deterministic renders across three
+Current adoption gate is 8/8 pages and 204 deterministic renders across three
 available-width layouts and four DPI targets, including product threshold-slider,
 fish-selection, hotkey-conflict and three startup-admission variants. Fishing passes only page names, Russian copy,
 data, commands, feature policy and embedded product assets into the shared

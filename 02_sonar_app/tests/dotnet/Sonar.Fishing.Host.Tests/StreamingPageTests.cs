@@ -12,6 +12,7 @@ internal static class StreamingPageTests
         new("streaming_snapshot_normalizes_inactive_preparing_without_public_url", SnapshotNormalizes),
         new("unavailable_streaming_controller_rejects_every_mutation", UnavailableControllerRejects),
         new("streaming_page_projects_one_controller_snapshot_and_persists_10fps", PageProjectsController),
+        new("streaming_page_hides_chat_mode_without_bridge_capability", ChatModeAvailabilityIsExplicit),
         new("overview_stream_card_projects_the_same_runtime_snapshot", OverviewProjectsSnapshot),
     ];
 
@@ -113,6 +114,26 @@ internal static class StreamingPageTests
         page.StopCommand.Execute(null);
         TestAssert.Equal("Остановлен", page.Status, "Stopped stream status was not projected");
         TestAssert.True(page.CanStart, "Stopped stream did not restore start command");
+    }
+
+    private static void ChatModeAvailabilityIsExplicit()
+    {
+        var controller = new TestStreamingController();
+        var withoutBridge = new StreamingPageViewModel(
+            controller,
+            featureAllowed: true,
+            chatFeatureAllowed: false);
+        var withBridge = new StreamingPageViewModel(
+            controller,
+            featureAllowed: true,
+            chatFeatureAllowed: true);
+
+        TestAssert.True(!withoutBridge.IsChatModeAvailable,
+            "Missing chat bridge was presented as available");
+        TestAssert.True(!withoutBridge.ToggleChatModeCommand.CanExecute(null),
+            "Missing chat bridge admitted a chat command");
+        TestAssert.True(withBridge.IsChatModeAvailable,
+            "Composed chat bridge was hidden from presentation");
     }
 
     private static void OverviewProjectsSnapshot()

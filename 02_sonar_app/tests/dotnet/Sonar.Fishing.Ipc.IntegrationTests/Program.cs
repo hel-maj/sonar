@@ -12,6 +12,7 @@ var allTests = new (string Name, Func<Task> Run)[]
 {
     ("catch_quality_envelope_managed_golden_parity", CatchQualityManagedGoldenParity),
     ("catch_disposition_envelope_managed_golden_parity", CatchDispositionManagedGoldenParity),
+    ("reset_statistics_envelope_managed_golden_parity", ResetStatisticsManagedGoldenParity),
     ("offline_host_native_engine_round_trip", OfflineHostNativeEngineRoundTrip),
     ("offline_host_keeps_one_contained_engine_session_alive", OfflineHostKeepsSessionAlive),
     ("offline_host_restarts_one_crashed_engine_generation", OfflineHostRestartsCrashedEngine),
@@ -88,6 +89,24 @@ static Task CatchDispositionManagedGoldenParity()
         request.SelectedFishIds.SequenceEqual(["ruster", "marlin"]),
         "golden selected-fish policy changed");
     Require(request.InventoryFull, "golden inventory state changed");
+    Require(envelope.ToByteArray().SequenceEqual(golden), "managed wire parity changed");
+    return Task.CompletedTask;
+}
+
+static Task ResetStatisticsManagedGoldenParity()
+{
+    var path = Path.Combine(
+        AppContext.BaseDirectory,
+        "fixtures",
+        "ipc",
+        "v1",
+        "reset_fishing_session_statistics_request.hex");
+    var golden = Convert.FromHexString(File.ReadAllText(path).Trim());
+    var envelope = Envelope.Parser.ParseFrom(golden);
+    Require(
+        envelope.PayloadCase ==
+            Envelope.PayloadOneofCase.ResetFishingSessionStatisticsRequest,
+        "reset statistics payload case changed");
     Require(envelope.ToByteArray().SequenceEqual(golden), "managed wire parity changed");
     return Task.CompletedTask;
 }
@@ -299,6 +318,15 @@ static async Task ProductionHostEngineUsesVerifiedIdentity()
     Require(acceptedRevision == 31, "production Engine rejected runtime settings");
     Require(await session.PingAsync(CancellationToken.None) == 1,
         "production Engine heartbeat was not acknowledged");
+    var resetReceipt = await session.ResetCurrentSessionStatistics(
+        CancellationToken.None).Completion;
+    Require(resetReceipt.BytesMayHaveBeenWritten,
+        "production statistics reset did not cross its pipe write boundary");
+    var reset = resetReceipt.Result;
+    Require(!reset.Running && reset.AcceptedSettingsRevision == 31,
+        "production statistics reset changed lifecycle or settings");
+    Require(reset.Totals.CaughtCount == 0 && reset.TackleItems.Count == 0,
+        "production statistics reset did not publish an empty aggregate");
 
     try
     {

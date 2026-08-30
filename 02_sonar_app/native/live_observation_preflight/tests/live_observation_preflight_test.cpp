@@ -159,7 +159,7 @@ void detector_failure_blocks_memory_and_readiness() {
 void memory_failure_preserves_prior_readiness() {
   fake_port port;
   port.memory = {
-      .reason = preflight::readiness_reason::memory_unavailable,
+      .reason = preflight::readiness_reason::memory_active_fish_unavailable,
   };
   const auto result = preflight::run(port);
 
@@ -167,8 +167,52 @@ void memory_failure_preserves_prior_readiness() {
       result.build_ready && result.profile_ready && result.capture_ready &&
       !result.memory_ready,
       "memory_failure_aggregate_changed");
-  require(result.reason == preflight::readiness_reason::memory_unavailable,
+  require(result.reason ==
+          preflight::readiness_reason::memory_active_fish_unavailable,
       "memory_failure_reason_changed");
+  require(preflight::serialize_json(result).ends_with(
+              "\"reason\":\"memory_active_fish_unavailable\"}"),
+      "memory_failure_detail_not_serialized");
+}
+
+void internal_memory_reasons_are_mapped_to_sanitized_stages() {
+  using reason = preflight::readiness_reason;
+  require(preflight::classify_memory_failure_reason(
+              "memory_module_executable_scan_incomplete") ==
+          reason::memory_module_scan_incomplete,
+      "module_scan_failure_was_collapsed");
+  require(preflight::classify_memory_failure_reason(
+              "memory_world_endpoint_unresolved") ==
+          reason::memory_semantic_layout_unresolved,
+      "world_resolution_failure_was_collapsed");
+  require(preflight::classify_memory_failure_reason(
+              "memory_replay_endpoint_ambiguous") ==
+          reason::memory_semantic_layout_ambiguous,
+      "replay_ambiguity_was_collapsed");
+  require(preflight::classify_memory_failure_reason(
+              "memory_active_fish_unavailable") ==
+          reason::memory_active_fish_unavailable,
+      "missing_active_fish_was_collapsed");
+  require(preflight::classify_memory_failure_reason(
+              "memory_active_fish_incomplete") ==
+          reason::memory_active_fish_incomplete,
+      "incomplete_active_fish_was_collapsed");
+  require(preflight::classify_memory_failure_reason(
+              "memory_active_fish_ambiguous") ==
+          reason::memory_active_fish_ambiguous,
+      "ambiguous_active_fish_was_collapsed");
+  require(preflight::classify_memory_failure_reason(
+              "reeling_fish_identity_read_failed") ==
+          reason::memory_capture_unavailable,
+      "capture_read_failure_was_collapsed");
+  require(preflight::classify_memory_failure_reason(
+              "memory_process_generation_changed") ==
+          reason::game_target_changed,
+      "generation_drift_was_not_preserved");
+  require(preflight::classify_memory_failure_reason(
+              "unexpected_internal_reason") ==
+          reason::memory_unavailable,
+      "unknown_internal_reason_escaped_allowlist");
 }
 
 }  // namespace
@@ -180,5 +224,6 @@ int main() {
   unsupported_build_still_checks_readonly_capture_but_skips_memory();
   detector_failure_blocks_memory_and_readiness();
   memory_failure_preserves_prior_readiness();
+  internal_memory_reasons_are_mapped_to_sanitized_stages();
   return 0;
 }

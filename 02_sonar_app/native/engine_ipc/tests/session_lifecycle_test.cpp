@@ -55,15 +55,22 @@ void handshake_is_mode_specific() {
       production, engine_authority_mode::production);
   require(!production.diagnostic_mode(), "production_handshake_diagnostic");
   require(production.side_effect_support(), "production_side_effects_missing");
-  require(production.capabilities_size() == 1, "production_capability_count_changed");
+  require(production.capabilities_size() == 2, "production_capability_count_changed");
   require(
       production.capabilities(0).capability_id() ==
-          sonar::fishing::engine_ipc::fishing_session_control_capability_id,
-      "production_session_control_missing");
+          sonar::fishing::engine_ipc::
+              fishing_session_statistics_reset_capability_id,
+      "production_statistics_reset_missing");
   require(
       production.capabilities(0).major() == 1 &&
           production.capabilities(0).minor() == 0,
-      "production_session_control_version_changed");
+      "production_statistics_reset_version_changed");
+  require(
+      production.capabilities(1).capability_id() ==
+          sonar::fishing::engine_ipc::fishing_session_control_capability_id &&
+          production.capabilities(1).major() == 1 &&
+          production.capabilities(1).minor() == 0,
+      "production_session_control_missing");
   const auto production_policy = sonar::fishing::engine_ipc::handshake_policy(
       engine_authority_mode::production);
   require(
@@ -76,7 +83,7 @@ void handshake_is_mode_specific() {
   require(!developer.diagnostic_mode(), "developer_handshake_diagnostic");
   require(developer.side_effect_support(), "developer_side_effects_missing");
   require(
-      developer.capabilities_size() == 1,
+      developer.capabilities_size() == 2,
       "developer_capability_count_changed");
 }
 
@@ -174,6 +181,36 @@ void start_and_stop_are_coarse_and_bounded() {
       "idempotent_stop_reason_changed");
 }
 
+void completed_operation_reconciliation_is_exactly_once_and_restartable() {
+  fishing_session_lifecycle lifecycle;
+  const auto started = lifecycle.start(valid_context());
+  require(started.accepted, "completion_race_start_rejected");
+
+  const auto pending = lifecycle.reconcile_completion(
+      false,
+      "original-start-request");
+  require(!pending.transitioned, "pending_progress_stopped_lifecycle");
+  require(lifecycle.running(), "pending_progress_cleared_lifecycle");
+
+  const auto reset_capture = lifecycle.reconcile_completion(
+      true,
+      "original-start-request");
+  require(reset_capture.transitioned, "reset_completion_was_not_reconciled");
+  require(
+      reset_capture.correlation_id == "original-start-request",
+      "reset_completion_lost_original_start_correlation");
+  require(!lifecycle.running(), "completed_reset_capture_left_lifecycle_running");
+
+  const auto next_pending = lifecycle.reconcile_completion(
+      true,
+      "original-start-request");
+  require(!next_pending.transitioned, "completion_notification_would_be_duplicated");
+  require(next_pending.correlation_id.empty(), "duplicate_completion_retained_correlation");
+
+  const auto restarted = lifecycle.start(valid_context());
+  require(restarted.accepted, "completed_session_blocked_subsequent_start");
+}
+
 void developer_authority_is_compile_isolated() {
   auto context = valid_context();
   context.authority_mode = engine_authority_mode::developer_full_access;
@@ -198,6 +235,7 @@ int main() {
     handshake_is_mode_specific();
     production_start_gates_fail_closed();
     start_and_stop_are_coarse_and_bounded();
+    completed_operation_reconciliation_is_exactly_once_and_restartable();
     developer_authority_is_compile_isolated();
     std::cout << "PASS Fishing Engine mode handshake and session lifecycle\n";
     return 0;

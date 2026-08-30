@@ -258,7 +258,7 @@ class disabled_memory_connector final : public memory_connector {
 };
 
 // This factory is the only shipping platform seam. It opens Common's pinned
-// trusted-module lease using Fishing-owned accepted publishers; no known
+// role-owned trusted-module lease; no known
 // version/hash/file-size/PE-timestamp/image-size value controls availability.
 // Creating the connector performs no process access.
 [[nodiscard]] std::unique_ptr<memory_connector>

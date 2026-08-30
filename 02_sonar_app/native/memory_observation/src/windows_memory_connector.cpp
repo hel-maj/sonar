@@ -1,5 +1,6 @@
 #include "sonar/fishing/memory_observation/memory_observation.h"
 
+#include "sonar/majestic/runtime_module/runtime_module.hpp"
 #include "sonar/platform/windows/trusted_module.hpp"
 
 #include <Windows.h>
@@ -9,7 +10,6 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <string_view>
 #include <utility>
 
 namespace sonar::fishing::memory_observation {
@@ -66,25 +66,31 @@ class common_windows_memory_session final : public readonly_memory_session {
   process_identity identity_;
 };
 
-struct role_policy final {
-  std::wstring_view image_name;
-  std::string_view publisher_thumbprint;
-};
+namespace common_runtime = sonar::majestic::runtime_module;
 
-[[nodiscard]] role_policy policy_for(const process_role role) noexcept {
+[[nodiscard]] std::optional<common_runtime::win32_runtime_module_role>
+common_role_for(const process_role role) noexcept {
   switch (role) {
     case process_role::game:
-      return {
-          L"GTA5.exe",
-          "565932392989B3616F2968E1B1D6F974561B1F32",
-      };
+      return common_runtime::win32_runtime_module_role::gta5;
     case process_role::webengine:
-      return {
-          L"majestic-webengine.exe",
-          "B03C125E345303D797A951DA1BC76B960C21FF57",
-      };
+      return common_runtime::win32_runtime_module_role::majestic_webengine;
   }
-  return {};
+  return std::nullopt;
+}
+
+[[nodiscard]] std::string admission_reason(
+    const common_runtime::win32_runtime_module_open_result& admitted) {
+  std::string reason{"memory_trusted_module_"};
+  if (admitted.status !=
+      common_runtime::win32_runtime_module_open_status::authority_rejected) {
+    reason += common_runtime::win32_runtime_module_open_status_name(
+        admitted.status);
+    return reason;
+  }
+  reason += sonar::platform::windows::trusted_module_admission_status_name(
+      admitted.authority_status);
+  return reason;
 }
 
 class common_windows_memory_connector final : public memory_connector {
@@ -98,35 +104,23 @@ class common_windows_memory_connector final : public memory_connector {
       return nullptr;
     }
     try {
-      const auto product_policy = policy_for(role);
-      if (product_policy.image_name.empty() ||
-          product_policy.publisher_thumbprint.empty()) {
+      const auto common_role = common_role_for(role);
+      if (!common_role.has_value()) {
         reason = "memory_process_role_invalid";
         return nullptr;
       }
-      auto process = sonar::platform::windows::readonly_process::open(
-          process_id,
-          sonar::platform::windows::process_access_profile::memory_regions);
-      auto admitted = sonar::platform::windows::open_trusted_module_lease(
-          std::move(process),
-          {
-              .process_image_name = std::wstring(product_policy.image_name),
-              .module_name = std::wstring(product_policy.image_name),
-              .accepted_publisher_thumbprints = {
-                  std::string(product_policy.publisher_thumbprint),
-              },
-          });
+      auto admitted =
+          common_runtime::open_win32_trusted_runtime_module_lease(
+              *common_role, process_id);
       if (!admitted.ready()) {
-        reason = "memory_trusted_module_";
-        reason += sonar::platform::windows::trusted_module_admission_status_name(
-            admitted.status);
+        reason = admission_reason(admitted);
         return nullptr;
       }
       const auto& authority = admitted.lease->authority();
       process_identity identity{
           .role = role,
           .generation = authority.generation,
-          .image_name = std::wstring(product_policy.image_name),
+          .image_name = authority.module.name,
           .image_sha256 = {},
           .admission = process_admission::trusted_publisher_runtime,
           .authority_fingerprint = authority.identity_fingerprint,

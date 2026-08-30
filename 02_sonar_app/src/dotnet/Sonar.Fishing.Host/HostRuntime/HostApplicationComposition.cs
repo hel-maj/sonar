@@ -56,6 +56,7 @@ public sealed record HostApplicationComposition(
         HostStateCoordinator coordinator,
         IEngineHealthUseCase engineHealthUseCase,
         IFishingAutomationRuntime automationRuntime,
+        IFishingSessionStatisticsRuntime statisticsRuntime,
         IFishingEngineNotificationSource engineNotifications,
         IFishingInventorySnapshotSource inventorySnapshots,
         ILicenseRuntimeLifecycle licenseRuntime,
@@ -68,6 +69,7 @@ public sealed record HostApplicationComposition(
         ArgumentNullException.ThrowIfNull(coordinator);
         ArgumentNullException.ThrowIfNull(engineHealthUseCase);
         ArgumentNullException.ThrowIfNull(automationRuntime);
+        ArgumentNullException.ThrowIfNull(statisticsRuntime);
         ArgumentNullException.ThrowIfNull(engineNotifications);
         ArgumentNullException.ThrowIfNull(inventorySnapshots);
         ArgumentNullException.ThrowIfNull(licenseRuntime);
@@ -86,6 +88,7 @@ public sealed record HostApplicationComposition(
             engineHealthUseCase,
             licenseRuntime,
             automationRuntime,
+            statisticsRuntime,
             hotkeyRuntime,
             licenseOverride,
             engineNotifications,
@@ -101,6 +104,7 @@ public sealed record HostApplicationComposition(
         IEngineHealthUseCase? productionEngineHealth = null,
         ILicenseRuntimeLifecycle? licenseRuntime = null,
         IFishingAutomationRuntime? automationRuntime = null,
+        IFishingSessionStatisticsRuntime? statisticsRuntime = null,
         IHostHotkeyRuntimeLifecycle? hotkeyRuntime = null,
         LicenseHostSettings? licenseOverride = null,
         IFishingEngineNotificationSource? engineNotifications = null,
@@ -159,7 +163,8 @@ public sealed record HostApplicationComposition(
                 coordinator.UpdateCustomFishPrice(fishId, price);
         var statisticsPage = new StatisticsPageViewModel(
             FishingSessionStateSnapshot.Empty,
-            persistCustomPrice);
+            persistCustomPrice,
+            statisticsRuntime);
         overviewPage.ApplySessionState(FishingSessionStateSnapshot.Empty);
         void ApplySessionState(FishingSessionStateSnapshot snapshot)
         {
@@ -251,13 +256,38 @@ public sealed record HostApplicationComposition(
                 : allowedFeatures.Contains("telegram"),
             source.Telegram,
             source.Secrets.TelegramBotToken);
-        var telegramRuntime = new TelegramRuntimeCoordinator(
+        var telegramPage = new TelegramSettingsPageViewModel(
+            state.Telegram,
+            state.Secrets.TelegramBotToken,
+            telegramFeatureAllowed,
+            saveHandler: coordinator is null
+                ? null
+                : result => coordinator.SaveTelegram(result.Settings, result.BotToken));
+        var telegramRuntime = new TelegramAvailabilityCoordinator(
             TelegramConfiguration(state),
-            telegramNetwork.RunAsync);
+            new TelegramAvailabilityProbe(),
+            telegramNetwork.RunVerifiedAsync);
+        telegramPage.AvailabilityCandidateChanged += telegramRuntime.ApplyCandidate;
+        telegramRuntime.ApplyCandidate(telegramPage.CurrentAvailabilityCandidate);
+        telegramRuntime.AvailabilityChanged += availability =>
+        {
+            var current = coordinator?.Current ?? state;
+            var featureAllowed = licenseOverride is null
+                ? current.License.Features.Contains("telegram", StringComparer.Ordinal)
+                : allowedFeatures.Contains("telegram");
+            telegramPage.UpdateAccessPolicy(featureAllowed, availability);
+        };
+        telegramPage.UpdateAccessPolicy(telegramFeatureAllowed, telegramRuntime.Current);
         if (coordinator is not null)
         {
             coordinator.StateChanged += updated =>
+            {
                 telegramRuntime.ApplyConfiguration(TelegramConfiguration(updated));
+                var featureAllowed = licenseOverride is null
+                    ? updated.License.Features.Contains("telegram", StringComparer.Ordinal)
+                    : allowedFeatures.Contains("telegram");
+                telegramPage.UpdateAccessPolicy(featureAllowed, telegramRuntime.Current);
+            };
         }
         var licensePage = new LicensePageViewModel(
             effectiveLicense,
@@ -282,13 +312,7 @@ public sealed record HostApplicationComposition(
                 persistSnapshotMode: coordinator is null
                     ? null
                     : enabled => coordinator.UpdateStreamSnapshotMode(enabled)),
-            new TelegramSettingsPageViewModel(
-                state.Telegram,
-                state.Secrets.TelegramBotToken,
-                telegramFeatureAllowed,
-                saveHandler: coordinator is null
-                    ? null
-                    : result => coordinator.SaveTelegram(result.Settings, result.BotToken)),
+            telegramPage,
             new AboutPageViewModel(clearDiagnostics),
             engineHealth,
             allowedFeatures,

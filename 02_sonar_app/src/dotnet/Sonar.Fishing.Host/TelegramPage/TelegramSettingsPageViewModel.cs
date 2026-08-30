@@ -36,6 +36,7 @@ public sealed class TelegramSettingsPageViewModel : ObservableObject
     private bool featureAllowed;
     private TelegramAvailability availability;
     private readonly Action<TelegramSettingsSaveResult>? saveHandler;
+    private readonly SynchronizationContext? uiContext;
     private string interactionMessage = string.Empty;
 
     public TelegramSettingsPageViewModel(
@@ -51,9 +52,12 @@ public sealed class TelegramSettingsPageViewModel : ObservableObject
         this.featureAllowed = featureAllowed;
         this.availability = availability ?? TelegramAvailability.Unknown;
         this.saveHandler = saveHandler;
+        uiContext = SynchronizationContext.Current;
         SaveCommand = new RelayCommand(Save, () => IsDirty && this.saveHandler is not null);
         DiscardCommand = new RelayCommand(DiscardChanges, () => IsDirty);
     }
+
+    public event Action<TelegramAvailabilityCandidate>? AvailabilityCandidateChanged;
 
     public TelegramSettingsDraft Draft
     {
@@ -194,6 +198,10 @@ public sealed class TelegramSettingsPageViewModel : ObservableObject
 
     public bool CanPersist => saveHandler is not null;
 
+    public TelegramAvailabilityCandidate CurrentAvailabilityCandidate => new(
+        Draft.BotToken,
+        Draft.AdminIds);
+
     public string InteractionMessage
     {
         get => interactionMessage;
@@ -204,14 +212,22 @@ public sealed class TelegramSettingsPageViewModel : ObservableObject
 
     public IRelayCommand DiscardCommand { get; }
 
-    public void UpdateCredentials(string botToken, string adminIdsText) =>
+    public void UpdateCredentials(string botToken, string adminIdsText)
+    {
         Draft = Draft.WithCredentials(botToken, adminIdsText);
+        NotifyAvailabilityCandidateChanged();
+    }
 
     public bool TrySetEnabled(bool enabled, out string blockReason)
     {
         if (!enabled)
         {
             Draft = Draft.WithEnabled(false);
+            blockReason = string.Empty;
+            return true;
+        }
+        if (Draft.Enabled)
+        {
             blockReason = string.Empty;
             return true;
         }
@@ -234,16 +250,36 @@ public sealed class TelegramSettingsPageViewModel : ObservableObject
         bool allowed,
         TelegramAvailability nextAvailability)
     {
+        ArgumentNullException.ThrowIfNull(nextAvailability);
+        if (uiContext is not null && SynchronizationContext.Current != uiContext)
+        {
+            uiContext.Post(
+                static state =>
+                {
+                    var update = (AccessPolicyUpdate)state!;
+                    update.Target.ApplyAccessPolicy(update.Allowed, update.Availability);
+                },
+                new AccessPolicyUpdate(this, allowed, nextAvailability));
+            return;
+        }
+        ApplyAccessPolicy(allowed, nextAvailability);
+    }
+
+    private void ApplyAccessPolicy(
+        bool allowed,
+        TelegramAvailability nextAvailability)
+    {
         featureAllowed = allowed;
-        availability = nextAvailability ?? throw new ArgumentNullException(nameof(nextAvailability));
+        availability = nextAvailability;
         RaiseStateChanged();
     }
 
     public TelegramSettingsSaveResult BuildSaveResult()
     {
-        var reason = Draft.Enabled ? EnableBlockReason : string.Empty;
+        var enabling = Draft.Enabled && !saved.Enabled;
+        var reason = enabling ? EnableBlockReason : string.Empty;
         return new TelegramSettingsSaveResult(
-            Draft.BuildSettings(Draft.Enabled && reason.Length == 0),
+            Draft.BuildSettings(Draft.Enabled && (!enabling || reason.Length == 0)),
             Draft.BotToken,
             reason);
     }
@@ -253,11 +289,16 @@ public sealed class TelegramSettingsPageViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(result);
         saved = TelegramSettingsDraft.FromSettings(result.Settings, result.BotToken);
         Draft = TelegramSettingsDraft.FromSettings(result.Settings, result.BotToken);
+        NotifyAvailabilityCandidateChanged();
     }
 
-    public void DiscardChanges() => Draft = TelegramSettingsDraft.FromSettings(
-        saved.BuildSettings(saved.Enabled),
-        saved.BotToken);
+    public void DiscardChanges()
+    {
+        Draft = TelegramSettingsDraft.FromSettings(
+            saved.BuildSettings(saved.Enabled),
+            saved.BotToken);
+        NotifyAvailabilityCandidateChanged();
+    }
 
     private bool AvailabilityMatches(TelegramAvailabilityStatus status) =>
         availability.Status == status &&
@@ -299,4 +340,12 @@ public sealed class TelegramSettingsPageViewModel : ObservableObject
             ? $"Telegram сохранён выключенным: {result.EnableBlockReason}"
             : string.Empty;
     }
+
+    private void NotifyAvailabilityCandidateChanged() =>
+        AvailabilityCandidateChanged?.Invoke(CurrentAvailabilityCandidate);
+
+    private sealed record AccessPolicyUpdate(
+        TelegramSettingsPageViewModel Target,
+        bool Allowed,
+        TelegramAvailability Availability);
 }

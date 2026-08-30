@@ -77,6 +77,20 @@ session_transition fishing_session_lifecycle::stop() noexcept {
   return {true, "completed", "automation_stopped"};
 }
 
+session_completion_reconciliation
+fishing_session_lifecycle::reconcile_completion(
+    const bool operation_completed,
+    const std::string_view active_start_correlation_id) noexcept {
+  if (!operation_completed || !running_) {
+    return {};
+  }
+  static_cast<void>(stop());
+  return {
+      true,
+      active_start_correlation_id,
+  };
+}
+
 bool fishing_session_lifecycle::running() const noexcept {
   return running_;
 }

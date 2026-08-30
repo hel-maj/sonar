@@ -91,6 +91,8 @@ public sealed class StreamingPageViewModel : ObservableObject
     public bool CanToggleChatMode => chatFeatureAllowed &&
         (snapshot.Active || snapshot.ChatActive || snapshot.ChatModeEnabled);
 
+    public bool IsChatModeAvailable => chatFeatureAllowed;
+
     public string CaptureArea => snapshot.ChatZoomEnabled ? "Чат" : "Все окно";
 
     public string Quality

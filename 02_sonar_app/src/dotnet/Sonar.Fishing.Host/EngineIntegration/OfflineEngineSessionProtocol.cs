@@ -18,6 +18,8 @@ internal static class OfflineEngineSessionProtocol
     private const string RuntimeSettingsCapabilityId = "fishing-runtime-settings.apply";
     private const string SignedEntitlementCapabilityId = "signed-entitlement.verify";
     private const string NotificationEventsCapabilityId = "fishing-notifications.events";
+    private const string SessionStatisticsResetCapabilityId =
+        "fishing-session.statistics.reset";
 
     internal static HandshakeAccepted AcceptHandshake(
         EngineSessionIdentity identity,
@@ -43,6 +45,10 @@ internal static class OfflineEngineSessionProtocol
         if (authorityMode is EngineProcessAuthorityMode.Production or
             EngineProcessAuthorityMode.DeveloperFullAccess)
         {
+            requirements.Add(new CapabilityRequirement(
+                SessionStatisticsResetCapabilityId,
+                Major: 1,
+                MinimumMinor: 0));
             requirements.Add(new CapabilityRequirement(
                 "fishing-session.control",
                 Major: 1,
@@ -176,6 +182,35 @@ internal static class OfflineEngineSessionProtocol
             FrameLimits.ControlBytes,
             cancellationToken);
 
+    internal static async ValueTask<EngineCommandDispatchReceipt>
+        WriteEnvelopeWithDispatchReceiptAsync(
+            Stream stream,
+            Envelope envelope,
+            EngineCommandDispatchState dispatchState,
+            CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(dispatchState);
+        var trackingStream = new DispatchTrackingWriteStream(stream, dispatchState);
+        try
+        {
+            await LengthPrefixedFrameCodec.WriteMessageAsync(
+                trackingStream,
+                envelope,
+                FrameLimits.ControlBytes,
+                cancellationToken).ConfigureAwait(false);
+            return new EngineCommandDispatchReceipt(
+                dispatchState.BytesMayHaveBeenWritten);
+        }
+        catch (Exception exception)
+        {
+            throw new EngineCommandDispatchException(
+                dispatchState.BytesMayHaveBeenWritten,
+                exception);
+        }
+    }
+
     internal static ValueTask<Envelope> ReadEnvelopeAsync(
         Stream stream,
         CancellationToken cancellationToken) =>
@@ -205,4 +240,71 @@ internal static class OfflineEngineSessionProtocol
             FishingSchemaIdentity.Sha256,
             sessionId,
             SessionGeneration: EngineSessionIdentity.SessionGeneration);
+
+    private sealed class DispatchTrackingWriteStream(
+        Stream inner,
+        EngineCommandDispatchState dispatchState) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+
+        public override bool CanSeek => inner.CanSeek;
+
+        public override bool CanWrite => inner.CanWrite;
+
+        public override long Length => inner.Length;
+
+        public override long Position
+        {
+            get => inner.Position;
+            set => inner.Position = value;
+        }
+
+        public override void Flush() => inner.Flush();
+
+        public override Task FlushAsync(CancellationToken cancellationToken) =>
+            inner.FlushAsync(cancellationToken);
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            inner.Read(buffer, offset, count);
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            inner.Seek(offset, origin);
+
+        public override void SetLength(long value) => inner.SetLength(value);
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            if (count != 0)
+            {
+                dispatchState.EnterWriteBoundary(CancellationToken.None);
+            }
+            inner.Write(buffer, offset, count);
+        }
+
+        public override Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (count != 0)
+            {
+                dispatchState.EnterWriteBoundary(cancellationToken);
+            }
+            return inner.WriteAsync(buffer, offset, count, cancellationToken);
+        }
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!buffer.IsEmpty)
+            {
+                dispatchState.EnterWriteBoundary(cancellationToken);
+            }
+            return inner.WriteAsync(buffer, cancellationToken);
+        }
+    }
 }

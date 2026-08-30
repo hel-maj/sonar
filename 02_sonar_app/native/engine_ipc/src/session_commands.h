@@ -58,6 +58,23 @@ void handle_start_read_only_session(
     std::uint64_t& snapshot_revision,
     std::uint64_t& published_progress_revision);
 
+void handle_reset_session_statistics(
+    HANDLE control_pipe,
+    sonar::fishing::engine_ipc::event_writer& event_writer,
+    const fishing_envelope& request,
+    const std::optional<fishing_envelope>& active_start_request,
+    std::string_view session_id,
+    const sonar::platform::ipc::session_identity_expectation& identity,
+    engine_authority_mode authority_mode,
+    sonar::fishing::engine_ipc::fishing_session_lifecycle& lifecycle,
+    sonar::fishing::engine_ipc::production_capability_composition& capabilities,
+    const sonar::fishing::runtime_settings::RuntimeSettingsOwner& settings,
+    sonar::platform::ipc::session_header_factory& headers,
+    sonar::platform::ipc::incoming_sequence_gate& incoming_sequences,
+    sonar::platform::ipc::peer_liveness_tracker& liveness,
+    std::uint64_t& snapshot_revision,
+    std::uint64_t& published_progress_revision);
+
 void handle_stop_automation(
     HANDLE control_pipe,
     sonar::fishing::engine_ipc::event_writer& event_writer,

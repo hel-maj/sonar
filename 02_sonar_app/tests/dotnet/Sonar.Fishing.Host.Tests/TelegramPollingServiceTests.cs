@@ -10,6 +10,7 @@ internal static class TelegramPollingServiceTests
     [
         new("telegram_polling_orders_updates_acknowledges_callbacks_and_advances_offset", PollingMatches),
         new("telegram_polling_disabled_settings_never_touch_transport", DisabledIsInert),
+        new("telegram_polling_recovers_with_health_and_preserves_offset", RetryPreservesOffset),
     ];
 
     private static void PollingMatches()
@@ -69,6 +70,42 @@ internal static class TelegramPollingServiceTests
         service.RunAsync(disabled, CancellationToken.None).GetAwaiter().GetResult();
         TestAssert.Equal(0, api.Offsets.Count, "Disabled Telegram started polling");
     }
+
+    private static void RetryPreservesOffset()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var api = new RecoveringTelegramBotApi(cancellation);
+        var cursor = new TelegramPollingCursor();
+        var health = new List<TelegramAvailabilityStatus>();
+        var service = new TelegramPollingService(
+            api,
+            new TelegramInboundRouter(),
+            (_, _) => Task.CompletedTask,
+            cursor,
+            () => health.Add(TelegramAvailabilityStatus.Available),
+            _ => health.Add(TelegramAvailabilityStatus.Unavailable),
+            TimeSpan.FromMilliseconds(1));
+
+        TestAssert.Throws<OperationCanceledException>(
+            () => service.RunAsync(EnabledSettings(), cancellation.Token).GetAwaiter().GetResult(),
+            "Recovering polling did not stop through cancellation");
+
+        TestAssert.True(
+            api.Offsets.SequenceEqual([null, null, 6L]),
+            "Polling retry replayed or skipped the retained offset");
+        TestAssert.True(
+            health.SequenceEqual(
+                [TelegramAvailabilityStatus.Unavailable, TelegramAvailabilityStatus.Available]),
+            "Polling health did not recover after a transient API failure");
+        TestAssert.Equal<long>(6, cursor.NextOffset!.Value, "Shared polling cursor was not retained");
+    }
+
+    private static TelegramHostSettings EnabledSettings() => new(
+        true,
+        [42],
+        1.0,
+        TelegramHostSettings.Default.Notifications,
+        TelegramSoundSettings.AllEnabled);
 
     private sealed class FakeTelegramBotApi(CancellationTokenSource cancellation)
         : ITelegramBotApi
@@ -150,5 +187,61 @@ internal static class TelegramPollingServiceTests
                     text = "/menu",
                 },
             }).AsMemory());
+    }
+
+    private sealed class RecoveringTelegramBotApi(CancellationTokenSource cancellation)
+        : ITelegramBotApi
+    {
+        public List<long?> Offsets { get; } = [];
+
+        public Task<IReadOnlyList<TelegramBotApiUpdate>> GetUpdatesAsync(
+            long? offset,
+            int longPollingTimeoutSeconds,
+            CancellationToken cancellationToken)
+        {
+            Offsets.Add(offset);
+            if (Offsets.Count == 1)
+            {
+                throw new TelegramBotApiException("telegram_http_unavailable");
+            }
+            if (Offsets.Count == 2)
+            {
+                IReadOnlyList<TelegramBotApiUpdate> updates =
+                    [new TelegramBotApiUpdate(5, JsonSerializer.SerializeToUtf8Bytes(new
+                    {
+                        update_id = 5,
+                        message = new { chat = new { id = 99 }, text = "/menu" },
+                    }))];
+                return Task.FromResult(updates);
+            }
+            cancellation.Cancel();
+            return Task.FromCanceled<IReadOnlyList<TelegramBotApiUpdate>>(cancellation.Token);
+        }
+
+        public Task AnswerCallbackQueryAsync(
+            string callbackId,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<long?> SendMessageAsync(
+            long chatId,
+            string html,
+            bool silent,
+            TelegramMenuPlan? menu,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task EditMessageAsync(
+            long chatId,
+            long messageId,
+            string html,
+            TelegramMenuPlan? menu,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<long?> SendPhotoAsync(
+            long chatId,
+            ReadOnlyMemory<byte> png,
+            string captionHtml,
+            bool silent,
+            TelegramMenuPlan? menu,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

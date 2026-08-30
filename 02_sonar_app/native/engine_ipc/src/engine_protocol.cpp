@@ -197,6 +197,12 @@ bool require_handshake_accepted(
           .minimum_minor = 0,
       },
       sonar::platform::ipc::capability_requirement{
+          .capability_id = sonar::fishing::engine_ipc::
+              fishing_session_statistics_reset_capability_id,
+          .major = 1,
+          .minimum_minor = 0,
+      },
+      sonar::platform::ipc::capability_requirement{
           .capability_id =
               sonar::fishing::engine_ipc::fishing_session_control_capability_id,
           .major = 1,
@@ -208,7 +214,7 @@ bool require_handshake_accepted(
   const auto required_capability_count =
       mode_policy.advertises_session_control
           ? required_capabilities.size()
-          : required_capabilities.size() - 1;
+          : required_capabilities.size() - 2;
   const sonar::platform::ipc::handshake_acceptance_expectation expectation{
       .identity = identity,
       .minimum_protocol_minor = sonar::platform::ipc::protocol_minor,

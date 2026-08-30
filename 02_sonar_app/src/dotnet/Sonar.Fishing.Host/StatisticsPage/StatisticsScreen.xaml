@@ -25,6 +25,26 @@
                     </common:PageHeader.Actions>
                 </common:PageHeader>
 
+                <TextBlock
+                    x:Name="StatisticsCommandStatus"
+                    Margin="0,0,0,16"
+                    AutomationProperties.LiveSetting="Assertive"
+                    Text="{Binding ViewModel.CommandStatus, ElementName=Root}"
+                    TextWrapping="Wrap">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger
+                                    Binding="{Binding ViewModel.CommandStatus, ElementName=Root}"
+                                    Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
                 <layout:ResponsiveGrid>
                     <common:MetricCard
                         layout:ResponsiveGrid.CompactSpan="4"

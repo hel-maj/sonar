@@ -34,16 +34,29 @@ public sealed class TelegramRuntimeConfiguration
 
     public TelegramHostSettings Settings { get; }
 
-    public bool Eligible =>
+    public TelegramAvailabilityCandidate Candidate => new(botToken, Settings.AdminIds);
+
+    public bool ProbeEligible =>
         NetworkAllowed &&
         FeatureAllowed &&
-        Settings.Enabled &&
-        Settings.AdminIds.Count != 0 &&
-        !string.IsNullOrWhiteSpace(botToken);
+        Candidate.ConfigurationReady;
+
+    public bool RuntimeEligible => ProbeEligible && Settings.Enabled;
+
+    public bool Eligible => RuntimeEligible;
 
     internal string BotToken => botToken;
 
     internal bool SameTransportAs(TelegramRuntimeConfiguration other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        return NetworkAllowed == other.NetworkAllowed &&
+            FeatureAllowed == other.FeatureAllowed &&
+            Settings.Enabled == other.Settings.Enabled &&
+            transportIdentity.Equals(other.transportIdentity);
+    }
+
+    internal bool SamePolicyAndRuntimeAs(TelegramRuntimeConfiguration other)
     {
         ArgumentNullException.ThrowIfNull(other);
         return NetworkAllowed == other.NetworkAllowed &&

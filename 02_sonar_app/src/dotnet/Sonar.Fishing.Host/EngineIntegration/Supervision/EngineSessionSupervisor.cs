@@ -205,10 +205,13 @@ internal sealed class EngineSessionSupervisor :
     internal Task<FishingSessionStateSnapshot> StartFishingSessionAsync(
         FishingRuntimeSettings settings,
         CancellationToken cancellationToken) =>
-        ExecuteAutomationAsync(
+        ExecuteGenerationBoundCommandAsync<IEngineAutomationSession>(
             (automation, token) => automation.StartFishingSessionAsync(
                 settings,
                 token),
+            "engine_automation_capability_missing",
+            "engine_automation_command",
+            retireOnCallerCancellation: false,
             cancellationToken);
 
     internal bool HasActiveEntitlement =>
@@ -216,8 +219,20 @@ internal sealed class EngineSessionSupervisor :
 
     internal Task<FishingSessionStateSnapshot> StopAutomationAsync(
         CancellationToken cancellationToken) =>
-        ExecuteAutomationAsync(
+        ExecuteGenerationBoundCommandAsync<IEngineAutomationSession>(
             (automation, token) => automation.StopAutomationAsync(token),
+            "engine_automation_capability_missing",
+            "engine_automation_command",
+            retireOnCallerCancellation: false,
+            cancellationToken);
+
+    internal Task<FishingSessionStateSnapshot> ResetCurrentSessionStatisticsAsync(
+        CancellationToken cancellationToken) =>
+        ExecuteGenerationBoundDispatchCommandAsync<IEngineSessionStatisticsSession>(
+            (statistics, token) =>
+                statistics.ResetCurrentSessionStatistics(token),
+            "engine_session_statistics_capability_missing",
+            "engine_session_statistics_reset",
             cancellationToken);
 
     public async ValueTask DisposeAsync()
@@ -408,11 +423,17 @@ internal sealed class EngineSessionSupervisor :
         }
     }
 
-    private async Task<FishingSessionStateSnapshot> ExecuteAutomationAsync(
-        Func<IEngineAutomationSession, CancellationToken, Task<FishingSessionStateSnapshot>> operation,
+    private async Task<FishingSessionStateSnapshot> ExecuteGenerationBoundCommandAsync<TCapability>(
+        Func<TCapability, CancellationToken, Task<FishingSessionStateSnapshot>> operation,
+        string capabilityMissingReason,
+        string failureReason,
+        bool retireOnCallerCancellation,
         CancellationToken cancellationToken)
+        where TCapability : class
     {
         ArgumentNullException.ThrowIfNull(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(capabilityMissingReason);
+        ArgumentException.ThrowIfNullOrWhiteSpace(failureReason);
         ThrowIfStopped();
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
@@ -424,18 +445,32 @@ internal sealed class EngineSessionSupervisor :
             operationCancellation.Token,
             deadlineCancellation.Token);
         var token = boundedCancellation.Token;
-        await lifecycleGate.WaitAsync(token).ConfigureAwait(false);
+        var gateAcquired = false;
+        var operationIssued = false;
         try
         {
+            await lifecycleGate.WaitAsync(token).ConfigureAwait(false);
+            gateAcquired = true;
             ThrowIfStopped();
             await EnsureSessionAsync(token).ConfigureAwait(false);
-            if (session is not IEngineAutomationSession automation)
+            var boundSession = session ?? throw new InvalidOperationException(
+                "engine_supervisor_session_missing");
+            var boundGeneration = generation;
+            if (boundSession is not TCapability capability)
             {
-                throw new InvalidOperationException("engine_automation_capability_missing");
+                throw new InvalidOperationException(capabilityMissingReason);
             }
-            return await operation(automation, token)
+            var operationTask = operation(capability, token);
+            operationIssued = true;
+            var result = await operationTask
                 .WaitAsync(token)
                 .ConfigureAwait(false);
+            if (!ReferenceEquals(session, boundSession) || generation != boundGeneration)
+            {
+                throw new InvalidOperationException(
+                    "engine_command_generation_changed");
+            }
+            return result;
         }
         catch (EngineCommandRejectedException)
         {
@@ -445,17 +480,26 @@ internal sealed class EngineSessionSupervisor :
             when (deadlineCancellation.IsCancellationRequested &&
                   !operationCancellation.IsCancellationRequested)
         {
-            await RetireSessionAsync().ConfigureAwait(false);
             var timeout = new TimeoutException(
-                "engine_automation_command_timeout",
+                $"{failureReason}_timeout",
                 exception);
-            RegisterFailure(timeout);
+            if (operationIssued)
+            {
+                await RetireSessionAsync().ConfigureAwait(false);
+                RegisterFailure(timeout);
+            }
             throw new InvalidOperationException(
-                "engine_automation_command_timeout",
+                $"{failureReason}_timeout",
                 timeout);
         }
         catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
         {
+            if (retireOnCallerCancellation &&
+                operationIssued &&
+                !lifetimeCancellation.IsCancellationRequested)
+            {
+                await RetireSessionAsync().ConfigureAwait(false);
+            }
             throw;
         }
         catch (InvalidOperationException exception)
@@ -467,11 +511,154 @@ internal sealed class EngineSessionSupervisor :
         {
             await RetireSessionAsync().ConfigureAwait(false);
             RegisterFailure(exception);
-            throw new InvalidOperationException("engine_automation_command_failed", exception);
+            throw new InvalidOperationException($"{failureReason}_failed", exception);
         }
         finally
         {
-            lifecycleGate.Release();
+            if (gateAcquired)
+            {
+                lifecycleGate.Release();
+            }
+        }
+    }
+
+    private async Task<FishingSessionStateSnapshot>
+        ExecuteGenerationBoundDispatchCommandAsync<TCapability>(
+            Func<TCapability, CancellationToken,
+                EngineCommandDispatch<FishingSessionStateSnapshot>> operation,
+            string capabilityMissingReason,
+            string failureReason,
+            CancellationToken cancellationToken)
+        where TCapability : class
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(capabilityMissingReason);
+        ArgumentException.ThrowIfNullOrWhiteSpace(failureReason);
+        ThrowIfStopped();
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            lifetimeCancellation.Token);
+        using var deadlineCancellation = new CancellationTokenSource(
+            policy.AutomationCommandTimeout,
+            timeProvider);
+        using var boundedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            operationCancellation.Token,
+            deadlineCancellation.Token);
+        var token = boundedCancellation.Token;
+        var gateAcquired = false;
+        EngineCommandDispatch<FishingSessionStateSnapshot>? dispatch = null;
+        try
+        {
+            await lifecycleGate.WaitAsync(token).ConfigureAwait(false);
+            gateAcquired = true;
+            ThrowIfStopped();
+            await EnsureSessionAsync(token).ConfigureAwait(false);
+            var boundSession = session ?? throw new InvalidOperationException(
+                "engine_supervisor_session_missing");
+            var boundGeneration = generation;
+            if (boundSession is not TCapability capability)
+            {
+                throw new InvalidOperationException(capabilityMissingReason);
+            }
+            dispatch = operation(capability, token);
+            var receipt = await dispatch.Completion
+                .WaitAsync(token)
+                .ConfigureAwait(false);
+            if (!ReferenceEquals(session, boundSession) || generation != boundGeneration)
+            {
+                throw new InvalidOperationException(
+                    "engine_command_generation_changed");
+            }
+            if (!receipt.BytesMayHaveBeenWritten)
+            {
+                throw new InvalidOperationException(
+                    "engine_command_dispatch_receipt_invalid");
+            }
+            return receipt.Result;
+        }
+        catch (EngineCommandRejectedException)
+        {
+            throw;
+        }
+        catch (EngineCommandDispatchException exception)
+            when (exception.InnerException is OperationCanceledException cancellation &&
+                  deadlineCancellation.IsCancellationRequested &&
+                  !operationCancellation.IsCancellationRequested)
+        {
+            dispatch?.CancelBeforeWrite();
+            var timeout = new TimeoutException(
+                $"{failureReason}_timeout",
+                cancellation);
+            if (dispatch?.BytesMayHaveBeenWritten == true ||
+                exception.BytesMayHaveBeenWritten)
+            {
+                await RetireSessionAsync().ConfigureAwait(false);
+                RegisterFailure(timeout);
+            }
+            throw new InvalidOperationException(
+                $"{failureReason}_timeout",
+                timeout);
+        }
+        catch (EngineCommandDispatchException exception)
+            when (exception.InnerException is OperationCanceledException cancellation &&
+                  operationCancellation.IsCancellationRequested)
+        {
+            dispatch?.CancelBeforeWrite();
+            if (!lifetimeCancellation.IsCancellationRequested &&
+                (dispatch?.BytesMayHaveBeenWritten == true ||
+                 exception.BytesMayHaveBeenWritten))
+            {
+                await RetireSessionAsync().ConfigureAwait(false);
+            }
+            throw new OperationCanceledException(
+                cancellation.Message,
+                cancellation,
+                cancellation.CancellationToken);
+        }
+        catch (OperationCanceledException exception)
+            when (deadlineCancellation.IsCancellationRequested &&
+                  !operationCancellation.IsCancellationRequested)
+        {
+            dispatch?.CancelBeforeWrite();
+            var timeout = new TimeoutException(
+                $"{failureReason}_timeout",
+                exception);
+            if (dispatch?.BytesMayHaveBeenWritten == true)
+            {
+                await RetireSessionAsync().ConfigureAwait(false);
+                RegisterFailure(timeout);
+            }
+            throw new InvalidOperationException(
+                $"{failureReason}_timeout",
+                timeout);
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            dispatch?.CancelBeforeWrite();
+            if (!lifetimeCancellation.IsCancellationRequested &&
+                dispatch?.BytesMayHaveBeenWritten == true)
+            {
+                await RetireSessionAsync().ConfigureAwait(false);
+            }
+            throw;
+        }
+        catch (InvalidOperationException exception)
+            when (IsRegisteredLifecycleFailure(exception))
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await RetireSessionAsync().ConfigureAwait(false);
+            RegisterFailure(exception);
+            throw new InvalidOperationException($"{failureReason}_failed", exception);
+        }
+        finally
+        {
+            if (gateAcquired)
+            {
+                lifecycleGate.Release();
+            }
         }
     }
 

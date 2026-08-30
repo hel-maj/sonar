@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.0-local",
+    [string]$Version = "1.0.6-local",
     [string]$OutputDirectory = "",
     [switch]$SkipOfflineTests,
     [string]$CommonFeed = $env:SONAR_COMMON_FEED,
@@ -9,6 +9,8 @@ param(
     [string]$CommonNativeLicensingPackage = $env:SONAR_COMMON_NATIVE_LICENSING_PACKAGE,
     [string]$CommonMajesticCatalogPackage =
         $env:SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE,
+    [string]$CommonMajesticRuntimeModulePackage =
+        $env:SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE,
     [string]$CommonMajesticCefInventoryPackage =
         $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
@@ -33,6 +35,7 @@ $arguments = @{
     CommonNativeWindowsPackage = $CommonNativeWindowsPackage
     CommonNativeLicensingPackage = $CommonNativeLicensingPackage
     CommonMajesticCatalogPackage = $CommonMajesticCatalogPackage
+    CommonMajesticRuntimeModulePackage = $CommonMajesticRuntimeModulePackage
     CommonMajesticCefInventoryPackage = $CommonMajesticCefInventoryPackage
     ProtocExecutable = $ProtocExecutable
     CMakeExecutable = $CMakeExecutable

@@ -664,8 +664,22 @@ make_inventory_binding_process(
     }
   }
   game->regions = {
-      {inventory_scan_base, 0x1000U, 0x1000U, 0x04U, 0x20000U},
-      {inventory_scan_base + 0x1000U, 0x1000U, 0U, 0x01U, 0U},
+      {
+          .base_address = inventory_scan_base,
+          .allocation_base = inventory_scan_base,
+          .size = 0x1000U,
+          .state = 0x1000U,
+          .protection = 0x04U,
+          .kind = 0x20000U,
+      },
+      {
+          .base_address = inventory_scan_base + 0x1000U,
+          .allocation_base = inventory_scan_base,
+          .size = 0x1000U,
+          .state = 0U,
+          .protection = 0x01U,
+          .kind = 0U,
+      },
   };
   return game;
 }
@@ -814,9 +828,30 @@ void materialize_aggregate_pe_layout(std::vector<std::byte>& module) {
         inventory_bytes, offset, *profile.inventory_binding, true);
   }
   game->regions = {
-      {module_base, 0x2000U, 0x1000U, 0x20U, 0x1000000U},
-      {inventory_scan_base, 0x1000U, 0x1000U, 0x04U, 0x20000U},
-      {inventory_scan_base + 0x1000U, 0x1000U, 0U, 0x01U, 0U},
+      {
+          .base_address = module_base,
+          .allocation_base = module_base,
+          .size = 0x2000U,
+          .state = 0x1000U,
+          .protection = 0x20U,
+          .kind = 0x1000000U,
+      },
+      {
+          .base_address = inventory_scan_base,
+          .allocation_base = inventory_scan_base,
+          .size = 0x1000U,
+          .state = 0x1000U,
+          .protection = 0x04U,
+          .kind = 0x20000U,
+      },
+      {
+          .base_address = inventory_scan_base + 0x1000U,
+          .allocation_base = inventory_scan_base,
+          .size = 0x1000U,
+          .state = 0U,
+          .protection = 0x01U,
+          .kind = 0U,
+      },
   };
   return {
       .profile = std::move(profile),
@@ -1027,6 +1062,30 @@ void test_trusted_runtime_semantic_admission() {
   require(!ambiguous.ready() &&
           ambiguous.reason == "memory_replay_endpoint_ambiguous",
       "trusted_runtime_ambiguous_replay_was_admitted");
+}
+
+void test_nonshipping_profile_fixture_preserves_missing_fish_reason() {
+  // This fixture characterizes the transitional profile-backed resolver only.
+  // It is not production authority and must disappear when Fishing consumes
+  // Common's closed GTA observation transaction.
+  auto fixture = make_aggregate_resolver_fixture();
+  fixture.game->identity.image_sha256.clear();
+  fixture.game->identity.admission =
+      observation::process_admission::trusted_publisher_runtime;
+  fixture.game->identity.authority_fingerprint = 19U;
+  fixture.game->memory.at(fixture.fish)
+      [fixture.profile.fish_active_offset] = std::byte{0U};
+  fake_connector connector(fixture.game, nullptr);
+  observation::memory_capture_plan_resolver resolver(
+      connector,
+      std::span<const observation::embedded_memory_build_profile>{
+          &fixture.profile, 1U});
+
+  const auto result = resolver.resolve_reeling(
+      1U, 100U, fixture.game->identity.generation);
+  require(!result.ready() &&
+          result.reason == "memory_active_fish_unavailable",
+      "profile_fixture_missing_active_fish_reason_was_collapsed");
 }
 
 void test_inventory_scope_discovery_and_recovery() {
@@ -1356,6 +1415,7 @@ int main() {
     test_inventory_scope_typed_blockers();
     test_aggregate_runtime_resolution_and_self_healing();
     test_trusted_runtime_semantic_admission();
+    test_nonshipping_profile_fixture_preserves_missing_fish_reason();
     test_independent_fish_identity_projection(rows);
     test_negative_and_profile_drift(rows);
     test_default_off_composition();

@@ -47,27 +47,36 @@ internal static class Program
             return result;
         }
 
-        if (args.Length != 0)
+        string? testPrefix = null;
+        if (args is ["--test-prefix", var requestedPrefix] &&
+            !string.IsNullOrWhiteSpace(requestedPrefix))
+        {
+            testPrefix = requestedPrefix;
+        }
+        else if (args.Length != 0)
         {
             Console.Error.WriteLine(
                 "Usage: Sonar.Fishing.Host.Tests [--render-ui <output-directory>] " +
-                "[--verify-saved-license <config-path>] [--verify-production-startup]");
+                "[--verify-saved-license <config-path>] [--verify-production-startup] " +
+                "[--test-prefix <prefix>]");
             application.Shutdown();
             return 2;
         }
 
-        var tests = EngineStatusScreenTests.Create(theme)
+        var allTests = EngineStatusScreenTests.Create(theme)
             .Concat(FishingSessionSummaryScreenTests.Create())
             .Concat(FishingHostNavigationTests.Create())
             .Concat(InventoryPageTests.Create())
             .Concat(HostRuntimeTests.Create())
             .Concat(EngineSupervisorTests.Create())
+            .Concat(EngineCommandDispatchTests.Create())
             .Concat(EngineSessionIdentityTests.Create())
             .Concat(FishingAutomationViewModelTests.Create())
             .Concat(FishingStateStoreTests.Create())
             .Concat(FishingFishCatalogTests.Create())
             .Concat(FishingProductModelTests.Create())
             .Concat(TelegramSettingsPageTests.Create())
+            .Concat(TelegramAvailabilityCoordinatorTests.Create())
             .Concat(TelegramInboundRouterTests.Create())
             .Concat(TelegramNotificationPlannerTests.Create())
             .Concat(TelegramEngineNotificationPublisherTests.Create())
@@ -89,6 +98,17 @@ internal static class Program
             .Concat(DesignSystemCompositionTests.Create())
             .Concat(UiGalleryRendererTests.Create())
             .ToArray();
+        var tests = testPrefix is null
+            ? allTests
+            : allTests.Where(
+                    test => test.Name.StartsWith(testPrefix, StringComparison.Ordinal))
+                .ToArray();
+        if (tests.Length == 0)
+        {
+            Console.Error.WriteLine($"No tests matched prefix '{testPrefix}'.");
+            application.Shutdown();
+            return 2;
+        }
         var failures = 0;
         foreach (var test in tests)
         {

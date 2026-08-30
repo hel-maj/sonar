@@ -36,6 +36,11 @@ void apply_handshake_mode(
   hello.set_diagnostic_mode(policy.diagnostic_mode);
   hello.set_side_effect_support(policy.side_effect_support);
   if (policy.advertises_session_control) {
+    auto* statistics_reset = hello.add_capabilities();
+    statistics_reset->set_capability_id(
+        fishing_session_statistics_reset_capability_id);
+    statistics_reset->set_major(1);
+    statistics_reset->set_minor(0);
     auto* capability = hello.add_capabilities();
     capability->set_capability_id(fishing_session_control_capability_id);
     capability->set_major(1);

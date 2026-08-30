@@ -1,3 +1,4 @@
+using Sonar.Fishing.Host.EngineIntegration;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.StatisticsPage;
 
@@ -12,6 +13,10 @@ internal static class CurrentSessionStatisticsTests
         new("current_statistics_rejects_inconsistent_native_aggregate", RejectsInconsistentAggregate),
         new("current_statistics_custom_price_normalizes_and_persists", CustomPricePersists),
         new("current_statistics_reset_uses_coarse_session_command", ResetUsesCoarseCommand),
+        new("current_statistics_duration_only_session_is_resettable", DurationOnlySessionIsResettable),
+        new("current_statistics_reset_rejection_preserves_snapshot", ResetRejectionPreservesSnapshot),
+        new("current_statistics_reset_cancel_without_retirement_preserves_snapshot", ResetCancellationWithoutRetirementPreservesSnapshot),
+        new("current_statistics_reset_double_click_is_single_flight", ResetDoubleClickIsSingleFlight),
     ];
 
     private static void MapsExactUnion()
@@ -105,19 +110,116 @@ internal static class CurrentSessionStatisticsTests
     private static void ResetUsesCoarseCommand()
     {
         var resets = 0;
+        var runtime = new FakeStatisticsRuntime(_ =>
+        {
+            resets++;
+            return Task.FromResult(FishingSessionStateSnapshot.Empty);
+        });
         var model = new StatisticsPageViewModel(
             CreateSnapshot(),
-            resetSession: () =>
-            {
-                resets++;
-                return FishingSessionStateSnapshot.Empty;
-            });
+            persistPrice: null,
+            runtime);
 
         TestAssert.True(model.ResetSessionCommand.CanExecute(null), "Populated session could not be reset");
-        model.ResetSessionCommand.Execute(null);
+        model.ResetSessionCommand.ExecuteAsync(null).GetAwaiter().GetResult();
         TestAssert.Equal(1, resets, "Session reset command was not coarse and singular");
         TestAssert.True(!model.Current.HasCatches, "Accepted reset did not replace the aggregate snapshot");
         TestAssert.True(!model.ResetSessionCommand.CanExecute(null), "Empty session remained resettable");
+        TestAssert.Equal(string.Empty, model.CommandStatus,
+            "Successful reset exposed a status toast/message");
+    }
+
+    private static void DurationOnlySessionIsResettable()
+    {
+        var durationOnly = new FishingSessionStateSnapshot(
+            3,
+            true,
+            false,
+            "active",
+            new FishingSessionTotalsSnapshot(4, 0, 0, 0, 0, 0, 0),
+            []);
+        var model = new StatisticsPageViewModel(
+            durationOnly,
+            persistPrice: null,
+            new FakeStatisticsRuntime(_ =>
+                Task.FromResult(FishingSessionStateSnapshot.Empty)));
+
+        TestAssert.True(model.ResetSessionCommand.CanExecute(null),
+            "Duration-only current session was not resettable");
+    }
+
+    private static void ResetRejectionPreservesSnapshot()
+    {
+        var snapshot = CreateSnapshot();
+        var model = new StatisticsPageViewModel(
+            snapshot,
+            persistPrice: null,
+            new FakeStatisticsRuntime(_ =>
+                Task.FromException<FishingSessionStateSnapshot>(
+                    new EngineCommandRejectedException(
+                        "reset-fishing-session-statistics",
+                        "session_statistics_reset_rejected"))));
+
+        model.ResetSessionCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+
+        TestAssert.True(model.Current.HasCatches,
+            "Rejected reset replaced the current aggregate");
+        TestAssert.Equal("Не удалось начать новую сессию", model.CommandStatus,
+            "Rejected reset lost its safe presentation state");
+    }
+
+    private static void ResetCancellationWithoutRetirementPreservesSnapshot()
+    {
+        var entered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var model = new StatisticsPageViewModel(
+            CreateSnapshot(),
+            persistPrice: null,
+            new FakeStatisticsRuntime(async cancellationToken =>
+            {
+                entered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                    .ConfigureAwait(false);
+                throw new InvalidOperationException("unreachable");
+            }));
+
+        var reset = model.ResetSessionCommand.ExecuteAsync(null);
+        TestAssert.True(entered.Task.Wait(TimeSpan.FromSeconds(1)),
+            "Reset command did not enter the runtime");
+        model.ResetSessionCommand.Cancel();
+        reset.GetAwaiter().GetResult();
+
+        TestAssert.True(model.Current.HasCatches,
+            "Cancelled reset replaced the current aggregate");
+        TestAssert.True(model.ResetSessionCommand.CanExecute(null),
+            "Cancelled reset did not restore command availability");
+    }
+
+    private static void ResetDoubleClickIsSingleFlight()
+    {
+        var calls = 0;
+        var entered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<FishingSessionStateSnapshot>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var model = new StatisticsPageViewModel(
+            CreateSnapshot(),
+            persistPrice: null,
+            new FakeStatisticsRuntime(_ =>
+            {
+                calls++;
+                entered.TrySetResult();
+                return release.Task;
+            }));
+
+        var first = model.ResetSessionCommand.ExecuteAsync(null);
+        TestAssert.True(entered.Task.Wait(TimeSpan.FromSeconds(1)),
+            "First reset command did not enter the runtime");
+        var second = model.ResetSessionCommand.ExecuteAsync(null);
+        TestAssert.Equal(1, calls, "Concurrent reset command crossed the single-flight gate");
+        release.TrySetResult(FishingSessionStateSnapshot.Empty);
+        Task.WhenAll(first, second).GetAwaiter().GetResult();
+        TestAssert.Equal(1, calls, "Reset command executed more than once");
     }
 
     private static FishingSessionStateSnapshot CreateSnapshot() => new(
@@ -148,4 +250,12 @@ internal static class CurrentSessionStatisticsTests
         null,
         2077,
         2263);
+
+    private sealed class FakeStatisticsRuntime(
+        Func<CancellationToken, Task<FishingSessionStateSnapshot>> reset) :
+        IFishingSessionStatisticsRuntime
+    {
+        public Task<FishingSessionStateSnapshot> ResetCurrentSessionAsync(
+            CancellationToken cancellationToken) => reset(cancellationToken);
+    }
 }

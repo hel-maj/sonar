@@ -1,6 +1,6 @@
 # ADR-0004: Common CEF inventory facade
 
-Статус: принято, обновлено 2026-08-26.
+Статус: принято, обновлено 2026-08-27.
 
 ## Контекст
 
@@ -14,10 +14,15 @@ reeling path или повторять на каждом UI frame после `un
 
 ## Решение
 
-Fishing exact-pins установленный `SonarMajesticCefInventory 0.1.19`, targets
-`Sonar::MajesticCefInventory` и `Sonar::MajesticCefInventoryContent`; SHA-256 его `SHA256SUMS.txt` равен
-`1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612`
-из Sonar Common commit `0c4baf0391134f05edd9a62e154001decb593c49`.
+Fishing exact-pins установленный `SonarMajesticRuntimeModule 0.1.3` / target
+`Sonar::MajesticRuntimeModule` и `SonarMajesticCefInventory 0.1.31` / targets
+`Sonar::MajesticCefInventory` и `Sonar::MajesticCefInventoryContent`. SHA-256
+их `SHA256SUMS.txt` равны соответственно
+`6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845` и
+`37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22`.
+RuntimeModule является единственным owner role-based trusted-publisher
+admission; CEF Inventory exact-зависит от него и добавляет только CEF/V8 и
+inventory content semantics.
 Continuous content factory включает closed-state bootstrap на собственной копии
 policy, поэтому содержимое не зависит от открытости inventory UI. Общий
 `acquisition_policy` остаётся strict-by-default; closed path по-прежнему требует
@@ -68,10 +73,10 @@ input gates. Неизвестность либо drift остаются fail-clo
 
 ## Последствия и rollback
 
-- Fishing зависит только от публичного Common content/provider surface;
-  локальные `Windows.h`, verifier, renderer/V8 headers и copied layouts запрещены
-  ownership test. Тот же test запрещает возврат exact-profile factory и
-  candidate identifiers в runtime adapter.
+- Fishing зависит только от публичных Common RuntimeModule и CEF
+  content/provider surfaces; локальные verifier, renderer/V8 headers и copied
+  layouts запрещены ownership test. Тот же test запрещает возврат
+  exact-profile factory и candidate identifiers в runtime adapter.
 - Любой Common failure отображается как typed unavailable reason; last-known
   replay отсутствует.
 - Обновление package требует нового exact version/hash и повторного Release

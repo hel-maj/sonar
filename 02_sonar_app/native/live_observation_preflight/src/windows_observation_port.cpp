@@ -186,12 +186,16 @@ class windows_observation_port final : public observation_port {
           target_->process);
       if (!resolved.ready() || !resolved.profile.has_value() ||
           !resolved.plan.has_value()) {
-        return {.reason = readiness_reason::memory_unavailable};
+        return {
+            .reason = classify_memory_failure_reason(resolved.reason),
+        };
       }
       memory::memory_observer observer(*memory_connector_);
       const auto captured = observer.capture(*resolved.profile, *resolved.plan);
       if (!captured.ready() || !captured.snapshot.has_value()) {
-        return {.reason = readiness_reason::memory_unavailable};
+        return {
+            .reason = classify_memory_failure_reason(captured.reason),
+        };
       }
       const auto& snapshot = *captured.snapshot;
       if (snapshot.sequence != frame_->sequence ||

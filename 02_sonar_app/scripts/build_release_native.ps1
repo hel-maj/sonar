@@ -11,6 +11,8 @@ param(
     [string]$CommonNativeLicensingPackage = $env:SONAR_COMMON_NATIVE_LICENSING_PACKAGE,
     [string]$CommonMajesticCatalogPackage =
         $env:SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE,
+    [string]$CommonMajesticRuntimeModulePackage =
+        $env:SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE,
     [string]$CommonMajesticCefInventoryPackage =
         $env:SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE,
     [string]$ProtocExecutable = $env:SONAR_PROTOC_EXECUTABLE,
@@ -25,6 +27,7 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "release_common.ps1")
 . (Join-Path $PSScriptRoot "common_inventory_package.ps1")
+. (Join-Path $PSScriptRoot "common_runtime_module_package.ps1")
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $releaseMode = if ($DeveloperFullAccess) {
@@ -253,6 +256,7 @@ function Build-FishingEngine(
     [string]$ResolvedNativeWindowsPackage,
     [string]$ResolvedNativeLicensingPackage,
     [string]$ResolvedMajesticCatalogPackage,
+    [string]$ResolvedMajesticRuntimeModulePackage,
     [string]$ResolvedMajesticCefInventoryPackage,
     [string]$ResolvedInventoryContractRoot,
     [string]$ResolvedProtoc) {
@@ -275,6 +279,7 @@ function Build-FishingEngine(
         "-DSONAR_COMMON_NATIVE_WINDOWS_PACKAGE=$ResolvedNativeWindowsPackage",
         "-DSONAR_COMMON_NATIVE_LICENSING_PACKAGE=$ResolvedNativeLicensingPackage",
         "-DSONAR_COMMON_MAJESTIC_CATALOG_PACKAGE=$ResolvedMajesticCatalogPackage",
+        "-DSONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE=$ResolvedMajesticRuntimeModulePackage",
         "-DSONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE=$ResolvedMajesticCefInventoryPackage",
         "-DSONAR_COMMON_INVENTORY_CONTRACT_ROOT=$ResolvedInventoryContractRoot",
         "-DSONAR_PROTOC_EXECUTABLE=$ResolvedProtoc",
@@ -331,13 +336,17 @@ if (-not $DevelopmentUnsigned) {
 if ($SkipOfflineTests) {
     & (Join-Path $PSScriptRoot "setup_native.ps1") `
         -CommonFeed $CommonFeed `
+        -CommonNativeWindowsPackage $CommonNativeWindowsPackage `
         -CommonMajesticCatalogPackage $CommonMajesticCatalogPackage `
+        -CommonMajesticRuntimeModulePackage $CommonMajesticRuntimeModulePackage `
         -CommonMajesticCefInventoryPackage $CommonMajesticCefInventoryPackage
 }
 else {
     & (Join-Path $PSScriptRoot "test_native.ps1") `
         -CommonFeed $CommonFeed `
+        -CommonNativeWindowsPackage $CommonNativeWindowsPackage `
         -CommonMajesticCatalogPackage $CommonMajesticCatalogPackage `
+        -CommonMajesticRuntimeModulePackage $CommonMajesticRuntimeModulePackage `
         -CommonMajesticCefInventoryPackage $CommonMajesticCefInventoryPackage
 }
 
@@ -354,7 +363,7 @@ $resolvedNativePackage = Resolve-RequiredDirectory `
     "Sonar Platform IPC native package"
 $resolvedNativeWindowsPackage = Resolve-RequiredDirectory `
     $CommonNativeWindowsPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.9") `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-native-windows\0.1.12") `
     "Sonar Platform Windows native package"
 $resolvedNativeLicensingPackage = Resolve-RequiredDirectory `
     $CommonNativeLicensingPackage `
@@ -362,12 +371,18 @@ $resolvedNativeLicensingPackage = Resolve-RequiredDirectory `
     "Sonar Platform Licensing native package"
 $resolvedMajesticCatalogPackage = Resolve-RequiredDirectory `
     $CommonMajesticCatalogPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-catalog\1.0.0") `
-    "Sonar Majestic Catalog 1.0.0 package"
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-catalog\1.1.0") `
+    "Sonar Majestic Catalog 1.1.0 package"
+$resolvedMajesticRuntimeModulePackage = Resolve-RequiredDirectory `
+    $CommonMajesticRuntimeModulePackage `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-runtime-module\0.1.3") `
+    "Sonar Majestic Runtime Module 0.1.3 package"
+$resolvedMajesticRuntimeModulePackage = Assert-FishingCommonRuntimeModulePackage `
+    $resolvedMajesticRuntimeModulePackage
 $resolvedMajesticCefInventoryPackage = Resolve-RequiredDirectory `
     $CommonMajesticCefInventoryPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.19") `
-    "Sonar Majestic CEF Inventory 0.1.19 package"
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.31") `
+    "Sonar Majestic CEF Inventory 0.1.31 package"
 $resolvedMajesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
     $resolvedMajesticCefInventoryPackage
 $resolvedProtoc = Resolve-RequiredExecutable `
@@ -408,14 +423,16 @@ $firstHost = Publish-FishingHost $firstBuild $localFeed $resolvedProtoc
 $firstEngine = Build-FishingEngine `
     $firstBuild $resolvedCMake $resolvedNativePackage `
     $resolvedNativeWindowsPackage $resolvedNativeLicensingPackage `
-    $resolvedMajesticCatalogPackage $resolvedMajesticCefInventoryPackage `
+    $resolvedMajesticCatalogPackage $resolvedMajesticRuntimeModulePackage `
+    $resolvedMajesticCefInventoryPackage `
     $resolvedInventoryContractRoot `
     $resolvedProtoc
 $secondHost = Publish-FishingHost $secondBuild $localFeed $resolvedProtoc
 $secondEngine = Build-FishingEngine `
     $secondBuild $resolvedCMake $resolvedNativePackage `
     $resolvedNativeWindowsPackage $resolvedNativeLicensingPackage `
-    $resolvedMajesticCatalogPackage $resolvedMajesticCefInventoryPackage `
+    $resolvedMajesticCatalogPackage $resolvedMajesticRuntimeModulePackage `
+    $resolvedMajesticCefInventoryPackage `
     $resolvedInventoryContractRoot `
     $resolvedProtoc
 
@@ -433,7 +450,10 @@ if (-not $determinismVerified) {
     Write-Warning "Development bundle built, but clean-directory unsigned hashes differ."
 }
 
-$bundle = Reset-FishingBuildDirectory $productRoot $OutputDirectory "release bundle"
+$bundle = Reset-FishingBuildDirectory `
+    $productRoot `
+    (Join-Path $workRoot "candidate-bundle") `
+    "release candidate bundle"
 Copy-Item -LiteralPath $firstHost -Destination (Join-Path $bundle "Sonar.exe")
 Copy-Item -LiteralPath $firstEngine -Destination (Join-Path $bundle "Sonar.Engine.exe")
 New-Item -ItemType Directory -Path (Join-Path $bundle "config") -Force | Out-Null
@@ -493,6 +513,32 @@ if ($DeveloperFullAccess) {
 else {
     Assert-FishingHighConfidenceSecretScan $bundle
 }
+
+$alreadyCurrent = $false
+if (Test-Path -LiteralPath $OutputDirectory -PathType Container) {
+    $alreadyCurrent = Assert-FishingImmutableBundleVersionReplacement `
+        $productRoot `
+        $OutputDirectory `
+        $bundle `
+        $releaseMode `
+        -AllowDeveloperFullAccess:$DeveloperFullAccess
+}
+if (-not $alreadyCurrent) {
+    $publishedBundle = Reset-FishingBuildDirectory `
+        $productRoot $OutputDirectory "release bundle"
+    foreach ($entry in @(Get-ChildItem -LiteralPath $bundle -Force)) {
+        Copy-Item `
+            -LiteralPath $entry.FullName `
+            -Destination $publishedBundle `
+            -Recurse
+    }
+    $candidateTreeHash = Get-FishingVerifiedBundleTreeHash $bundle
+    $publishedTreeHash = Get-FishingVerifiedBundleTreeHash $publishedBundle
+    if ($candidateTreeHash -cne $publishedTreeHash) {
+        throw "release_bundle_publish_tree_mismatch"
+    }
+}
+$bundle = $OutputDirectory
 
 Write-Output "PASS Fishing $releaseMode bundle: $bundle"
 Write-Output "BUNDLE_DIRECTORY=$bundle"

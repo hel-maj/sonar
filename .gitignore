@@ -26,6 +26,7 @@ env/
 # Build output
 build/
 dist/
+/.codex-temp/
 *.egg-info/
 *.build/
 *.dist/

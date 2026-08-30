@@ -120,6 +120,11 @@ struct production_capability_admission final {
   std::string reason;
 };
 
+struct production_statistics_reset_result final {
+  production_capability_snapshot progress;
+  session_statistics::SessionTotals totals_before_reset;
+};
+
 // One product-owned coarse operation seam. Implementations keep observation,
 // decision, immediate final revalidation and mutation inside the Engine. The
 // Host never receives a frame, address, detector step or individual input RPC.
@@ -183,6 +188,12 @@ class production_capability_composition final
       std::uint64_t admitted_entitlement_generation,
       std::int64_t expires_unix_seconds) noexcept;
 
+  // Linearizes the in-memory statistics reset with all progress updates. The
+  // result carries the post-reset aggregate plus the same-boundary prior totals
+  // needed only for an already-completed session notification. Lifecycle,
+  // authority and the running automation operation are unchanged.
+  [[nodiscard]] production_statistics_reset_result reset_session_statistics();
+
   void stop() noexcept;
 
   [[nodiscard]] catch_observation::CatchObservation interpret_catch(
@@ -202,6 +213,8 @@ class production_capability_composition final
   void enqueue_notification(
       production_notification_event notification) noexcept;
   void advance_progress_revision() noexcept;
+  [[nodiscard]] production_capability_snapshot snapshot_locked(
+      double now_seconds) const;
 
   std::unique_ptr<production_automation_session_factory> factory_;
   std::unique_ptr<production_automation_session> session_;

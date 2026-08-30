@@ -21,23 +21,10 @@
                     x:Name="EngineStatusScreen"
                     layout:ResponsiveGrid.CompactSpan="4"
                     layout:ResponsiveGrid.MediumSpan="8"
-                    layout:ResponsiveGrid.ExpandedSpan="6"
+                    layout:ResponsiveGrid.ExpandedSpan="12"
                     StartCommand="{Binding ViewModel.StartFishingCommand, ElementName=Root}"
                     StopCommand="{Binding ViewModel.StopFishingCommand, ElementName=Root}"
                     ViewModel="{Binding ViewModel.EngineStatus, ElementName=Root}" />
-                <common:Card
-                    layout:ResponsiveGrid.CompactSpan="4"
-                    layout:ResponsiveGrid.MediumSpan="8"
-                    layout:ResponsiveGrid.ExpandedSpan="6"
-                    Header="Игра">
-                    <common:AspectRatioFrame AspectRatio="1.7777777777777777">
-                        <common:ImageSlot
-                            AutomationLabel="Окно игры"
-                            Placeholder="Нет изображения"
-                            State="Empty"
-                            Stretch="Uniform" />
-                    </common:AspectRatioFrame>
-                </common:Card>
             </layout:ResponsiveGrid>
             <sessionSummary:FishingSessionSummaryScreen
                 x:Name="FishingSessionSummaryScreen"

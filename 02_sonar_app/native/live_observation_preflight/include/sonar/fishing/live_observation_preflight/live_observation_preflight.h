@@ -22,6 +22,13 @@ enum class readiness_reason : std::uint8_t {
   capture_unavailable,
   detector_unavailable,
   memory_unavailable,
+  memory_module_scan_incomplete,
+  memory_semantic_layout_unresolved,
+  memory_semantic_layout_ambiguous,
+  memory_active_fish_unavailable,
+  memory_active_fish_incomplete,
+  memory_active_fish_ambiguous,
+  memory_capture_unavailable,
   internal_error,
 };
 
@@ -66,6 +73,8 @@ struct preflight_result final {
 };
 
 [[nodiscard]] preflight_result run(observation_port& port) noexcept;
+[[nodiscard]] readiness_reason classify_memory_failure_reason(
+    std::string_view reason) noexcept;
 [[nodiscard]] std::string_view reason_key(readiness_reason reason) noexcept;
 [[nodiscard]] std::string serialize_json(const preflight_result& result);
 

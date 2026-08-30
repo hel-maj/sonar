@@ -283,6 +283,7 @@ public partial class App : Application
             state,
             healthUseCase,
             automationRuntime,
+            automationRuntime,
             supervisor,
             supervisor,
             _licenseRuntime,

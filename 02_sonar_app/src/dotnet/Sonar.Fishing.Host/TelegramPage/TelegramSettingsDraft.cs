@@ -46,7 +46,10 @@ public sealed partial class TelegramSettingsDraft
 
     public TelegramSoundSettings Sounds { get; }
 
-    public bool ConfigurationReady => BotToken.Length != 0 && AdminIds.Count != 0;
+    public bool ConfigurationReady =>
+        BotToken.Length != 0 &&
+        AdminIds.Count != 0 &&
+        AdminIds.All(value => value > 0);
 
     public int EnabledNotificationCount => new[]
     {

@@ -328,19 +328,6 @@
                         </ScrollViewer>
                     </StackPanel>
                 </common:SettingsSection>
-
-                <common:Card Margin="0,24,0,0" Header="Удаление" Variant="Danger">
-                    <StackPanel>
-                        <TextBlock Text="Перед удалением остановите рыбалку и сохраните нужные настройки." TextWrapping="Wrap" />
-                        <common:ActionButton
-                            Margin="0,16,0,0"
-                            HorizontalAlignment="Left"
-                            AutomationProperties.Name="Удалить Sonar Fishing"
-                            Content="Удалить программу"
-                            IsEnabled="False"
-                            Role="Danger" />
-                    </StackPanel>
-                </common:Card>
             </StackPanel>
         </common:PageContainer>
     </common:PageScrollViewer>

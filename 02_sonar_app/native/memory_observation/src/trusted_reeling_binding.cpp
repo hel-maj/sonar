@@ -720,6 +720,7 @@ trusted_reeling_binding resolve_trusted_reeling_binding(
 
     std::vector<trusted_reeling_binding> admitted;
     std::string uncertain;
+    std::set<std::string> definitive_rejections;
     bool matching_profile = false;
     for (const auto& profile : profiles) {
       if (!same_image_name(image_name, profile.game.image_name)) {
@@ -731,6 +732,8 @@ trusted_reeling_binding resolve_trusted_reeling_binding(
       if (!player.ready()) {
         if (uncertain_reason(player.reason)) {
           uncertain = player.reason;
+        } else if (!player.reason.empty()) {
+          definitive_rejections.insert(player.reason);
         }
         continue;
       }
@@ -739,6 +742,8 @@ trusted_reeling_binding resolve_trusted_reeling_binding(
       if (!replay.ready()) {
         if (uncertain_reason(replay.reason)) {
           uncertain = replay.reason;
+        } else if (!replay.reason.empty()) {
+          definitive_rejections.insert(replay.reason);
         }
         continue;
       }
@@ -747,6 +752,8 @@ trusted_reeling_binding resolve_trusted_reeling_binding(
       if (!fish.ready()) {
         if (uncertain_reason(fish.reason)) {
           uncertain = fish.reason;
+        } else if (!fish.reason.empty()) {
+          definitive_rejections.insert(fish.reason);
         }
         continue;
       }
@@ -768,6 +775,9 @@ trusted_reeling_binding resolve_trusted_reeling_binding(
       return {.reason = "memory_semantic_layout_ambiguous"};
     }
     if (admitted.empty()) {
+      if (definitive_rejections.size() == 1U) {
+        return {.reason = std::move(*definitive_rejections.begin())};
+      }
       return {.reason = matching_profile
           ? "memory_semantic_layout_unresolved"
           : "memory_semantic_layout_unavailable"};

@@ -190,6 +190,7 @@ Coarse contract:
 
 - `StartFishingSession`;
 - `StopAutomation`;
+- `ResetFishingSessionStatistics`;
 - `RequestPlayerStatusScan`;
 - `FishingSessionSnapshot`;
 - `PhaseChanged`, `CommandRejected`, typed domain facts/faults.
@@ -257,6 +258,13 @@ audio, но не создает history/CSV/outbox:
 - `CatchResolved`;
 - `TackleScanCompleted`;
 - `SessionStopped`.
+
+Current-session reset является отдельной coarse typed operation. Field `24`
+обнуляет один Engine-owned aggregate под тем же state gate, сохраняет fishing
+lifecycle/settings и возвращает один correlated snapshot. Host привязывает
+операцию к exact Engine generation; timeout/cancellation retire-ит обмен, а
+supervisor не replay-ит reset после recovery. См.
+[ADR-0006](ADR-0006-CURRENT-SESSION-STATISTICS-RESET.md).
 
 Disconnect/crash во время side-effect session делает всю активную session
 `OperationOutcomeUnknown`. Новый Engine не продолжает и не replay-ит side
@@ -1486,12 +1494,13 @@ and revalidates the trusted lease after the last byte. Module/file/generation
 drift, partial reads, ambiguous decodes and replayed sequences return no
 snapshot; exact SHA remains only an injected forensic/replay contract.
 
-The Windows adapter uses Common `trusted_module_lease` for least-rights process
-access, pinned file/module identity, region enumeration and exact memory reads.
-Fishing adds Rockstar publisher policy, bounded semantic scan and decoder/
-layout policy; it contains no local signer/file/process verifier. Normal
+The Windows adapter uses exact-pinned Common `SonarMajesticRuntimeModule 0.1.3`
+for role-owned trusted-publisher admission, least-rights process access, pinned
+file/module identity, region enumeration and exact memory reads. Fishing adds
+the bounded semantic scan and decoder/layout policy; it contains no local
+module/publisher policy or signer/file/process verifier. Normal
 Engine instantiates this adapter for reeling only. A separate cancellable Engine
-worker owns exact-pinned Common `SonarMajesticCefInventory 0.1.19` content
+worker owns exact-pinned Common `SonarMajesticCefInventory 0.1.31` content
 provider, so cold discovery/content decode cannot block reeling, control IPC or
 heartbeat. Common owns CEF/V8 discovery, version-independent publisher/file/
 process admission, coherent read transaction, hot binding and product-neutral
@@ -1784,3 +1793,42 @@ startup, public viewer access, failure recovery, performance, signing and
 installed/update/rollback allowlist remain unaccepted. Chat mode has no product
 bridge and stays hidden/fail-closed. Full status and boundaries are in
 [H07_STREAMING_RUNTIME.md](H07_STREAMING_RUNTIME.md).
+
+### Phase 50 - truthful Host capabilities and Telegram availability
+
+The Statistics action now crosses one append-only field-24 typed command from
+WPF Host to C++ Engine. The Engine resets only its in-memory aggregate at one
+linearization boundary and publishes the correlated empty snapshot. Capability
+negotiation excludes offline diagnostics, while Host timeout/cancellation and
+replacement preserve exact-generation/no-replay semantics. Rapid UI invocation
+has an atomic single-flight gate and does not create a success banner. One
+revision-aware owner merges the correlated command response and asynchronous
+session events, so a delayed N response cannot overwrite an already published
+N+1 event. A timeout before issue preserves the healthy generation; ambiguous
+timeout/cancellation after issue retires it and projects fail-closed empty state,
+while caller cancellation does not consume the runtime failure/backoff budget.
+If reset capture observes an operation that completed after the pre-dispatch
+poll, the shared lifecycle reconciler emits exactly one stopped notification
+with the original Start correlation before advancing published progress.
+
+Telegram availability is no longer inferred from Local Access, saved settings
+or syntactically valid credentials. One Host-owned coordinator performs a real
+HTTPS `getMe` proof for the current token/admin identity before a new enable,
+including while the valid draft is still disabled. It serializes one probe or
+polling generation per lane, drops stale results, retains polling offset only
+for the same persisted identity, bounds probe/stop/retry and redacts the token
+from state and errors. An unsaved draft is probed independently and cannot stop
+or reset the persisted enabled runtime; discard resumes the same cursor and a
+saved identity replacement resets it exactly once. Terminal Stop invalidates
+both generations, and even a non-cooperative late probe cannot update state or
+notify UI. A previously enabled setting survives a transient outage, but polling
+remains gated until fresh availability returns.
+No live Telegram send/update acceptance is claimed by the offline tests.
+
+Three unsupported visible surfaces now collapse instead of advertising inert
+behavior: stream chat without a bridge, a game preview without a fresh preview
+source, and Settings uninstall without production-signed after-exit activation.
+Their controller/transaction internals remain independently testable and the UI
+can return only when the owning capability is composed. Focused and full gates
+are recorded in the current cutover checklist rather than frozen into this
+historical phase log.

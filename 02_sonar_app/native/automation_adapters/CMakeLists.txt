@@ -105,6 +105,7 @@ add_test(
     NAME sonar_fishing.common_inventory_open_package_ownership
     COMMAND "${CMAKE_COMMAND}"
         "-DPACKAGE_ROOT=${SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE}"
+        "-DRUNTIME_PACKAGE_ROOT=${SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE}"
         "-DCATALOG_PACKAGE_ROOT=${SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE}"
         "-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_common_inventory_package_ownership.cmake"

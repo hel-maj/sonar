@@ -306,8 +306,8 @@ internal static class UiGalleryRenderer
         var overview = new OverviewPageViewModel(galleryTelegram, recentEvents);
         overview.ApplySessionState(session);
 
-        var fishing = FishingPageViewModel.CreateProduction(
-            new GalleryAutomationRuntime(session));
+        var automation = new GalleryAutomationRuntime(session);
+        var fishing = FishingPageViewModel.CreateProduction(automation);
         fishing.ApplySessionState(session);
 
         var settings = new FishingSettingsPageViewModel(state.Fishing, _ => { });
@@ -341,7 +341,7 @@ internal static class UiGalleryRenderer
             new StatisticsPageViewModel(
                 session,
                 (_, _) => { },
-                () => FishingSessionStateSnapshot.Empty),
+                automation),
             streaming,
             telegram,
             new AboutPageViewModel(() => { }),
@@ -563,7 +563,9 @@ internal static class UiGalleryRenderer
     }
 
     private sealed class GalleryAutomationRuntime(
-        FishingSessionStateSnapshot snapshot) : IFishingAutomationRuntime
+        FishingSessionStateSnapshot snapshot) :
+        IFishingAutomationRuntime,
+        IFishingSessionStatisticsRuntime
     {
         public bool HasActiveEntitlement => true;
 
@@ -577,6 +579,13 @@ internal static class UiGalleryRenderer
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(snapshot);
+        }
+
+        public Task<FishingSessionStateSnapshot> ResetCurrentSessionAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(FishingSessionStateSnapshot.Empty);
         }
     }
 

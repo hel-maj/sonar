@@ -4,6 +4,8 @@ namespace Sonar.Fishing.Host.TelegramPage;
 
 public sealed record TelegramBotApiUpdate(long UpdateId, ReadOnlyMemory<byte> Utf8Json);
 
+public sealed record TelegramBotIdentity(long Id, string Username);
+
 public interface ITelegramBotApi
 {
     Task<IReadOnlyList<TelegramBotApiUpdate>> GetUpdatesAsync(

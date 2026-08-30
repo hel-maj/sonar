@@ -4,7 +4,7 @@
 overlay; legacy UI owner retired, native production cutover выполнен, live и
 signed-release acceptance остаются отдельными gates
 
-Дата: 2026-08-24
+Дата: 2026-08-27
 
 ## 1. Граница ledger
 
@@ -26,12 +26,13 @@ phase-status читаются вместе с этим текущим code-backe
   `A2B33A8D7E6F7F4803F8A5D4F703CF091D8D4A18B51F4147413A8D90837BA6A8`;
 - 8/8 product pages consume Common AppShell/AppBrand/page/grid/dashboard/
   settings/table/master-detail/state patterns without copied Common XAML;
-- 180 deterministic renders cover compact/medium/expanded and
+- 204 deterministic renders cover compact/medium/expanded and
   100/125/150/200%, plus threshold-slider, fish-selection, hotkey-conflict and
   startup checking/blocked/unavailable variants;
-- statistics, settings, native fishing, hotkeys, licensing and Telegram subset
-  have production owners; Stream, general update and unverified Telegram/game
-  actions remain unavailable with exact prerequisites in the cutover matrix.
+- statistics, settings, native fishing, hotkeys, licensing and the verified
+  Telegram subset have production owners. Unsupported stream chat, empty game
+  preview, uninstall and unverified Telegram/game actions are collapsed until
+  their exact prerequisites in the cutover matrix are met.
 
 В ledger:
 
@@ -64,23 +65,23 @@ the current overlay in section 1 above.
 | `SHELL-03` | `_page`, `_scroll_page`, `eventFilter` и `_forward_page_wheel` дают page header, outer scroll и Fishing-specific nested-wheel policy | Common владеет responsive scroll shell и accessibility; package 0.1.0 еще не заменяет весь policy | Не перехватывать wheel у nested lists; `ContainedScrollArea` должен consume локальный wheel | **Pending.** Перенос после Common scroll contract/interaction tests, без копии Qt helper |
 | `OVR-01` | `Обзор`: control card рыбалки и компактное `Состояние системы` без снастей | `Card`, `StatusBadge`, `ActionButton`, `MetricCard`, `SectionHeader` | Две product projections одного bot/session state, preview content и exact game/player statuses | **Pending**, кроме inert control mapping из Phase 3; нужен один revisioned read-only snapshot adapter |
 | `OVR-02` | `Текущая сессия`: время, поймано, **оставлено** (`kept_count`), доход и доход/час; premium gate скрывает четыре metric | `MetricCard` либо product compact composition поверх Common tokens | В Overview третья metric намеренно показывает kept, а не released; premium visibility policy и income/hour | **Pending.** Не переиспользовать Phase 7 `Отпущено` с другой семантикой |
-| `OVR-03` | Telegram summary: enabled badge, Chat ID, runtime status, notification summary, переход в настройки | `Card`, `StatusBadge`, `ActionButton` | Credential-safe content, feature gate, availability state, navigation callback | **Managed model partial.** Credential-safe Host draft/status/signature and seven-notification count are ready; Overview projection/navigation and Common 0.2 composition remain |
+| `OVR-03` | Telegram summary: enabled badge, Chat ID, runtime status, notification summary, переход в настройки | `Card`, `StatusBadge`, `ActionButton` | Credential-safe content, feature gate, availability state, navigation callback | **Production Host composed / live network acceptance pending.** Summary consumes credential-safe persisted state; matching draft availability now comes from a real bounded `getMe` coordinator with stale-generation drop and redacted failure copy |
 | `OVR-04` | Stream summary: on/off badge, status, quality, mode и переход в настройки | `Card`, `StatusBadge`, `ActionButton` | Stream lifecycle snapshot, feature gate и navigation callback | **Phase 23 offline done / runtime partial.** Overview and Stream consume one immutable Host snapshot; real process/network lifecycle and settings-navigation action remain |
 | `OVR-05` | `Последние события`: in-memory ordered rows time/level/message/extra, empty state, nested scrolling и `Очистить` | `Card`, `ActionButton`, typography/scroll contract | In-memory event ownership, order, level tone, clear command и bounded retention | **Pending.** Presenter возможен после typed event snapshot; clear остается отдельной command boundary |
 | `LIC-01` | `Лицензия`: masked key activation form, status/errors; account status, tier и expiry metrics | `Card`, `ActionButton`, `MetricCard`, text-input/accessibility primitives | Secret handling, activation lifecycle, feature catalog, account copy and error mapping | **Pending.** Network/license operations не входят в inert UI; key нельзя помещать в logs/snapshots |
-| `FISH-01` | Две копии control card показывают ready/running/stopping, detected stage, `Старт/Стоп`, hotkey badge и 192x108 game preview | `Card`, `StatusBadge`, `ActionButton`, generic image surface | Bot lifecycle mapping, hotkey content, preview source/refresh, start/stop commands and safety gate | **WPF migration partial.** Demo явно fake и скрывает actions. Offline mode получает real revision/stage/running flags от contained inert C++ Engine event; это доказывает mapper, но не production lifecycle. Preview/hotkey/live commands и complete state-machine authority pending |
+| `FISH-01` | Две копии control card показывают ready/running/stopping, detected stage, `Старт/Стоп`, hotkey badge и 192x108 game preview | `Card`, `StatusBadge`, `ActionButton`, generic image surface | Bot lifecycle mapping, hotkey content, preview source/refresh, start/stop commands and safety gate | **Native control composed / preview withheld.** Production control, hotkey and session state use one coarse Engine runtime. Empty preview is collapsed because no fresh product preview grant/source exists; historical 16:9 evidence does not justify an inert placeholder |
 | `FISH-02` | `Состояние системы`: игра, inventory, food, water, bait, leader/hook, net; value/subtitle и red/green state dot | `Card`, `MetricCard` or product tile composition, `StatusBadge` semantic tone | Exact unknown/present/count formatting, game availability and session tackle mapping | **Pending.** Нужен atomic snapshot from game/player/tackle sources; нельзя собирать inconsistent UI state несколькими fine RPC |
 | `FISH-03` | Нижняя сводка: `Время`, `Поймано`, `Отпущено`, `Доход`; рядом полный список rod/reel/line/hook/bait/net или exact empty text | Package `Card`, `SectionHeader`, `MetricCard`; Common owns adaptive value sizing and accessible names | Exact `format_duration`, exact money range threshold/rounding, released (не kept) count, slot names/order/count text | **WPF migration partial.** C++ `SessionStatistics` и shared corpus переносят semantics; offline page получает real revisioned C++ aggregate and mapper, demo остается fake. Inert Engine сейчас публикует только корректное пустое session state, поэтому non-zero/live parity, full visual matrix и production cutover pending |
 | `SET-01` | Behavior grid: auto-meal, depleted food/overweight/equipment actions, auto-bait, trunk, sound, leader/net fallback and dependent enable/visibility rules | `Card`, `ToggleSwitch`, `NonScrollingComboBox` | Settings schema, allowed option IDs, dependency rules and destructive action copy | **Partial.** Managed `config/state.dat`, round-trip, recovery and legacy migration готовы offline; editable WPF page, dependency rules and revisioned save/apply pending |
 | `SET-02` | Food/water recovery threshold sliders | Generic slider/tokens/accessibility принадлежат Common UI platform | Units, limits, persistence and application timing | **Pending.** Contract должен быть resolution-independent and keyboard accessible |
 | `SET-03` | Fish keep list: sorted localized fish cards, select all/clear all, contained scroll; drives exact selected-ID policy | Common card/toggle/scroll primitives | Fish catalog snapshot, stable fish IDs, selection semantics and catch-disposition policy revision | **Pending.** Нельзя отправлять отдельные stateful decisions; Host передает immutable policy snapshot coarse Engine operation |
 | `SET-04` | Six `HotkeyButton` bindings implement capture, normalization, Escape/focus cancel and suppress-until-release; save applies config immediately | Common 0.2.22 `HotkeyCapture`/`HotkeyGesture` own generic capture, focus and presentation | Command names, defaults, conflicts, persistence and runtime application | **Done native / live acceptance pending.** Capture/save/conflict UX is shared; normal Host reads the latest persisted start/stop gesture in one bounded lifecycle, suppresses while its own window is foreground, requires full release and invokes the existing coarse entitlement-gated automation command once per press |
-| `SET-05` | Danger uninstall card performs availability check, confirmation and self-removal | `Card` danger variant and `ActionButton` danger role | Product install topology, warning copy, confirmation and destructive operation | **Pending / release boundary.** Не входит в offline migration slice |
-| `STAT-01` | Actions `Новая сессия` и CSV export; filter supports current, saved session, date, range and since-date | `ActionButton`, `NonScrollingComboBox`, input primitives | Filter grammar/errors, export schema and session reset command | **Target split.** Current-session filter may move; persistent saved-session history is **Do not copy** because target WPF release keeps session statistics in memory only |
+| `SET-05` | Danger uninstall card performs availability check, confirmation and self-removal | `Card` danger variant and `ActionButton` danger role | Product install topology, warning copy, confirmation and destructive operation | **Capability-gated / collapsed.** H08 transaction core remains tested, but Settings does not expose uninstall until production-signed after-exit activation exists |
+| `STAT-01` | Actions `Новая сессия` и CSV export; filter supports current, saved session, date, range and since-date | `ActionButton`, `NonScrollingComboBox`, input primitives | Filter grammar/errors, export schema and session reset command | **Target split complete for current session.** `Новая сессия` invokes one typed field-24 command on the exact Engine generation and receives one correlated aggregate; timeout/cancellation never replay. Persistent history/filter/export is **Do not copy** because target WPF release keeps session statistics in memory only |
 | `STAT-02` | Six aggregate metrics: duration, caught, kept, kept weight, income, income/hour | Common metric/dashboard pattern | Fishing aggregation and price policy | **WPF data parity partial.** One revisioned native aggregate maps exact six presentation values; Common 0.2 screen composition/visual matrix pending |
 | `STAT-03` | Fish table shows icon/name/caught/kept/default price/custom editable price/income | Common mixed-editor table pattern | Row identity by fish ID, numeric validation, custom-price mutation and recalculation | **WPF read projection partial.** Coarse proto + mapper + exact 6-column row ViewModel ready; edit preservation/save/apply and Common 0.2 table UI pending |
 | `STAT-04` | Catch-size donut plus legend | Common chart/legend/content region and visual-regression infrastructure | Size buckets, totals, labels and chart composition | **WPF data parity partial.** Native stable buckets and product legend/empty-state ViewModel ready; responsive chart rendering pending Common 0.2 |
-| `TG-01` | Telegram page manages enabled/token/admin IDs, availability status, seven notification switches, inventory threshold and external setup links | `Card`, `ToggleSwitch`, `ActionButton`, generic secure input/link primitives | Credential secrecy, validation, notification policy, feature gate and navigation security | **Production transport + native fishing adapter composed / remaining actions partial.** Common 0.2.22 page, exact parsing/normalization, credential lock, availability/feature gates, settings, 45 routes, bounded HTTPS/long poll, callback edit/new/ack, native fishing start/stop, statistics and tackle projections are covered. Demo/offline remains network-denied; player scan, screenshot, focus and shutdown have no native adapter and stay hidden/fail-closed |
+| `TG-01` | Telegram page manages enabled/token/admin IDs, availability status, seven notification switches, inventory threshold and external setup links | `Card`, `ToggleSwitch`, `ActionButton`, generic secure input/link primitives | Credential secrecy, validation, notification policy, feature gate and navigation security | **Production transport + verified availability + native fishing adapter composed / remaining actions partial.** Common 0.2.22 page, exact parsing/normalization, credential lock, real bounded `getMe`, settings, 45 routes, long poll, callback edit/new/ack, native fishing start/stop, statistics and tackle projections are covered. Draft probe and polling are single-flight by credential generation; stale result is dropped and token is redacted. Demo/offline remains network-denied; player scan, screenshot, focus and shutdown have no native adapter and stay hidden/fail-closed |
 | `STREAM-01` | Stream page shows status/area/quality/autostop/public URL; start/stop/chat-mode; quality, chat zoom, 10fps toggles; four session metrics | `Card`, `StatusBadge`, `ActionButton`, `ToggleSwitch`, `NonScrollingComboBox`, `MetricCard` | Stream subprocess/network lifecycle, URL policy, feature gate, quality profile and settings | **Local Access composition done offline / live acceptance pending.** The compile-isolated local bundle embeds exact hash-pinned FFmpeg/cloudflared and wires current-HWND capture, authenticated secret-path loopback HLS/viewer and Common-contained public tunnel lifecycle. Chat remains unavailable and hidden. Ordinary licensed composition keeps the typed unavailable state pending payload policy; no live capture/network acceptance is claimed |
 | `ABOUT-01` | Current version/build, subscription note, update card/download action | `Card`, `ActionButton`, typography/link primitives | Build metadata, subscription/update policy, download URL and uninstall availability | **Truthful production surface.** Current version/short build, subscription projection and owned-log clear are wired. The disabled/unavailable download card is removed; it returns only after a production signed manifest endpoint/key and after-exit executor exist |
 | `DEAD-01` | `_build_player_status_card` can build five metrics and a `Сканировать` action but has no call from `_build_ui`, Overview or Fishing composition | Ничего не извлекать по неиспользуемому code | Preserve only as audit evidence until owner decides removal | **Do not copy.** A constructed-but-unconsumed helper is not product parity scope |
@@ -150,7 +151,7 @@ mapping and commands. License key never enters snapshot, event feed or log.
 | Region | Exact content/state | Migration rule |
 | --- | --- | --- |
 | Control | ready/running/stopping/license/unavailable mapping, start/stop, configured hotkey, detected phase | Same coarse application use case as Overview. Current source has hotkey-badge hook but never populates its list; target restores the intended visible binding from settings instead of copying the wiring defect |
-| Preview | Game content in 16:9 surface, rounded/overflow-clipped | Common aspect-media pattern; product preview grant/source. Legacy 192x108 is ratio evidence, not fixed layout dimensions; no cover crop may hide semantic game content without explicit decision |
+| Preview | Game content in 16:9 surface, rounded/overflow-clipped | Common aspect-media pattern; product preview grant/source. Legacy 192x108 is ratio evidence, not fixed layout dimensions; no cover crop may hide semantic game content without explicit decision. Current composition collapses this region until a fresh grant/source exists |
 | Full system state | game, inventory, food, water, bait, leader/hook and net, each with value/subtitle and valid/problem dot | One atomic revisioned snapshot; no per-tile RPC or mixed revisions |
 | Session metrics | duration, caught, released and income; introductory license may hide caught/income | Preserve released (not Overview kept) semantics and feature visibility |
 | Tackle | six semantic slots: rod, reel, line, hook/leader, bait/lure and landing net; count/list or exact empty `Снаряжение ещё не сканировалось` | Single tackle projection. Older Statistics tackle card is merged here; do not maintain duplicate mutable list |
@@ -184,9 +185,9 @@ Escape cancel, focus-loss cancel and suppress-until-all-keys-released. It must
 be an accessible binding editor, not an `ActionButton` pretending to capture.
 
 Save is enabled only for a dirty Fishing draft and persists one complete next
-revision before coarse runtime apply. The danger uninstall action shows exact
-target, availability/unavailable explanation, warning confirmation with default
-`No`, and critical failure state. `garbage_checks` currently has no constructed
+revision before coarse runtime apply. Historical danger uninstall semantics are
+retained as release evidence, but current Settings collapses the action until a
+production-signed after-exit owner is composed. `garbage_checks` currently has no constructed
 rows and the five-metric player-status helper is also unconsumed: neither is
 copied as phantom UI. Their settings/domain data remain only where an actual
 runtime consumer exists.
@@ -196,8 +197,10 @@ runtime consumer exists.
 Target surface is session-only: persistent history filters/saved sessions/date
 range/since-date and file CSV export are **do not copy** under the accepted
 no-history release policy. `Новая сессия`/reset remains a coarse explicit
-command; any future export needs a separate product decision consistent with
-the two-EXE allowlist.
+command. Current Host sends one append-only field-24 request, accepts only the
+correlated snapshot from the exact Engine generation and never replays reset
+after timeout, cancellation or recovery. Any future export needs a separate
+product decision consistent with the two-EXE allowlist.
 
 The current-session union contains six metrics: duration, caught, kept, kept
 weight, income and income/hour. The table has exact columns `Рыба`, `Поймано`,
@@ -224,8 +227,14 @@ the Fishing-page tackle source, not a second Statistics owner.
 - low-space threshold accepts comma or period, minimum 1.00 kg and two-decimal
   normalized display;
 - external BotFather and ID-helper links use product allowlisted destinations;
-- availability scheduling is product networking policy (700 ms debounce,
-  5-second interval, 4-second timeout in legacy), not a UI/Common timer.
+- availability scheduling is product networking policy, not a UI/Common timer.
+  Current owner performs one 350 ms debounced real `getMe`, a 5-second bounded
+  probe and a 2-second retry. Persisted polling and unsaved draft proof use
+  separate single-flight generations: draft edits do not stop the saved runtime
+  or reset its cursor, discard resumes the same identity, and saving a new
+  identity resets once. Stale and post-Stop results are ignored, bounded Stop
+  does not wait forever for a non-cooperative adapter, and token material is
+  excluded from status/error copy.
 
 ## 2.9. Стрим — exhaustive union
 
@@ -234,7 +243,8 @@ window/chat, quality, no-viewer autostop countdown and public URL with actual
 elision tooltip. Commands are start, stop and chat mode; settings are
 480/720/1080 quality, chat zoom and 10-fps mode. Metrics are target FPS,
 bitrate, mode and uptime. Feature/runtime state determines exact command and
-editor enablement.
+editor enablement. Current Local Access has no chat bridge capability, therefore
+the chat action is collapsed instead of displaying a disabled promise.
 
 One tracked screenshot also shows Telegram and License/account summaries on
 Stream. Current builder no longer constructs those cards although dead refresh
@@ -254,8 +264,9 @@ them; never create Stream-owned credential/license services. Unconsumed
 - Hard block: embedded branding, explanatory shared hyperlink, primary download
   and close actions;
   main shell is never constructed behind a fail-closed startup decision.
-- Uninstall warning (default `No`) and critical error use Common dialog/error
-  patterns with Fishing-owned target/copy/lifecycle.
+- Uninstall warning (default `No`) and critical error remain historical release
+  semantics. Current UI does not expose them until production-signed after-exit
+  activation owns the complete action.
 
 ## 2.11. Exact generic vs product-owned control inventory
 
@@ -397,7 +408,7 @@ consumer only after:
    отсутствие clipping у four-metric row;
 4. explicit UI authority cutover, rollback window and removal approval.
 
-Current focused acceptance: Release build 0 warnings/errors, 209/209
-STA/lifecycle WPF tests, 7/7 managed IPC integration tests and native CTest
-48/48. Tests do not open the product window or run a live GTA/input/network
-adapter.
+Current focused acceptance is recorded by the latest product test receipts;
+these tests do not open the product window or run a live GTA/input/network
+adapter. Exact counts are not frozen in this ledger because every added
+capability regression changes them.

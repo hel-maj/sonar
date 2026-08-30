@@ -324,9 +324,9 @@ void publish_pending_production_progress(
   if (progress.progress_revision <= published_progress_revision) {
     return;
   }
-  if (progress.operation_completed && lifecycle.running()) {
-    static_cast<void>(lifecycle.stop());
-  }
+  const auto completion = lifecycle.reconcile_completion(
+      progress.operation_completed,
+      active_start_request->header().request_id());
   publish_session_snapshot(
       event_writer,
       *active_start_request,
@@ -343,10 +343,10 @@ void publish_pending_production_progress(
       progress.operation_completed && !progress.last_operation_ok
           ? std::optional<std::string_view>(progress.last_operation_reason)
           : std::nullopt);
-  if (progress.operation_completed) {
+  if (completion.transitioned && !completion.correlation_id.empty()) {
     publish_session_stopped_notification(
         event_writer,
-        active_start_request->header().request_id(),
+        completion.correlation_id,
         session_id,
         headers,
         progress.statistics.totals,
@@ -514,9 +514,9 @@ bool handle_start_fishing_session(
   write_envelope(control_pipe, response);
 
   auto progress = capabilities.snapshot();
-  if (progress.operation_completed && lifecycle.running()) {
-    static_cast<void>(lifecycle.stop());
-  }
+  const auto completion = lifecycle.reconcile_completion(
+      progress.operation_completed,
+      request.header().request_id());
   publish_session_snapshot(
       event_writer,
       request,
@@ -545,10 +545,10 @@ bool handle_start_fishing_session(
         session_id,
         headers,
         progress.statistics.totals);
-    if (progress.operation_completed) {
+    if (completion.transitioned && !completion.correlation_id.empty()) {
       publish_session_stopped_notification(
           event_writer,
-          request.header().request_id(),
+          completion.correlation_id,
           session_id,
           headers,
           progress.statistics.totals,
@@ -559,6 +559,90 @@ bool handle_start_fishing_session(
     published_progress_revision = progress.progress_revision;
   }
   return transition.accepted;
+}
+
+void handle_reset_session_statistics(
+    const HANDLE control_pipe,
+    sonar::fishing::engine_ipc::event_writer& event_writer,
+    const fishing_envelope& request,
+    const std::optional<fishing_envelope>& active_start_request,
+    const std::string_view session_id,
+    const sonar::platform::ipc::session_identity_expectation& identity,
+    const engine_authority_mode authority_mode,
+    sonar::fishing::engine_ipc::fishing_session_lifecycle& lifecycle,
+    sonar::fishing::engine_ipc::production_capability_composition& capabilities,
+    const sonar::fishing::runtime_settings::RuntimeSettingsOwner& settings,
+    sonar::platform::ipc::session_header_factory& headers,
+    sonar::platform::ipc::incoming_sequence_gate& incoming_sequences,
+    sonar::platform::ipc::peer_liveness_tracker& liveness,
+    std::uint64_t& snapshot_revision,
+    std::uint64_t& published_progress_revision) {
+  require_host_envelope(
+      request,
+      platform_v1::MESSAGE_KIND_COMMAND,
+      identity,
+      incoming_sequences,
+      liveness);
+  if (!request.has_reset_fishing_session_statistics_request() ||
+      request.header().request_id().empty() ||
+      request.header().command_id() != "reset-fishing-session-statistics") {
+    throw std::runtime_error("reset_session_statistics_request_invalid");
+  }
+  if (authority_mode == engine_authority_mode::offline_diagnostics) {
+    throw std::runtime_error("reset_session_statistics_capability_unavailable");
+  }
+
+  const auto reset = capabilities.reset_session_statistics();
+  const auto& progress = reset.progress;
+  const auto completion = lifecycle.reconcile_completion(
+      progress.operation_completed,
+      active_start_request.has_value()
+          ? std::string_view{active_start_request->header().request_id()}
+          : std::string_view{});
+
+  fishing_envelope response;
+  populate_header(
+      *response.mutable_header(),
+      headers,
+      platform_v1::MESSAGE_KIND_REPLY,
+      session_id,
+      1,
+      request.header().request_id(),
+      "completed");
+  auto* command_result = response.mutable_platform()->mutable_command_result();
+  command_result->set_command_id("reset-fishing-session-statistics");
+  command_result->set_status("completed");
+  command_result->set_reason("session_statistics_reset");
+  write_envelope(control_pipe, response);
+
+  publish_session_snapshot(
+      event_writer,
+      request,
+      session_id,
+      progress.statistics,
+      settings,
+      headers,
+      snapshot_revision,
+      lifecycle.running() && !progress.operation_completed,
+      progress.phase ==
+          sonar::fishing::engine_ipc::production_phase::stopping,
+      wire_phase(progress.phase),
+      progress.detected_stage,
+      progress.operation_completed && !progress.last_operation_ok
+          ? std::optional<std::string_view>(progress.last_operation_reason)
+          : std::nullopt);
+  if (completion.transitioned && !completion.correlation_id.empty()) {
+    publish_session_stopped_notification(
+        event_writer,
+        completion.correlation_id,
+        session_id,
+        headers,
+        reset.totals_before_reset,
+        progress.last_operation_ok
+            ? std::nullopt
+            : std::optional<std::string_view>(progress.last_operation_reason));
+  }
+  published_progress_revision = progress.progress_revision;
 }
 
 void handle_stop_automation(

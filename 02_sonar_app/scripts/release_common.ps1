@@ -82,6 +82,72 @@ function Get-FishingSha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
+function Get-FishingVerifiedBundleTreeHash([string]$BundleDirectory) {
+    $bundle = Get-FishingCanonicalPath $BundleDirectory
+    if (-not (Test-Path -LiteralPath $bundle -PathType Container)) {
+        throw "release_bundle_tree_missing"
+    }
+    $prefix = $bundle.TrimEnd("\") + "\"
+    $rows = @(Get-ChildItem -LiteralPath $bundle -Force -Recurse |
+        ForEach-Object {
+            if (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "release_bundle_tree_reparse_point"
+            }
+            $fullName = [IO.Path]::GetFullPath($_.FullName)
+            if (-not $fullName.StartsWith(
+                    $prefix,
+                    [StringComparison]::OrdinalIgnoreCase)) {
+                throw "release_bundle_tree_path_escape"
+            }
+            $relative = $fullName.Substring($prefix.Length).Replace("\", "/")
+            if ($_.PSIsContainer) {
+                "D|$relative"
+            }
+            else {
+                "F|$relative|$($_.Length)|$((Get-FileHash -LiteralPath $fullName -Algorithm SHA256).Hash.ToUpperInvariant())"
+            }
+        } |
+        Sort-Object -CaseSensitive)
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($rows -join "`n"))
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace("-", "")
+    }
+    finally {
+        $algorithm.Dispose()
+    }
+}
+
+function Assert-FishingImmutableBundleVersionReplacement(
+    [string]$ProductRoot,
+    [string]$ExistingBundle,
+    [string]$CandidateBundle,
+    [string]$ExpectedReleaseMode,
+    [switch]$AllowDeveloperFullAccess) {
+    $existingManifest = Read-FishingBundleManifest `
+        $ProductRoot `
+        $ExistingBundle `
+        $ExpectedReleaseMode `
+        -AllowDeveloperFullAccess:$AllowDeveloperFullAccess
+    $candidateManifest = Read-FishingBundleManifest `
+        $ProductRoot `
+        $CandidateBundle `
+        $ExpectedReleaseMode `
+        -AllowDeveloperFullAccess:$AllowDeveloperFullAccess
+    $sameIdentity = $existingManifest.product -ceq $candidateManifest.product -and
+        $existingManifest.releaseMode -ceq $candidateManifest.releaseMode -and
+        $existingManifest.version -ceq $candidateManifest.version
+    if (-not $sameIdentity) {
+        return $false
+    }
+    $existingTreeHash = Get-FishingVerifiedBundleTreeHash $ExistingBundle
+    $candidateTreeHash = Get-FishingVerifiedBundleTreeHash $CandidateBundle
+    if ($existingTreeHash -cne $candidateTreeHash) {
+        throw "release_immutable_version_reuse: $($candidateManifest.product)/$($candidateManifest.releaseMode)/$($candidateManifest.version)"
+    }
+    return $true
+}
+
 function Get-FishingSourceIdentity([string]$ProductRoot) {
     $commitLines = @(& git -C $ProductRoot rev-parse HEAD 2>$null)
     $commitExitCode = $LASTEXITCODE

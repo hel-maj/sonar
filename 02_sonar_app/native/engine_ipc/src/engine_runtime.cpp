@@ -191,6 +191,23 @@ int run_engine_runtime() {
       if (started) {
         active_start_request = request;
       }
+    } else if (request.has_reset_fishing_session_statistics_request()) {
+      handle_reset_session_statistics(
+          pipes.control_pipe(),
+          event_writer,
+          request,
+          active_start_request,
+          bootstrap.session_id,
+          identity,
+          bootstrap.authority_mode,
+          session_lifecycle,
+          production_capabilities,
+          runtime_settings,
+          headers,
+          incoming_sequences,
+          liveness,
+          snapshot_revision,
+          published_progress_revision);
     } else if (request.has_platform() &&
                request.platform().has_stop_automation()) {
       handle_stop_automation(

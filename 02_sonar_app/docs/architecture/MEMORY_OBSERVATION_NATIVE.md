@@ -33,30 +33,33 @@ publication; через IPC проходит один immutable product-neutral 
 
 ## Ownership и зависимости
 
-- Sonar Common `SonarPlatformWindows 0.1.9` владеет least-rights
+- Sonar Common `SonarPlatformWindows 0.1.12` владеет least-rights
   `readonly_process`, process generation, bounded exact `ReadProcessMemory` и
   bounded `unique_top_level_client_observer` для exact process generation.
-- Fishing владеет допустимыми executable names/publishers, semantic layout,
+- Common `SonarMajesticRuntimeModule 0.1.3` владеет semantic runtime roles,
+  executable names/publishers и единым version-independent admission. Fishing
+  владеет semantic layout,
   decoder policy, cross-process ambiguity и смыслом evidence. Product policy
   требует visible non-minimized client, но сохраняет прежнюю eligibility для
   owned/tool windows; обязательный Common cap 64 fail-closed при exhaustion.
-- Common `Sonar::PlatformWindowsTrustedModule` проверяет unique module,
+- Common `Sonar::MajesticRuntimeModule` через
+  `Sonar::PlatformWindowsTrustedModule` проверяет unique module,
   nonzero bounds, disk PE/loaded-size coherence, WinTrust signer/timestamp и
-  cold/hot fingerprint на pinned handle. Shipping adapter не вычисляет SHA-256;
-  Rockstar publisher policy остаётся product-owned. Offline ownership scan
+  cold/hot fingerprint на pinned handle. Shipping adapter не вычисляет SHA-256
+  и не содержит publisher policy. Offline ownership scan
   запрещает возвращение локального signer verifier или window enumeration.
 - Common target `Sonar::PlatformInventoryState` сохраняет общую трёхзначную
   семантику `unknown/closed/open` для legacy/coarse consumers.
-- Exact-pinned Common `SonarMajesticCefInventory 0.1.19` владеет production CEF
+- Exact-pinned Common `SonarMajesticCefInventory 0.1.31` владеет production CEF
   renderer discovery, version-independent trusted-publisher identity admission,
   V8/content decoding, coherent read transaction, hot binding/provider и stable
   inventory snapshot semantics. Continuous provider отдельно включает proven
   closed-state bootstrap, поэтому закрытый inventory UI не блокирует content
   snapshot; general acquisition default остаётся strict. Fishing вызывает только public content factory
   и владеет worker cadence, product reason mapping, columns, commands, feature
-  policy, IPC projection и surface composition. Manifest pin:
-  `1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612`,
-  source commit `0c4baf0391134f05edd9a62e154001decb593c49`.
+  policy, IPC projection и surface composition. RuntimeModule/CEF manifest pins:
+  `6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845` /
+  `37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22`.
 - Historical decoder semantics сохранены в language-neutral fixture; executable
   legacy oracle и runtime fallback удалены.
 - Полная разбивка historical memory/visual owners и полей находится в

@@ -68,7 +68,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_developer_full
 ```
 
 Builder делает два clean deterministic build и по умолчанию кладет результат в
-`build/developer-full-access/bundle` с версией `1.0.0-local`. Verify проверяет exact manifest, hashes,
+`build/developer-full-access/bundle` со следующей незанятой версией `1.0.6-local`. Версия
+монотонно увеличивается перед изменением публикуемых байтов и не используется
+повторно. Verify проверяет exact manifest, hashes,
 обязательный `determinism.verified: true`, двухфайловый dependency closure,
 no-Python ownership и strict secret scan. Для embedded streaming tools scan
 разрешает только exact marker multiset двух manifest-hash-verified payloads;

@@ -5,6 +5,7 @@ using Sonar.Fishing.Host.EngineIntegration.Notifications;
 using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.Licensing;
 using Sonar.Fishing.Host.SettingsPersistence;
+using Sonar.Fishing.Host.StatisticsPage;
 
 namespace Sonar.Fishing.Host.Tests;
 
@@ -28,6 +29,13 @@ internal static class EngineSupervisorTests
         new("engine_generation_bound_state_callback_cannot_cross_retirement", GenerationBoundStateCannotCrossRetirement),
         new("engine_generation_bound_notification_callback_cannot_cross_retirement", GenerationBoundNotificationCannotCrossRetirement),
         new("engine_automation_timeout_retires_generation_and_allows_recovery", AutomationTimeoutRetiresGeneration),
+        new("session_statistics_reset_is_generation_bound_and_not_replayed", StatisticsResetIsGenerationBound),
+        new("session_statistics_reset_timeout_retires_without_replay", StatisticsResetTimeoutRetiresWithoutReplay),
+        new("session_statistics_reset_timeout_while_queued_preserves_generation", StatisticsResetQueuedTimeoutPreservesGeneration),
+        new("session_statistics_reset_timeout_before_pipe_write_preserves_generation_and_allows_retry", StatisticsResetTimeoutBeforePipeWritePreservesGeneration),
+        new("session_statistics_reset_caller_cancel_before_pipe_write_preserves_generation_and_allows_retry", StatisticsResetCallerCancellationBeforePipeWritePreservesGeneration),
+        new("session_statistics_reset_caller_cancel_after_pipe_write_retires_without_failure_or_replay", StatisticsResetCallerCancellationAfterPipeWriteRetiresWithoutFailure),
+        new("engine_managed_session_state_merge_rejects_late_reset_response", ManagedSessionStateMergeRejectsLateResetResponse),
         new("rejected_cached_entitlement_allows_fresh_replacement_envelope", RejectedCachedEntitlementAllowsReplacement),
         new("engine_supervisor_caller_cancellation_preserves_session", CallerCancellationPreservesSession),
         new("engine_supervisor_terminal_stop_cancels_start_and_prevents_restart", TerminalStopCancelsStart),
@@ -359,6 +367,279 @@ internal static class EngineSupervisorTests
         supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
+    private static void StatisticsResetIsGenerationBound()
+    {
+        var first = new FakeSession(processId: 4373);
+        var second = new FakeSession(processId: 4374);
+        var supervisor = new EngineSessionSupervisor(
+            FakeFactory.FromSessions(first, second),
+            ManualCyclePolicy);
+
+        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var reset = supervisor.ResetCurrentSessionStatisticsAsync(
+            CancellationToken.None).GetAwaiter().GetResult();
+        first.IsAlive = false;
+        var recovered = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        TestAssert.Equal(1, first.ResetStatisticsCommandCount,
+            "Current generation did not receive exactly one reset command");
+        TestAssert.Equal(0, second.ResetStatisticsCommandCount,
+            "Replacement generation replayed the statistics reset");
+        TestAssert.Equal<ulong>(2, recovered.Generation,
+            "Replacement generation did not advance after crash");
+        TestAssert.Equal(0, reset.Totals.CaughtCount,
+            "Reset receipt retained catches");
+    }
+
+    private static void StatisticsResetTimeoutRetiresWithoutReplay()
+    {
+        var first = new FakeSession(processId: 4375) { BlockResetStatistics = true };
+        var second = new FakeSession(processId: 4376);
+        var supervisor = new EngineSessionSupervisor(
+            FakeFactory.FromSessions(first, second),
+            ManualCyclePolicy with
+            {
+                AutomationCommandTimeout = TimeSpan.FromMilliseconds(25),
+            });
+
+        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var failure = CaptureFailure(() =>
+            supervisor.ResetCurrentSessionStatisticsAsync(CancellationToken.None)
+                .GetAwaiter().GetResult());
+        var recovered = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        TestAssert.Equal("engine_session_statistics_reset_timeout", failure.Message,
+            "Statistics reset timeout lost its stable reason");
+        TestAssert.Equal(1, first.ResetStatisticsCommandCount,
+            "Timed-out reset was not issued exactly once");
+        TestAssert.Equal(0, second.ResetStatisticsCommandCount,
+            "Replacement generation replayed the timed-out reset");
+        TestAssert.Equal<ulong>(2, recovered.Generation,
+            "Timed-out reset did not recover with a fresh generation");
+    }
+
+    private static void StatisticsResetQueuedTimeoutPreservesGeneration()
+    {
+        var session = new FakeSession(processId: 4377);
+        var supervisor = new EngineSessionSupervisor(
+            FakeFactory.FromSessions(session),
+            ManualCyclePolicy with
+            {
+                AutomationCommandTimeout = TimeSpan.FromMilliseconds(25),
+            });
+
+        var initial = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        session.BlockPing = true;
+        using var holderCancellation = new CancellationTokenSource();
+        var holder = supervisor.CheckAsync(holderCancellation.Token);
+        TestAssert.True(
+            session.PingStarted.Task.Wait(TimeSpan.FromSeconds(2)),
+            "Lifecycle gate holder did not enter the heartbeat");
+
+        var failure = CaptureFailure(() =>
+            supervisor.ResetCurrentSessionStatisticsAsync(CancellationToken.None)
+                .GetAwaiter().GetResult());
+
+        TestAssert.Equal("engine_session_statistics_reset_timeout", failure.Message,
+            "Queued reset timeout escaped without its stable reason");
+        TestAssert.Equal(0, session.ResetStatisticsCommandCount,
+            "Queued reset timeout issued an ambiguous Engine command");
+        TestAssert.Equal(0, session.DisposeCount,
+            "Queued reset timeout retired an unambiguous generation");
+
+        holderCancellation.Cancel();
+        TestAssert.Throws<OperationCanceledException>(
+            () => holder.GetAwaiter().GetResult(),
+            "Cancelled lifecycle gate holder did not return caller cancellation");
+        session.BlockPing = false;
+        _ = supervisor.ResetCurrentSessionStatisticsAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var after = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        TestAssert.Equal<ulong>(initial.Generation, after.Generation,
+            "Queued timeout advanced the Engine generation");
+        TestAssert.Equal(initial.ProcessId, after.ProcessId,
+            "Queued timeout replaced the Engine process");
+        TestAssert.Equal(0, after.FailuresInWindow,
+            "Queued timeout consumed the runtime failure budget");
+        TestAssert.Equal(TimeSpan.Zero, after.LastRestartDelay,
+            "Queued timeout introduced restart backoff");
+        TestAssert.Equal(1, session.ResetStatisticsCommandCount,
+            "Healthy retry did not issue exactly one reset on the same generation");
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static void StatisticsResetCallerCancellationBeforePipeWritePreservesGeneration()
+    {
+        var session = new FakeSession(processId: 4378)
+        {
+            BlockResetStatisticsBeforeWrite = true,
+        };
+        var supervisor = new EngineSessionSupervisor(
+            FakeFactory.FromSessions(session),
+            ManualCyclePolicy);
+
+        var initial = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        using var cancellation = new CancellationTokenSource();
+        var reset = supervisor.ResetCurrentSessionStatisticsAsync(cancellation.Token);
+        TestAssert.True(
+            session.ResetStatisticsPreWriteStarted.Task.Wait(TimeSpan.FromSeconds(2)),
+            "Statistics reset did not enter the pre-write cancellation window");
+        cancellation.Cancel();
+        TestAssert.Throws<OperationCanceledException>(
+            () => reset.GetAwaiter().GetResult(),
+            "Pre-write caller cancellation was converted into a runtime failure");
+
+        TestAssert.Equal(0, session.ResetStatisticsCommandCount,
+            "Pre-write cancellation recorded an Engine command as dispatched");
+        TestAssert.Equal(0, session.DisposeCount,
+            "Pre-write cancellation retired an unambiguous healthy generation");
+        session.BlockResetStatisticsBeforeWrite = false;
+        _ = supervisor.ResetCurrentSessionStatisticsAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var after = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        TestAssert.Equal(initial.ProcessId, after.ProcessId,
+            "Pre-write cancellation replaced the Engine process");
+        TestAssert.Equal(initial.Generation, after.Generation,
+            "Pre-write cancellation advanced the Engine generation");
+        TestAssert.Equal(0, after.FailuresInWindow,
+            "Pre-write caller cancellation consumed the runtime failure budget");
+        TestAssert.Equal(TimeSpan.Zero, after.LastRestartDelay,
+            "Pre-write caller cancellation introduced restart backoff");
+        TestAssert.Equal(1, session.ResetStatisticsCommandCount,
+            "Bounded retry did not dispatch exactly one reset on the same generation");
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static void StatisticsResetTimeoutBeforePipeWritePreservesGeneration()
+    {
+        var session = new FakeSession(processId: 4380)
+        {
+            BlockResetStatisticsBeforeWrite = true,
+        };
+        var supervisor = new EngineSessionSupervisor(
+            FakeFactory.FromSessions(session),
+            ManualCyclePolicy with
+            {
+                AutomationCommandTimeout = TimeSpan.FromMilliseconds(25),
+            });
+
+        var initial = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var reset = supervisor.ResetCurrentSessionStatisticsAsync(CancellationToken.None);
+        TestAssert.True(
+            session.ResetStatisticsPreWriteStarted.Task.Wait(TimeSpan.FromSeconds(2)),
+            "Statistics reset did not enter the pre-write timeout window");
+        var failure = CaptureFailure(() => reset.GetAwaiter().GetResult());
+
+        TestAssert.Equal("engine_session_statistics_reset_timeout", failure.Message,
+            "Pre-write reset timeout lost its stable reason");
+        TestAssert.Equal(0, session.ResetStatisticsCommandCount,
+            "Pre-write timeout recorded an Engine command as dispatched");
+        TestAssert.Equal(0, session.DisposeCount,
+            "Pre-write timeout retired an unambiguous healthy generation");
+        session.BlockResetStatisticsBeforeWrite = false;
+        _ = supervisor.ResetCurrentSessionStatisticsAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var after = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        TestAssert.Equal(initial.ProcessId, after.ProcessId,
+            "Pre-write timeout replaced the Engine process");
+        TestAssert.Equal(initial.Generation, after.Generation,
+            "Pre-write timeout advanced the Engine generation");
+        TestAssert.Equal(0, after.FailuresInWindow,
+            "Pre-write timeout consumed the runtime failure budget");
+        TestAssert.Equal(TimeSpan.Zero, after.LastRestartDelay,
+            "Pre-write timeout introduced restart backoff");
+        TestAssert.Equal(1, session.ResetStatisticsCommandCount,
+            "Bounded retry after pre-write timeout did not dispatch exactly once");
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static void StatisticsResetCallerCancellationAfterPipeWriteRetiresWithoutFailure()
+    {
+        var first = new FakeSession(processId: 4378) { BlockResetStatistics = true };
+        var second = new FakeSession(processId: 4379);
+        var supervisor = new EngineSessionSupervisor(
+            FakeFactory.FromSessions(first, second),
+            ManualCyclePolicy);
+        var observed = new List<FishingSessionStateSnapshot>();
+        supervisor.SessionStateChanged += observed.Add;
+
+        _ = supervisor.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var runtime = new EngineFishingAutomationRuntime(
+            supervisor,
+            () => FishingRuntimeSettings.CreateDefault(revision: 7));
+        var statistics = new StatisticsPageViewModel(
+            CreatePopulatedStatisticsState(),
+            persistPrice: null,
+            runtime);
+        runtime.SessionStateChanged += statistics.ApplySessionState;
+        first.EmitSessionState(revision: 7, running: true);
+        using var cancellation = new CancellationTokenSource();
+        var reset = runtime.ResetCurrentSessionAsync(cancellation.Token);
+        TestAssert.True(
+            first.ResetStatisticsStarted.Task.Wait(TimeSpan.FromSeconds(2)),
+            "Statistics reset did not cross the generation-bound issue point");
+        cancellation.Cancel();
+        TestAssert.Throws<OperationCanceledException>(
+            () => reset.GetAwaiter().GetResult(),
+            "Caller-cancelled reset was converted into a runtime failure");
+
+        TestAssert.Equal(1, first.DisposeCount,
+            "Ambiguous cancelled reset did not retire its generation");
+        TestAssert.True(ReferenceEquals(FishingSessionStateSnapshot.Empty, observed[^1]),
+            "Ambiguous reset retirement did not publish fail-closed empty state");
+        TestAssert.True(!statistics.Current.HasCatches,
+            "Statistics ViewModel retained an ambiguous retired-generation aggregate");
+        var recovered = supervisor.CheckAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        TestAssert.Equal<ulong>(2, recovered.Generation,
+            "Cancelled ambiguous reset did not recover on a fresh generation");
+        TestAssert.Equal(0, recovered.FailuresInWindow,
+            "Caller cancellation consumed the runtime failure budget");
+        TestAssert.Equal(TimeSpan.Zero, recovered.LastRestartDelay,
+            "Caller cancellation introduced restart backoff");
+        TestAssert.Equal(1, first.ResetStatisticsCommandCount,
+            "Cancelled reset was not issued exactly once");
+        TestAssert.Equal(0, second.ResetStatisticsCommandCount,
+            "Replacement generation replayed the cancelled reset");
+        supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static void ManagedSessionStateMergeRejectsLateResetResponse()
+    {
+        var owner = new EngineSessionStateRevisionOwner(
+            CreateState(revision: 8, running: true));
+        var published = new List<ulong>();
+        var resetResponse = CreateState(revision: 9, running: true);
+
+        _ = owner.Merge(resetResponse);
+        _ = owner.Merge(resetResponse, snapshot => published.Add(snapshot.Revision));
+        _ = owner.Merge(
+            CreateState(revision: 10, running: true),
+            snapshot => published.Add(snapshot.Revision));
+        var merged = owner.Merge(resetResponse);
+
+        TestAssert.Equal<ulong>(10, owner.Current.Revision,
+            "Late reset continuation rolled session state back from N+1 to N");
+        TestAssert.Equal<ulong>(10, merged.Revision,
+            "Late reset response returned stale state to its caller");
+        TestAssert.Equal("9,10", string.Join(',', published),
+            "Response/event merge skipped or replayed a session revision");
+    }
+
     private static void RejectedCachedEntitlementAllowsReplacement()
     {
         var first = new FakeSession(processId: 4381);
@@ -579,6 +860,42 @@ internal static class EngineSupervisorTests
         supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
+    private static FishingSessionStateSnapshot CreateState(
+        ulong revision,
+        bool running) => new(
+        revision,
+        running,
+        stopping: false,
+        detectedStage: running ? "active" : "idle",
+        totals: new FishingSessionTotalsSnapshot(0, 0, 0, 0, 0, 0, 0),
+        tackleItems: [],
+        acceptedSettingsRevision: revision);
+
+    private static FishingSessionStateSnapshot CreatePopulatedStatisticsState() => new(
+        revision: 6,
+        running: true,
+        stopping: false,
+        detectedStage: "active",
+        totals: new FishingSessionTotalsSnapshot(90, 1, 2.5, 0, 0, 100, 120),
+        tackleItems: [],
+        acceptedSettingsRevision: 7,
+        fishRows:
+        [
+            new FishingSessionFishRowSnapshot(
+                "fixture",
+                "Fixture",
+                1,
+                2.5,
+                0,
+                0,
+                1,
+                2.5,
+                null,
+                null,
+                100,
+                120),
+        ]);
+
     private static InvalidOperationException CaptureFailure(Action action)
     {
         try
@@ -714,11 +1031,18 @@ internal static class EngineSupervisorTests
         IEngineManagedSession,
         IEngineEntitlementSession,
         IEngineAutomationSession,
+        IEngineSessionStatisticsSession,
         IEngineSessionStateSource,
         IEngineNotificationFrameSource,
         IEngineBootstrapAuthoritySession
     {
         public TaskCompletionSource PingStarted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ResetStatisticsStarted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ResetStatisticsPreWriteStarted { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int ProcessId { get; } = processId;
@@ -747,6 +1071,12 @@ internal static class EngineSupervisorTests
 
         public bool BlockStart { get; set; }
 
+        public bool BlockResetStatistics { get; set; }
+
+        public bool BlockResetStatisticsBeforeWrite { get; set; }
+
+        public bool RejectResetStatistics { get; set; }
+
         public int RejectEntitlementApplicationsRemaining { get; set; }
 
         public ulong LastSettingsRevision { get; private set; }
@@ -756,6 +1086,8 @@ internal static class EngineSupervisorTests
         public int StartCommandCount { get; private set; }
 
         public int StopCommandCount { get; private set; }
+
+        public int ResetStatisticsCommandCount { get; private set; }
 
         public event Action<FishingSessionStateSnapshot>? SessionStateChanged;
 
@@ -833,6 +1165,73 @@ internal static class EngineSupervisorTests
                 LastSettingsRevision == 0 ? 1 : LastSettingsRevision,
                 running: false);
             return Task.FromResult(SessionState);
+        }
+
+        public EngineCommandDispatch<FishingSessionStateSnapshot>
+            ResetCurrentSessionStatistics(CancellationToken cancellationToken)
+        {
+            var dispatchState = new EngineCommandDispatchState();
+            return new EngineCommandDispatch<FishingSessionStateSnapshot>(
+                dispatchState,
+                ResetCurrentSessionStatisticsCoreAsync(
+                    dispatchState,
+                    cancellationToken));
+        }
+
+        private async Task<EngineCommandDispatchReceipt<FishingSessionStateSnapshot>>
+            ResetCurrentSessionStatisticsCoreAsync(
+                EngineCommandDispatchState dispatchState,
+                CancellationToken cancellationToken)
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (BlockResetStatisticsBeforeWrite)
+                {
+                    ResetStatisticsPreWriteStarted.TrySetResult();
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                dispatchState.EnterWriteBoundary(cancellationToken);
+                ResetStatisticsCommandCount++;
+                ResetStatisticsStarted.TrySetResult();
+                if (BlockResetStatistics)
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                if (RejectResetStatistics)
+                {
+                    throw new EngineCommandRejectedException(
+                        "reset-fishing-session-statistics",
+                        "session_statistics_reset_rejected");
+                }
+                SessionState = new FishingSessionStateSnapshot(
+                    SessionState.Revision + 1,
+                    SessionState.Running,
+                    SessionState.Stopping,
+                    SessionState.DetectedStage,
+                    new FishingSessionTotalsSnapshot(0, 0, 0, 0, 0, 0, 0),
+                    [],
+                    SessionState.AcceptedSettingsRevision);
+                return new EngineCommandDispatchReceipt<FishingSessionStateSnapshot>(
+                    SessionState,
+                    dispatchState.BytesMayHaveBeenWritten);
+            }
+            catch (EngineCommandRejectedException)
+            {
+                throw;
+            }
+            catch (EngineCommandDispatchException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                throw new EngineCommandDispatchException(
+                    dispatchState.BytesMayHaveBeenWritten,
+                    exception);
+            }
         }
 
         public void RestoreSettings(ulong revision)

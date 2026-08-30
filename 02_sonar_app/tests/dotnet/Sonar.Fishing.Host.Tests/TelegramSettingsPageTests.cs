@@ -11,6 +11,8 @@ internal static class TelegramSettingsPageTests
         new("telegram_enable_requires_matching_available_configuration", EnableRequiresAvailability),
         new("telegram_enabled_credentials_lock_and_sounds_are_preserved", EnabledCredentialsLock),
         new("telegram_save_fails_closed_when_availability_changes", SaveFailsClosed),
+        new("telegram_enabled_configuration_survives_transient_unavailability", EnabledSurvivesOutage),
+        new("telegram_draft_publishes_availability_candidate_changes", CandidateChangesArePublished),
     ];
 
     private static void DraftNormalizesInput()
@@ -122,5 +124,53 @@ internal static class TelegramSettingsPageTests
             "Telegram API недоступен",
             result.EnableBlockReason,
             "Availability error copy changed");
+    }
+
+    private static void EnabledSurvivesOutage()
+    {
+        var settings = new TelegramHostSettings(
+            true,
+            [42],
+            1.0,
+            TelegramHostSettings.Default.Notifications);
+        var model = new TelegramSettingsPageViewModel(
+            settings,
+            "fake-token",
+            true,
+            TelegramAvailability.Unavailable(
+                "fake-token",
+                [42],
+                "Telegram недоступен"));
+
+        var result = model.BuildSaveResult();
+
+        TestAssert.True(result.Settings.Enabled, "Transient outage disabled persisted Telegram");
+        TestAssert.True(!result.EnableRequestRejected, "Existing enabled state became a new enable request");
+        TestAssert.Equal("Недоступен", model.StatusText, "Outage status was hidden");
+    }
+
+    private static void CandidateChangesArePublished()
+    {
+        var model = new TelegramSettingsPageViewModel(
+            TelegramHostSettings.Default,
+            string.Empty,
+            featureAllowed: true);
+        var candidates = new List<TelegramAvailabilityCandidate>();
+        model.AvailabilityCandidateChanged += candidates.Add;
+
+        model.UpdateCredentials("  fake-token  ", "77,42");
+        model.DiscardChanges();
+
+        TestAssert.Equal(2, candidates.Count, "Draft and discard did not both publish candidates");
+        TestAssert.True(
+            candidates[0].Identity.Equals(
+                TelegramConfigurationIdentity.Create("fake-token", [42, 77])),
+            "Draft candidate identity was not normalized");
+        TestAssert.True(
+            !candidates[1].ConfigurationReady,
+            "Discard did not restore the saved empty candidate");
+        TestAssert.True(
+            !candidates[0].ToString().Contains("fake-token", StringComparison.Ordinal),
+            "Availability candidate string exposed the token");
     }
 }

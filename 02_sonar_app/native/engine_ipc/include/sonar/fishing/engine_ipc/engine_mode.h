@@ -12,6 +12,8 @@ enum class engine_authority_mode {
 
 inline constexpr char fishing_session_control_capability_id[] =
     "fishing-session.control";
+inline constexpr char fishing_session_statistics_reset_capability_id[] =
+    "fishing-session.statistics.reset";
 
 struct handshake_mode_policy final {
   bool diagnostic_mode;

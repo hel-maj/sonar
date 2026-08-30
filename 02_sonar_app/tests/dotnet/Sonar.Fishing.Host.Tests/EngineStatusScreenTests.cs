@@ -30,7 +30,7 @@ internal static class EngineStatusScreenTests
     {
         var assemblyName = typeof(Card).Assembly.GetName();
         TestAssert.Equal("Sonar.UI.Wpf", assemblyName.Name!, "Unexpected Common UI assembly");
-        TestAssert.Equal(new Version(0, 2, 21, 0), assemblyName.Version!, "Unexpected Common UI version");
+        TestAssert.Equal(new Version(0, 2, 22, 0), assemblyName.Version!, "Unexpected Common UI version");
         TestAssert.Equal(ThemeCatalog.DefaultThemeUri, theme.Source, "Theme URI changed");
 
         var missing = ThemeCatalog.FindMissingResources(theme);

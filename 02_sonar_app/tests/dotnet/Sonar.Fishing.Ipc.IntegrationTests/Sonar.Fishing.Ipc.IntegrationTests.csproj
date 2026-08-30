@@ -23,6 +23,9 @@
     <None Include="..\..\fixtures\ipc\v1\catch_disposition_request.hex"
           Link="fixtures\ipc\v1\catch_disposition_request.hex"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\fixtures\ipc\v1\reset_fishing_session_statistics_request.hex"
+          Link="fixtures\ipc\v1\reset_fishing_session_statistics_request.hex"
+          CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\fixtures\licensing\signed-entitlement-v1.properties"
           Link="fixtures\licensing\signed-entitlement-v1.properties"
           CopyToOutputDirectory="PreserveNewest" />

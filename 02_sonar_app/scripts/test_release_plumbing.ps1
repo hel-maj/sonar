@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "release_common.ps1")
 
 $productRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+& (Join-Path $PSScriptRoot "test_product_commands.ps1")
 $testRoot = Reset-FishingBuildDirectory `
     $productRoot `
     (Join-Path $productRoot "build\release-tests\current") `
@@ -81,6 +82,55 @@ try {
         $productRoot $bundle "development-unsigned"
     if (-not $accepted.determinism.verified) {
         throw "release_test_manifest_determinism_lost"
+    }
+
+    $immutableExisting = Join-Path $testRoot "immutable-existing"
+    $immutableCandidate = Join-Path $testRoot "immutable-candidate"
+    Copy-Item -LiteralPath $bundle -Destination $immutableExisting -Recurse
+    Copy-Item -LiteralPath $bundle -Destination $immutableCandidate -Recurse
+    $candidateEngine = Join-Path $immutableCandidate "Sonar.Engine.exe"
+    [IO.File]::AppendAllText(
+        $candidateEngine,
+        "different verified candidate",
+        [Text.UTF8Encoding]::new($false))
+    $candidateHostHash = Get-FishingSha256 `
+        (Join-Path $immutableCandidate "Sonar.exe")
+    $candidateEngineHash = Get-FishingSha256 $candidateEngine
+    $candidateManifest = New-FishingBundleManifestData `
+        $productRoot `
+        $immutableCandidate `
+        "0.0.0-test" `
+        "development-unsigned" `
+        $candidateHostHash `
+        $candidateEngineHash `
+        $candidateHostHash `
+        $candidateEngineHash `
+        $true `
+        "NotRequired" `
+        "NotRequired"
+    Write-FishingBundleManifest `
+        (Join-Path $immutableCandidate "bundle-manifest.json") `
+        $candidateManifest
+    $existingTreeBeforeReuse = Get-FishingVerifiedBundleTreeHash $immutableExisting
+    Assert-Throws {
+        Assert-FishingImmutableBundleVersionReplacement `
+            $productRoot `
+            $immutableExisting `
+            $immutableCandidate `
+            "development-unsigned"
+    } "release_immutable_version_reuse"
+    if ((Get-FishingVerifiedBundleTreeHash $immutableExisting) -cne
+        $existingTreeBeforeReuse) {
+        throw "release_immutable_version_reuse_mutated_existing_bundle"
+    }
+    $immutableExactClone = Join-Path $testRoot "immutable-exact-clone"
+    Copy-Item -LiteralPath $immutableExisting -Destination $immutableExactClone -Recurse
+    if (-not (Assert-FishingImmutableBundleVersionReplacement `
+            $productRoot `
+            $immutableExisting `
+            $immutableExactClone `
+            "development-unsigned")) {
+        throw "release_immutable_version_exact_tree_not_idempotent"
     }
 
     $secretFixtureRoot = Join-Path $testRoot 'secret-scan-fixture'
@@ -441,23 +491,38 @@ try {
         $releaseBuilderText -notmatch 'PathMap=.*%2C\$BuildRoot=/_/out' -or
         $releaseBuilderText -notmatch 'Sonar\.Fishing\.Host\.exe' -or
         $releaseBuilderText -notmatch 'SonarFishingDeveloperFullAccess=true' -or
+        $releaseBuilderText -notmatch
+            'Assert-FishingImmutableBundleVersionReplacement' -or
         $releaseBuilderText -notmatch 'SONAR_FISHING_DEVELOPER_FULL_ACCESS' -or
         $releaseBuilderText -notmatch
             'SONAR_COMMON_MAJESTIC_CEF_INVENTORY_PACKAGE' -or
         $releaseBuilderText -notmatch
+            'SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE' -or
+        $releaseBuilderText -notmatch
             'SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE' -or
-        $releaseBuilderText -notmatch 'Assert-FishingCommonInventoryPackage') {
+        $releaseBuilderText -notmatch 'Assert-FishingCommonInventoryPackage' -or
+        $releaseBuilderText -notmatch 'Assert-FishingCommonRuntimeModulePackage') {
         throw "release_clean_build_contract_invalid"
     }
     $inventoryPackageGateText = Get-Content -Raw -LiteralPath `
         (Join-Path $PSScriptRoot "common_inventory_package.ps1")
     if ($inventoryPackageGateText -notmatch
-            '1426967DC010CCDA80749DF15B6C3ADE8C3318A7FE63A21E6378FD69F787A612' -or
+            '37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22' -or
         $inventoryPackageGateText -notmatch
             'common_inventory_payload_hash_mismatch' -or
         $inventoryPackageGateText -notmatch
             'common_inventory_unlisted_payload') {
         throw "release_common_inventory_package_gate_invalid"
+    }
+    $runtimeModulePackageGateText = Get-Content -Raw -LiteralPath `
+        (Join-Path $PSScriptRoot "common_runtime_module_package.ps1")
+    if ($runtimeModulePackageGateText -notmatch
+            '6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845' -or
+        $runtimeModulePackageGateText -notmatch
+            'common_runtime_module_payload_hash_mismatch' -or
+        $runtimeModulePackageGateText -notmatch
+            'common_runtime_module_unlisted_payload') {
+        throw "release_common_runtime_module_package_gate_invalid"
     }
 
     $releaseSmokeText = Get-Content -Raw -LiteralPath `
@@ -523,6 +588,7 @@ try {
     $releaseScripts = @(
         "release_common.ps1",
         "common_inventory_package.ps1",
+        "common_runtime_module_package.ps1",
         "build_release_native.ps1",
         "package_native.ps1",
         "smoke_release_native.ps1",
@@ -530,6 +596,7 @@ try {
         "run_dotnet.ps1",
         "run_product.ps1",
         "build_developer_full_access.ps1",
+        "test_product_commands.ps1",
         "verify_developer_full_access.ps1",
         "admit_developer_full_access_launch.ps1",
         "run_developer_full_access.ps1",

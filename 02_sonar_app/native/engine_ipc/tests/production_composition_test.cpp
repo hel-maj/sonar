@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -97,6 +98,15 @@ class fixture_session final : public engine::production_automation_session {
         .weight_kg = 12.5,
     };
     progress.record_catch(observed, false);
+    progress.publish_tackle(
+        sonar::fishing::equipment_recovery::TackleCounts{
+            .rod = 1,
+            .reel = 1,
+            .line = 2,
+            .hook = 7,
+            .bait = 18,
+            .net = 1,
+        });
     progress.publish_notification(
         engine::production_meal_recovered_notification{
             .affected_count = 1U,
@@ -246,6 +256,9 @@ void fixture_platform_runs_one_coarse_cancellable_episode() {
           snapshot.progress_revision >= 3U &&
           snapshot.cycles_completed == 1U,
       "coarse_progress_aggregate_not_published");
+  require(snapshot.statistics.totals.caught_count == 1U &&
+          !snapshot.statistics.tackle_items.empty(),
+      "fixture_statistics_not_published_before_reset");
   require(
       snapshot.pending_notification_count ==
           engine::maximum_pending_production_notifications &&
@@ -283,6 +296,54 @@ void fixture_platform_runs_one_coarse_cancellable_episode() {
           !snapshot.observation_adapters_enabled &&
           !snapshot.mutation_adapters_enabled,
       "stop_retained_platform_adapters");
+}
+
+void reset_clears_only_statistics_at_one_linearization_boundary() {
+  const auto state = std::make_shared<fixture_state>();
+  engine::production_capability_composition composition(
+      std::make_unique<fixture_factory>(state));
+  require(composition.prepare_session(
+              valid_settings(), 11U, 1'900'000'000).accepted,
+      "reset_fixture_not_prepared");
+  require(composition.start_session().accepted,
+      "reset_fixture_not_started");
+  auto before = composition.snapshot();
+  for (std::size_t attempt = 0U;
+       attempt < 10'000U && !before.operation_completed; ++attempt) {
+    std::this_thread::yield();
+    before = composition.snapshot();
+  }
+  require(before.operation_completed &&
+          before.statistics.totals.caught_count == 1U &&
+          !before.statistics.fish_rows.empty() &&
+          !before.statistics.tackle_items.empty(),
+      "reset_fixture_statistics_missing");
+  const auto pending_before = before.pending_notification_count;
+  const auto reset = composition.reset_session_statistics();
+  require(reset.totals_before_reset.caught_count ==
+              before.statistics.totals.caught_count &&
+          reset.totals_before_reset.caught_kg ==
+              before.statistics.totals.caught_kg &&
+          reset.totals_before_reset.duration_seconds ==
+              before.statistics.totals.duration_seconds,
+      "reset_lost_pre_reset_terminal_totals");
+  require(reset.progress.statistics.totals.duration_seconds == 0.0 &&
+          reset.progress.statistics.totals.caught_count == 0U &&
+          reset.progress.statistics.fish_rows.empty() &&
+          reset.progress.statistics.tackle_items.empty(),
+      "reset_did_not_clear_in_memory_statistics");
+  require(std::ranges::all_of(
+              reset.progress.statistics.catch_sizes,
+              [](const auto& item) { return item.count == 0U; }),
+      "reset_did_not_clear_catch_size_counts");
+  require(reset.progress.session_prepared == before.session_prepared &&
+          reset.progress.operation_completed == before.operation_completed &&
+          reset.progress.last_operation_ok == before.last_operation_ok &&
+          reset.progress.phase == before.phase &&
+          reset.progress.pending_notification_count == pending_before &&
+          reset.progress.progress_revision > before.progress_revision,
+      "reset_changed_lifecycle_or_notification_authority");
+  composition.stop();
 }
 
 void platform_factory_failure_is_stable_and_fail_closed() {
@@ -492,6 +553,7 @@ int main() {
     complete_graph_is_inert_at_construction();
     pure_invalid_admission_never_calls_platform_factory();
     fixture_platform_runs_one_coarse_cancellable_episode();
+    reset_clears_only_statistics_at_one_linearization_boundary();
     platform_factory_failure_is_stable_and_fail_closed();
     active_session_refreshes_only_the_admitted_entitlement_lease();
     continuous_loop_owns_the_whole_coarse_cycle();

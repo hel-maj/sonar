@@ -102,6 +102,14 @@ deterministic `1.0.3-local` и выполнен фактический `Update` 
 неожиданное завершение Engine было восстановлено новым поколением, оба запуска
 закончились normal exit, transaction residue и loose runtime files отсутствуют.
 
+Последняя полная release acceptance 2026-08-27 повторена после exact repin на
+`SonarMajesticRuntimeModule 0.1.1` и `SonarMajesticCefInventory 0.1.25`.
+Изолированная установка прошла последовательность `1.0.0-local` install,
+`1.0.1-local` update, rollback, recovery и финальный update до
+`1.0.1-local`. Каждый этап повторил exact allowlist/no-Python gate, DPAPI
+`config/state.dat` сохранился побайтно, transaction residue после recovery
+равен нулю. Финальная установленная пара запустилась и завершилась с кодом 0.
+
 ## Offline acceptance
 
 `scripts/test_dotnet.ps1` выполняет fake-only transport/filesystem matrix без

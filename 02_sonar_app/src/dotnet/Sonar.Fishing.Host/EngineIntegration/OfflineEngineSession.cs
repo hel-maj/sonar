@@ -271,6 +271,17 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
         CancellationToken cancellationToken) =>
         ExecuteCommandAsync(StopAutomationCoreAsync, cancellationToken);
 
+    internal EngineCommandDispatch<FishingSessionStateSnapshot>
+        ResetCurrentSessionStatistics(CancellationToken cancellationToken)
+    {
+        var dispatchState = new EngineCommandDispatchState();
+        return new EngineCommandDispatch<FishingSessionStateSnapshot>(
+            dispatchState,
+            ExecuteResetCurrentSessionStatisticsAsync(
+                dispatchState,
+                cancellationToken));
+    }
+
     internal Task<OfflineCatchQualityDiagnostic> ClassifyCatchQualityAsync(
         string? rawText,
         CancellationToken cancellationToken) =>
@@ -598,6 +609,81 @@ internal sealed class OfflineEngineSession : IAsyncDisposable
                 control,
                 requestId,
                 "stop-automation",
+                cancellationToken).ConfigureAwait(false);
+            return await snapshotTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            AbandonExpectedSessionSnapshot(requestId);
+            throw;
+        }
+    }
+
+    private async Task<EngineCommandDispatchReceipt<FishingSessionStateSnapshot>>
+        ExecuteResetCurrentSessionStatisticsAsync(
+            EngineCommandDispatchState dispatchState,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await ExecuteCommandAsync(
+                (control, currentSequence, token) =>
+                    ResetCurrentSessionStatisticsCoreAsync(
+                        control,
+                        currentSequence,
+                        dispatchState,
+                        token),
+                cancellationToken).ConfigureAwait(false);
+            return new EngineCommandDispatchReceipt<FishingSessionStateSnapshot>(
+                result,
+                dispatchState.BytesMayHaveBeenWritten);
+        }
+        catch (EngineCommandRejectedException)
+        {
+            throw;
+        }
+        catch (EngineCommandDispatchException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw new EngineCommandDispatchException(
+                dispatchState.BytesMayHaveBeenWritten,
+                exception);
+        }
+    }
+
+    private async Task<FishingSessionStateSnapshot> ResetCurrentSessionStatisticsCoreAsync(
+        Stream control,
+        ulong currentSequence,
+        EngineCommandDispatchState dispatchState,
+        CancellationToken cancellationToken)
+    {
+        var requestId = $"reset-statistics-{Guid.NewGuid():N}";
+        var request = OfflineEngineSessionProtocol.CreateEnvelope(
+            identity,
+            PeerRole.Host,
+            MessageKind.Command,
+            sessionId,
+            currentSequence,
+            requestId: requestId,
+            commandId: "reset-fishing-session-statistics",
+            status: "pending");
+        request.ResetFishingSessionStatisticsRequest =
+            new ResetFishingSessionStatisticsRequest();
+        var snapshotTask = ExpectSessionSnapshotAsync(requestId, cancellationToken);
+        try
+        {
+            _ = await OfflineEngineSessionProtocol.WriteEnvelopeWithDispatchReceiptAsync(
+                control,
+                request,
+                dispatchState,
+                cancellationToken).ConfigureAwait(false);
+            await RequireCompletedCommandAsync(
+                control,
+                requestId,
+                "reset-fishing-session-statistics",
                 cancellationToken).ConfigureAwait(false);
             return await snapshotTask.ConfigureAwait(false);
         }

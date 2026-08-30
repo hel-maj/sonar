@@ -547,6 +547,12 @@ production_capability_composition::~production_capability_composition() {
 production_capability_snapshot production_capability_composition::snapshot()
     const {
   const std::scoped_lock lock(state_gate_);
+  return snapshot_locked(steady_now_seconds());
+}
+
+production_capability_snapshot
+production_capability_composition::snapshot_locked(
+    const double now_seconds) const {
   return production_capability_snapshot{
       .stage_detection_linked = true,
       .memory_observation_linked = true,
@@ -572,7 +578,7 @@ production_capability_snapshot production_capability_composition::snapshot()
           last_result_.maintenance_episodes_completed,
       .pending_notification_count = pending_notifications_.size(),
       .dropped_notification_count = dropped_notification_count_,
-      .statistics = statistics_.Snapshot(steady_now_seconds()),
+      .statistics = statistics_.Snapshot(now_seconds),
   };
 }
 
@@ -733,6 +739,20 @@ production_capability_composition::refresh_entitlement_expiry(
   }
   prepared_entitlement_expires_unix_seconds_ = expires_unix_seconds;
   return {true, "production_entitlement_refreshed"};
+}
+
+production_statistics_reset_result
+production_capability_composition::reset_session_statistics() {
+  const auto now_seconds = steady_now_seconds();
+  const std::scoped_lock lock(state_gate_);
+  const auto totals_before_reset =
+      statistics_.Snapshot(now_seconds).totals;
+  statistics_.Reset(now_seconds);
+  advance_progress_revision();
+  return {
+      .progress = snapshot_locked(now_seconds),
+      .totals_before_reset = totals_before_reset,
+  };
 }
 
 void production_capability_composition::stop() noexcept {

@@ -8,7 +8,10 @@ using System.IO;
 using System.Diagnostics;
 using Sonar.Fishing.Host.AboutPage;
 using Sonar.Fishing.Host.EngineHealth;
+using Sonar.Fishing.Host.EngineIntegration;
+using Sonar.Fishing.Host.EngineStatus;
 using Sonar.Fishing.Host.FishingPage;
+using Sonar.Fishing.Host.FishingSessionState;
 using Sonar.Fishing.Host.LicensePage;
 using Sonar.Fishing.Host.InventoryPage;
 using Sonar.Fishing.Host.Overview;
@@ -43,7 +46,9 @@ internal static class DesignSystemCompositionTests
         new("telegram_page_persists_secret_and_policy_without_engine_boundary", TelegramSaveIsHostOwned),
         new("telegram_credentials_use_supported_icons_and_visible_editors", TelegramCredentialEditorsAreVisible),
         new("statistics_table_stacks_before_columns_become_unreadable", StatisticsTableStaysReadable),
+        new("statistics_reset_failure_is_visible_without_success_toast", StatisticsResetFailureIsVisible),
         new("streaming_page_preserves_product_command_and_setting_union", StreamingPagePreservesUnion),
+        new("unsupported_visible_capabilities_are_collapsed", UnsupportedCapabilitiesAreCollapsed),
     ];
 
     private static void AppShellIsResponsive()
@@ -608,6 +613,32 @@ internal static class DesignSystemCompositionTests
             "Statistics income range column can clip its product value");
     }
 
+    private static void StatisticsResetFailureIsVisible()
+    {
+        var model = new StatisticsPageViewModel(
+            new FishingSessionStateSnapshot(
+                revision: 4,
+                running: true,
+                stopping: false,
+                detectedStage: "active",
+                totals: new FishingSessionTotalsSnapshot(30, 0, 0, 0, 0, 0, 0),
+                tackleItems: []),
+            persistPrice: null,
+            new RejectedStatisticsRuntime());
+        model.ResetSessionCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+        var screen = new StatisticsScreen { ViewModel = model };
+
+        Arrange(screen, new Size(1_280, 800));
+        var status = TestAssert.IsType<TextBlock>(
+            screen.FindName("StatisticsCommandStatus"),
+            "Statistics command status surface is missing");
+
+        TestAssert.Equal("Не удалось начать новую сессию", status.Text,
+            "Statistics reset failure was not bound to the visible surface");
+        TestAssert.Equal(Visibility.Visible, status.Visibility,
+            "Statistics reset failure remained visually collapsed");
+    }
+
     private static void StreamingPagePreservesUnion()
     {
         var shell = new FishingHostShell
@@ -622,11 +653,53 @@ internal static class DesignSystemCompositionTests
 
         _ = TestAssert.IsType<ActionButton>(screen.FindName("StreamStartButton"), "Stream start action is missing");
         _ = TestAssert.IsType<ActionButton>(screen.FindName("StreamStopButton"), "Stream stop action is missing");
-        _ = TestAssert.IsType<ActionButton>(screen.FindName("StreamChatModeButton"), "Stream chat action is missing");
+        var chatMode = TestAssert.IsType<ActionButton>(
+            screen.FindName("StreamChatModeButton"),
+            "Stream chat action is missing from the capability template");
+        TestAssert.Equal(Visibility.Collapsed, chatMode.Visibility,
+            "Unavailable stream chat action remained visible");
         _ = TestAssert.IsType<NonScrollingComboBox>(screen.FindName("StreamQualitySelector"), "Stream quality selector is missing");
         _ = TestAssert.IsType<ToggleSwitch>(screen.FindName("StreamChatZoomToggle"), "Stream chat zoom toggle is missing");
         _ = TestAssert.IsType<ToggleSwitch>(screen.FindName("StreamLowFpsToggle"), "Stream 10fps toggle is missing");
         TestAssert.Equal(3, screen.ViewModel.QualityOptions.Count, "Stream quality union changed");
+    }
+
+    private static void UnsupportedCapabilitiesAreCollapsed()
+    {
+        var shell = new FishingHostShell
+        {
+            ViewModel = FishingHostShellViewModel.CreatePreview(),
+        };
+
+        shell.ViewModel.ShowFishingCommand.Execute(null);
+        Arrange(shell, new Size(1_280, 800));
+        var fishing = WpfTestVisualTree.FindDescendant<FishingPageControl>(
+            shell,
+            "Fishing page is missing");
+        TestAssert.Equal(0,
+            WpfTestVisualTree.FindDescendants<ImageSlot>(fishing).Count(),
+            "Unavailable game preview placeholder remained visible");
+        var engineStatus = TestAssert.IsType<EngineStatusScreen>(
+            fishing.FindName("EngineStatusScreen"),
+            "Fishing status surface is missing");
+        TestAssert.Equal(12,
+            Sonar.UI.Wpf.Layout.ResponsiveGrid.GetExpandedSpan(engineStatus),
+            "Fishing status did not reclaim the removed preview width");
+
+        shell.ViewModel.ShowSettingsCommand.Execute(null);
+        Arrange(shell, new Size(1_280, 800));
+        var settings = WpfTestVisualTree.FindDescendant<SettingsScreen>(
+            shell,
+            "Settings page is missing");
+        var visibleActions = WpfTestVisualTree.FindDescendants<ActionButton>(settings)
+            .Where(button => button.Visibility == Visibility.Visible)
+            .Select(button => button.Content as string)
+            .Where(content => content is not null)
+            .ToArray();
+        TestAssert.True(
+            visibleActions.All(content =>
+                !content!.Contains("Удалить", StringComparison.Ordinal)),
+            "Unavailable uninstall action remained visible");
     }
 
     private static void AssertPage<T>(FishingHostShell shell, Action navigate)
@@ -643,5 +716,18 @@ internal static class DesignSystemCompositionTests
         element.Arrange(new Rect(new Point(0, 0), size));
         element.Dispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
         element.UpdateLayout();
+    }
+
+    private sealed class RejectedStatisticsRuntime : IFishingSessionStatisticsRuntime
+    {
+        public Task<FishingSessionStateSnapshot> ResetCurrentSessionAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromException<FishingSessionStateSnapshot>(
+                new EngineCommandRejectedException(
+                    "reset-fishing-session-statistics",
+                    "session_statistics_reset_rejected"));
+        }
     }
 }

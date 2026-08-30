@@ -13,8 +13,7 @@
             <StackPanel>
                 <common:PageHeader
                     x:Name="StreamingHeader"
-                    Title="Стрим"
-                    Subtitle="Запустите трансляцию всего окна или только чата">
+                    Title="Стрим">
                     <common:PageHeader.Status>
                         <common:StatusBadge
                             Content="{Binding ViewModel.Status, ElementName=Root}"
@@ -185,7 +184,20 @@
                     AutomationProperties.Name="Переключить режим чата стрима"
                     Command="{Binding ViewModel.ToggleChatModeCommand, ElementName=Root}"
                     Content="{Binding ViewModel.ChatModeActionText, ElementName=Root}"
-                    Role="Subtle" />
+                    Role="Subtle">
+                    <common:ActionButton.Style>
+                        <Style
+                            BasedOn="{StaticResource {x:Type common:ActionButton}}"
+                            TargetType="{x:Type common:ActionButton}">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ViewModel.IsChatModeAvailable, ElementName=Root}" Value="False">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </common:ActionButton.Style>
+                </common:ActionButton>
             </StackPanel>
         </common:PageContainer>
     </common:PageScrollViewer>

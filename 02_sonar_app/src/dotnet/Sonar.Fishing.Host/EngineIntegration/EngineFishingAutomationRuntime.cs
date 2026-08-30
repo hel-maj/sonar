@@ -7,7 +7,9 @@ namespace Sonar.Fishing.Host.EngineIntegration;
 internal sealed class EngineFishingAutomationRuntime(
     EngineSessionSupervisor supervisor,
     Func<FishingRuntimeSettings> currentSettings)
-    : IFishingAutomationRuntime, IFishingAutomationStateSource
+    : IFishingAutomationRuntime,
+      IFishingAutomationStateSource,
+      IFishingSessionStatisticsRuntime
 {
     private readonly EngineSessionSupervisor supervisor = supervisor ??
         throw new ArgumentNullException(nameof(supervisor));
@@ -36,6 +38,10 @@ internal sealed class EngineFishingAutomationRuntime(
     public Task<FishingSessionStateSnapshot> StopAsync(
         CancellationToken cancellationToken) =>
         supervisor.StopAutomationAsync(cancellationToken);
+
+    public Task<FishingSessionStateSnapshot> ResetCurrentSessionAsync(
+        CancellationToken cancellationToken) =>
+        supervisor.ResetCurrentSessionStatisticsAsync(cancellationToken);
 
     private void RequireActiveEntitlement()
     {

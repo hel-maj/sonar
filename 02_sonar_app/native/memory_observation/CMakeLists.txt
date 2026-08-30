@@ -21,6 +21,8 @@ target_link_libraries(SonarFishingMemoryObservation
         Sonar::PlatformWindowsProcess
         Sonar::PlatformWindowsTrustedModule
         Sonar::PlatformInventoryState
+    PRIVATE
+        Sonar::MajesticRuntimeModule
 )
 target_compile_options(SonarFishingMemoryObservation
     PRIVATE /permissive- /utf-8 /W4 /WX /EHsc

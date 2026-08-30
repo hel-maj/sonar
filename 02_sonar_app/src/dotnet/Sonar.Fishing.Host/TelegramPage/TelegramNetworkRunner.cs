@@ -30,12 +30,44 @@ internal sealed class TelegramNetworkRunner
         this.handlerFactory = handlerFactory;
     }
 
-    public async Task RunAsync(
+    public Task RunAsync(
         TelegramRuntimeConfiguration configuration,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        if (!configuration.Eligible)
+        return RunCoreAsync(
+            configuration,
+            new TelegramPollingCursor(),
+            static () => { },
+            static _ => { },
+            cancellationToken);
+    }
+
+    public Task RunVerifiedAsync(
+        TelegramRuntimeGenerationContext context,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return RunCoreAsync(
+            context.Configuration,
+            context.Cursor,
+            context.ReportAvailable,
+            context.ReportUnavailable,
+            cancellationToken);
+    }
+
+    private async Task RunCoreAsync(
+        TelegramRuntimeConfiguration configuration,
+        TelegramPollingCursor cursor,
+        Action reportAvailable,
+        Action<TelegramAvailabilityFailure> reportUnavailable,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(cursor);
+        ArgumentNullException.ThrowIfNull(reportAvailable);
+        ArgumentNullException.ThrowIfNull(reportUnavailable);
+        if (!configuration.RuntimeEligible)
         {
             return;
         }
@@ -54,7 +86,10 @@ internal sealed class TelegramNetworkRunner
         var polling = new TelegramPollingService(
             api,
             new TelegramInboundRouter(),
-            dispatcher.DispatchAsync);
+            dispatcher.DispatchAsync,
+            cursor,
+            reportAvailable,
+            reportUnavailable);
         if (notificationSource is null)
         {
             await polling.RunAsync(readSettings, cancellationToken).ConfigureAwait(false);
@@ -89,7 +124,7 @@ internal sealed class TelegramNetworkRunner
             catch
             {
                 // The first completed task owns this generation's outcome.
-                // The outer coordinator performs the bounded retry.
+                // The availability coordinator performs the bounded retry.
             }
         }
     }

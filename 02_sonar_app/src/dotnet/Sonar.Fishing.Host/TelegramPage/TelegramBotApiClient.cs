@@ -30,6 +30,33 @@ public sealed class TelegramBotApiClient : ITelegramBotApi
         methodPrefix = $"bot{botToken}/";
     }
 
+    public async Task<TelegramBotIdentity> GetMeAsync(
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, MethodUri("getMe"));
+        using var document = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var result = RequireResult(document.RootElement);
+        if (result.ValueKind != JsonValueKind.Object ||
+            !result.TryGetProperty("id", out var idElement) ||
+            !idElement.TryGetInt64(out var id) ||
+            id <= 0 ||
+            !result.TryGetProperty("is_bot", out var isBotElement) ||
+            isBotElement.ValueKind is not JsonValueKind.True)
+        {
+            throw new TelegramBotApiException("telegram_bot_identity_invalid");
+        }
+
+        var username = result.TryGetProperty("username", out var usernameElement) &&
+            usernameElement.ValueKind == JsonValueKind.String
+                ? usernameElement.GetString() ?? string.Empty
+                : string.Empty;
+        if (username.Length > 128)
+        {
+            throw new TelegramBotApiException("telegram_bot_identity_invalid");
+        }
+        return new TelegramBotIdentity(id, username);
+    }
+
     public async Task<IReadOnlyList<TelegramBotApiUpdate>> GetUpdatesAsync(
         long? offset,
         int longPollingTimeoutSeconds,
@@ -224,6 +251,12 @@ public sealed class TelegramBotApiClient : ITelegramBotApi
                     MaxDepth = 32,
                 });
                 var root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    throw new TelegramBotApiException(
+                        "telegram_response_invalid",
+                        statusCode);
+                }
                 if (!response.IsSuccessStatusCode ||
                     !root.TryGetProperty("ok", out var ok) ||
                     ok.ValueKind is not JsonValueKind.True)
@@ -292,7 +325,8 @@ public sealed class TelegramBotApiClient : ITelegramBotApi
 
     private static JsonElement RequireResult(JsonElement root)
     {
-        if (!root.TryGetProperty("result", out var result))
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("result", out var result))
         {
             throw new TelegramBotApiException("telegram_result_missing");
         }
@@ -351,6 +385,7 @@ public sealed class TelegramBotApiClient : ITelegramBotApi
     }
 
     private static bool IsMessageNotModified(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object &&
         root.TryGetProperty("error_code", out var errorCode) &&
         errorCode.TryGetInt32(out var parsed) &&
         parsed == 400 &&
