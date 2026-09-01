@@ -521,7 +521,7 @@ $resolvedMajesticRuntimeModulePackage = Assert-FishingCommonRuntimeModulePackage
     $resolvedMajesticRuntimeModulePackage
 $resolvedMajesticCefInventoryPackage = Resolve-Directory `
     $CommonMajesticCefInventoryPackage `
-    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.31") `
+    (Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.33") `
     "Installed Sonar Majestic CEF Inventory package"
 $resolvedMajesticCefInventoryPackage = Assert-FishingCommonInventoryPackage `
     $resolvedMajesticCefInventoryPackage

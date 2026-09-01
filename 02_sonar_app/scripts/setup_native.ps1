@@ -118,7 +118,7 @@ $majesticRuntimeModulePackage = Assert-FishingCommonRuntimeModulePackage `
     $majesticRuntimeModulePackage
 $majesticCefInventoryPackage = if (
     [string]::IsNullOrWhiteSpace($CommonMajesticCefInventoryPackage)) {
-    Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.31"
+    Join-Path $productRoot "..\..\.artifacts\sonar-majestic-cef-inventory\0.1.33"
 }
 elseif ([IO.Path]::IsPathRooted($CommonMajesticCefInventoryPackage)) {
     $CommonMajesticCefInventoryPackage

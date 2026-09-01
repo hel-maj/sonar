@@ -15,11 +15,11 @@ reeling path или повторять на каждом UI frame после `un
 ## Решение
 
 Fishing exact-pins установленный `SonarMajesticRuntimeModule 0.1.3` / target
-`Sonar::MajesticRuntimeModule` и `SonarMajesticCefInventory 0.1.31` / targets
+`Sonar::MajesticRuntimeModule` и `SonarMajesticCefInventory 0.1.33` / targets
 `Sonar::MajesticCefInventory` и `Sonar::MajesticCefInventoryContent`. SHA-256
 их `SHA256SUMS.txt` равны соответственно
 `6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845` и
-`37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22`.
+`E79A579A3CAA29E91FC8EA4A4DCDFDDE98FA4D03FACBF5BC8B6AB0C76440A4FE`.
 RuntimeModule является единственным owner role-based trusted-publisher
 admission; CEF Inventory exact-зависит от него и добавляет только CEF/V8 и
 inventory content semantics.

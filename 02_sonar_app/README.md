@@ -36,10 +36,10 @@ Host/Engine composition; запуск рыбалки остаётся fail-close
 `Sonar.UI.Wpf 0.2.22`, `SonarPlatformWindows 0.1.12`,
 `SonarMajesticCatalog 1.1.0`, runtime admission facade
 `SonarMajesticRuntimeModule 0.1.3` и CEF inventory facade
-`SonarMajesticCefInventory 0.1.31` потребляются как точные immutable Sonar
+`SonarMajesticCefInventory 0.1.33` потребляются как точные immutable Sonar
 Common packages. Setup/release проверяют manifest SHA-256 соответственно
 `6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845` и
-`37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22`, а также
+`E79A579A3CAA29E91FC8EA4A4DCDFDDE98FA4D03FACBF5BC8B6AB0C76440A4FE`, а также
 все перечисленные payloads; исходники или sibling checkout Common не
 используются. RuntimeModule владеет role-based trusted-publisher admission, а
 CEF Inventory переиспользует тот же owner и добавляет bounded V8/content

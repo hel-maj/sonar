@@ -13,7 +13,7 @@ function Assert-FishingCommonInventoryPackage(
         throw "common_inventory_manifest_missing: $manifest"
     }
     $expectedManifestHash =
-        "37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22"
+        "E79A579A3CAA29E91FC8EA4A4DCDFDDE98FA4D03FACBF5BC8B6AB0C76440A4FE"
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $manifest).Hash -cne
         $expectedManifestHash) {
         throw "common_inventory_manifest_hash_mismatch"

@@ -50,7 +50,7 @@ publication; через IPC проходит один immutable product-neutral 
   запрещает возвращение локального signer verifier или window enumeration.
 - Common target `Sonar::PlatformInventoryState` сохраняет общую трёхзначную
   семантику `unknown/closed/open` для legacy/coarse consumers.
-- Exact-pinned Common `SonarMajesticCefInventory 0.1.31` владеет production CEF
+- Exact-pinned Common `SonarMajesticCefInventory 0.1.33` владеет production CEF
   renderer discovery, version-independent trusted-publisher identity admission,
   V8/content decoding, coherent read transaction, hot binding/provider и stable
   inventory snapshot semantics. Continuous provider отдельно включает proven
@@ -59,7 +59,7 @@ publication; через IPC проходит один immutable product-neutral 
   и владеет worker cadence, product reason mapping, columns, commands, feature
   policy, IPC projection и surface composition. RuntimeModule/CEF manifest pins:
   `6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845` /
-  `37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22`.
+  `E79A579A3CAA29E91FC8EA4A4DCDFDDE98FA4D03FACBF5BC8B6AB0C76440A4FE`.
 - Historical decoder semantics сохранены в language-neutral fixture; executable
   legacy oracle и runtime fallback удалены.
 - Полная разбивка historical memory/visual owners и полей находится в

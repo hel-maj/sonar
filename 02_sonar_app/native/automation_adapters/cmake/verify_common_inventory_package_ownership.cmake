@@ -20,7 +20,7 @@ endif()
 file(SHA256 "${manifest}" actual_manifest_hash)
 string(TOUPPER "${actual_manifest_hash}" actual_manifest_hash)
 if(NOT actual_manifest_hash STREQUAL
-   "37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22")
+   "E79A579A3CAA29E91FC8EA4A4DCDFDDE98FA4D03FACBF5BC8B6AB0C76440A4FE")
     message(FATAL_ERROR "installed Common inventory manifest hash drifted")
 endif()
 
@@ -114,7 +114,7 @@ file(READ "${SOURCE_ROOT}/CMakeLists.txt" root_cmake)
 foreach(required IN ITEMS
         "SonarPlatformWindows 0.1.12 EXACT CONFIG REQUIRED"
         "SonarMajesticRuntimeModule 0.1.3 EXACT CONFIG REQUIRED"
-        "SonarMajesticCefInventory 0.1.31 EXACT CONFIG REQUIRED"
+        "SonarMajesticCefInventory 0.1.33 EXACT CONFIG REQUIRED"
         "SonarMajesticCatalog 1.1.0 EXACT CONFIG REQUIRED"
         "SONAR_COMMON_MAJESTIC_CATALOG_PACKAGE"
         "SONAR_COMMON_MAJESTIC_RUNTIME_MODULE_PACKAGE"

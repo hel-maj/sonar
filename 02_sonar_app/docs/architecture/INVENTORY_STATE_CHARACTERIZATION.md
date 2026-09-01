@@ -18,7 +18,7 @@ Production путь состояния:
 
 ```text
 same-frame exact GTA process generation
-  -> one SonarMajesticCefInventory 0.1.31 observe()
+  -> one SonarMajesticCefInventory 0.1.33 observe()
   -> Common trusted publisher + pinned file/process admission
   -> bounded CEF/V8 discovery + three-frame semantic type proof
   -> Common coherent double-read + generation-pinned hot binding
@@ -106,9 +106,9 @@ input. Повторный run имеет смысл только для отде
 Shipping Engine и Local Access линкуют тот же immutable static package и
 создают один trusted-publisher facade. Runtime setting не может заменить его
 admission. `scripts/setup_native.ps1`, `scripts/test_ipc.ps1` и release builder
-проверяют exact RuntimeModule 0.1.3 / CEF Inventory 0.1.31, manifest hashes
+проверяют exact RuntimeModule 0.1.3 / CEF Inventory 0.1.33, manifest hashes
 `6E902CF03A7F19F4451D6F5F03CFAD6AA2B2928FEB9C56C5B873CD6EC1ADA845` /
-`37CE5F29B39371F7EED310266CCA028906BB045487B63AFC938B9252E9728C22` и каждый
+`E79A579A3CAA29E91FC8EA4A4DCDFDDE98FA4D03FACBF5BC8B6AB0C76440A4FE` и каждый
 manifest payload. Подробнее: [ADR-0004](ADR-0004-COMMON-CEF-INVENTORY-OPEN.md).
 
 Tool собирается только при OFF-by-default
